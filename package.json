@@ -1,6 +1,6 @@
 {
   "name": "linguist",
-  "version": "1.0.0",
+  "version": "0.1.2",
   "description": "LLM Gateway — 大模型统一网关",
   "main": "dist/index.js",
   "scripts": {

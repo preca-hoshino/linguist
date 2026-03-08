@@ -66,4 +66,3 @@ docker-compose*.yml
 .prettierrc
 eslint.config.mjs
 jest.config.js
-tsconfig.json
