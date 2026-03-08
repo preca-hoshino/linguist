@@ -209,10 +209,10 @@ Content-Type: application/json
 
 ## Supported User API Formats
 
-| Format ID      | Chat Endpoint                                                                      | Embedding Endpoint                        | Description                                        |
-| -------------- | ---------------------------------------------------------------------------------- | ----------------------------------------- | -------------------------------------------------- |
-| `openaicompat` | `POST /v1/chat/completions` (streaming: `stream: true`)                            | `POST /v1/embeddings`                     | OpenAI-compatible format, default for most clients |
-| `gemini`       | `POST /v1beta/models/:model:generateContent` (streaming: `:streamGenerateContent`) | `POST /v1beta/models/:model:embedContent` | Google Gemini native format                        |
+| Format   | Description      | Chat Endpoint                     | Embedding Endpoint              |
+| -------- | ---------------- | --------------------------------- | ------------------------------- |
+| OpenAI   | Compatible format | `/v1/chat/completions`           | `/v1/embeddings`                |
+| Gemini   | Native format     | `/v1beta/models/:model:generateContent` | `/v1beta/models/:model:embedContent` |
 
 ---
 
@@ -220,51 +220,31 @@ Content-Type: application/json
 
 ### Gateway API
 
-| Method | Path                                          | Format            | Description                                                 |
-| ------ | --------------------------------------------- | ----------------- | ----------------------------------------------------------- |
-| `GET`  | `/api/health`                                 | —                 | Health check, returns `{ status: "ok", timestamp, uptime }` |
-| `GET`  | `/v1/models`                                  | OpenAI-compatible | Returns list of available virtual models                    |
-| `POST` | `/v1/chat/completions`                        | OpenAI-compatible | Chat completion (supports streaming: `stream: true`)        |
-| `POST` | `/v1/embeddings`                              | OpenAI-compatible | Text embedding                                              |
-| `POST` | `/v1beta/models/:model:generateContent`       | Gemini native     | Chat completion (non-streaming)                             |
-| `POST` | `/v1beta/models/:model:streamGenerateContent` | Gemini native     | Chat completion (streaming SSE)                             |
-| `POST` | `/v1beta/models/:model:embedContent`          | Gemini native     | Text embedding                                              |
+| Method | Path                                      | Description                         |
+| ------ | ----------------------------------------- | ----------------------------------- |
+| `GET`  | `/api/health`                             | Health check                        |
+| `GET`  | `/v1/models`                              | Get model list                      |
+| `POST` | `/v1/chat/completions`                    | OpenAI format chat completion       |
+| `POST` | `/v1/embeddings`                          | OpenAI format text embedding        |
+| `POST` | `/v1beta/models/:model:generateContent`   | Gemini format chat completion       |
+| `POST` | `/v1beta/models/:model:streamGenerateContent` | Gemini format streaming chat     |
+| `POST` | `/v1beta/models/:model:embedContent`      | Gemini format text embedding        |
 
-### Thinking Parameters (OpenAI Format)
+### Extended Parameters
 
-| Field                    | Type                              | Description                                                                                    |
-| ------------------------ | --------------------------------- | ---------------------------------------------------------------------------------------------- |
-| `reasoning_effort`       | `"minimal"∕"low"∕"medium"∕"high"` | Reasoning effort level; `minimal` → disabled; others set budget at 20%∕50%∕80% of `max_tokens` |
-| `thinking.type`          | `"enabled"∕"disabled"∕"auto"`     | Deep thinking toggle (explicit control, higher priority than `reasoning_effort`)               |
-| `thinking.budget_tokens` | `number`                          | Direct specification of thinking token budget, higher priority than `reasoning_effort`         |
-
-### Thinking Parameters (Gemini Format)
-
-| Field                            | Type                              | Description                                                                                                      |
-| -------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| `thinkingConfig.includeThoughts` | `boolean`                         | Enable thinking mode, default `true`                                                                             |
-| `thinkingConfig.thinkingLevel`   | `"MINIMAL"∕"LOW"∕"MEDIUM"∕"HIGH"` | Thinking level; `MINIMAL` maps to disabled; `LOW`∕`MEDIUM`∕`HIGH` set budget at 20%∕50%∕80% of `maxOutputTokens` |
-| `thinkingConfig.thinkingBudget`  | `number`                          | Direct specification of thinking token budget, higher priority than `thinkingLevel`                              |
-
-> When `max_tokens` (or `maxOutputTokens`) is not specified, percentage-based levels don't set `budget_tokens`, leaving it to provider defaults.
+Refer to the official provider documentation for additional parameters supported by specific models.
 
 ### Management API
 
 All management endpoints require `Authorization: Bearer <ADMIN_KEY>` header.
 
-| Method           | Path                       | Description                                |
-| ---------------- | -------------------------- | ------------------------------------------ |
-| `GET/POST`       | `/api/providers`           | List / Create providers                    |
-| `GET/PUT/DELETE` | `/api/providers/:id`       | Query / Update / Delete provider           |
-| `GET/POST`       | `/api/provider-models`     | List / Create provider models              |
-| `GET/PUT/DELETE` | `/api/provider-models/:id` | Query / Update / Delete provider model     |
-| `GET/POST`       | `/api/virtual-models`      | List / Create virtual models               |
-| `GET/PUT/DELETE` | `/api/virtual-models/:id`  | Query / Update / Delete virtual model      |
-| `GET`            | `/api/request-logs`        | Query logs (supports filtering/pagination) |
-| `GET`            | `/api/request-logs/:id`    | Query single log details                   |
-| `GET/POST`       | `/api/api-keys`            | List / Create user API keys                |
-| `GET/PUT/DELETE` | `/api/api-keys/:id`        | Query / Update / Delete API key            |
-| `POST`           | `/api/api-keys/:id/rotate` | Rotate API key (regenerate credentials)    |
+| Path                  | Description                                   |
+| --------------------- | --------------------------------------------- |
+| `/api/providers`      | Manage providers (CRUD)                       |
+| `/api/provider-models` | Manage provider models (CRUD)                 |
+| `/api/virtual-models` | Manage virtual models (CRUD)                  |
+| `/api/request-logs`   | Query logs (supports filtering/pagination)    |
+| `/api/api-keys`       | Manage user API keys (CRUD & rotate)          |
 
 ---
 

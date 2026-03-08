@@ -122,14 +122,17 @@ docker-compose logs -f
 
 #### 可用的服务端点
 
-服务启动后（无论本地或 Docker）：
-- 健康检查：`GET http://localhost:3000/api/health`
-- 模型列表（OpenAI 格式）：`GET http://localhost:3000/v1/models`
-- 聊天接口（OpenAI 格式）：`POST http://localhost:3000/v1/chat/completions`
-- 嵌入接口（OpenAI 格式）：`POST http://localhost:3000/v1/embeddings`
-- 聊天接口（Gemini 格式）：`POST http://localhost:3000/v1beta/models/:model:generateContent`
-- 流式聊天（Gemini 格式）：`POST http://localhost:3000/v1beta/models/:model:streamGenerateContent`
-- 管理接口：`http://localhost:3000/api/*`
+服务启动后，可访问以下端点：
+
+| 方法   | 路径                                      | 说明                         |
+| ------ | ----------------------------------------- | ---------------------------- |
+| `GET`  | `/api/health`                             | 健康检查                     |
+| `GET`  | `/v1/models`                              | 获取模型列表                 |
+| `POST` | `/v1/chat/completions`                    | OpenAI 格式聊天补全          |
+| `POST` | `/v1/embeddings`                          | OpenAI 格式文本嵌入          |
+| `POST` | `/v1beta/models/:model:generateContent`   | Gemini 格式聊天补全          |
+| `POST` | `/v1beta/models/:model:streamGenerateContent` | Gemini 格式流式聊天补全  |
+| `POST` | `/v1beta/models/:model:embedContent`      | Gemini 格式文本嵌入          |
 
 ---
 
@@ -211,10 +214,10 @@ Content-Type: application/json
 
 ## 支持的用户 API 格式
 
-| 格式标识       | Chat 端点                                                                      | Embedding 端点                            | 说明                                  |
-| -------------- | ------------------------------------------------------------------------------ | ----------------------------------------- | ------------------------------------- |
-| `openaicompat` | `POST /v1/chat/completions`（流式：`stream: true`）                            | `POST /v1/embeddings`                     | OpenAI 兼容格式，大多数客户端默认支持 |
-| `gemini`       | `POST /v1beta/models/:model:generateContent`（流式：`:streamGenerateContent`） | `POST /v1beta/models/:model:embedContent` | Google Gemini 原生格式                |
+| 格式   | 说明           | Chat 端点                     | Embedding 端点              |
+| ------ | -------------- | ----------------------------- | --------------------------- |
+| OpenAI | 兼容格式        | `/v1/chat/completions`        | `/v1/embeddings`            |
+| Gemini | 原生格式        | `/v1beta/models/:model:generateContent` | `/v1beta/models/:model:embedContent` |
 
 ---
 
@@ -232,41 +235,17 @@ Content-Type: application/json
 | `POST` | `/v1beta/models/:model:streamGenerateContent` | Gemini 原生 | 聊天补全（流式 SSE）                                 |
 | `POST` | `/v1beta/models/:model:embedContent`          | Gemini 原生 | 文本嵌入                                             |
 
-### 思考参数（OpenAI 格式）
-
-| 字段                     | 类型                              | 说明                                                                            |
-| ------------------------ | --------------------------------- | ------------------------------------------------------------------------------- |
-| `reasoning_effort`       | `"minimal"∕"low"∕"medium"∕"high"` | 推理努力级别；`minimal` → 关闭思考；其余按 `max_tokens` 的 20%∕50%∕80% 设定预算 |
-| `thinking.type`          | `"enabled"∕"disabled"∕"auto"`     | 深度思考开关（显式控制，优先级高于 `reasoning_effort`）                         |
-| `thinking.budget_tokens` | `number`                          | 直接指定思考 token 预算，优先级高于 `reasoning_effort`                          |
-
-### 思考参数（Gemini 格式）
-
-| 字段                             | 类型                              | 说明                                                                                                   |
-| -------------------------------- | --------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| `thinkingConfig.includeThoughts` | `boolean`                         | 是否启用思考模式，缺省 `true`                                                                          |
-| `thinkingConfig.thinkingLevel`   | `"MINIMAL"∕"LOW"∕"MEDIUM"∕"HIGH"` | 思考级别；`MINIMAL` 映射为关闭思考；`LOW`∕`MEDIUM`∕`HIGH` 按 `maxOutputTokens` 的 20%∕50%∕80% 设定预算 |
-| `thinkingConfig.thinkingBudget`  | `number`                          | 直接指定思考 token 预算，优先级高于 `thinkingLevel`                                                    |
-
-> `max_tokens`（或 `maxOutputTokens`）未指定时，百分比换算的级别不设置 `budget_tokens`，交由提供商使用其默认思考预算。
-
 ### 管理 API
 
 所有管理接口需要 `Authorization: Bearer <ADMIN_KEY>` 请求头。
 
-| 方法             | 路径                       | 说明                           |
-| ---------------- | -------------------------- | ------------------------------ |
-| `GET/POST`       | `/api/providers`           | 列出 / 创建提供商              |
-| `GET/PUT/DELETE` | `/api/providers/:id`       | 查询 / 更新 / 删除提供商       |
-| `GET/POST`       | `/api/provider-models`     | 列出 / 创建提供商模型          |
-| `GET/PUT/DELETE` | `/api/provider-models/:id` | 查询 / 更新 / 删除提供商模型   |
-| `GET/POST`       | `/api/virtual-models`      | 列出 / 创建虚拟模型            |
-| `GET/PUT/DELETE` | `/api/virtual-models/:id`  | 查询 / 更新 / 删除虚拟模型     |
-| `GET`            | `/api/request-logs`        | 查询请求日志（支持过滤和分页） |
-| `GET`            | `/api/request-logs/:id`    | 查询单条请求日志详情           |
-| `GET/POST`       | `/api/api-keys`            | 列出 / 创建用户 API Key        |
-| `GET/PUT/DELETE` | `/api/api-keys/:id`        | 查询 / 更新 / 删除 API Key     |
-| `POST`           | `/api/api-keys/:id/rotate` | 轮换 API Key（重新生成密钥）   |
+| 路径                  | 说明                                   |
+| --------------------- | -------------------------------------- |
+| `/api/providers`      | 管理提供商（增删改查）                 |
+| `/api/provider-models` | 管理提供商模型（增删改查）               |
+| `/api/virtual-models` | 管理虚拟模型（增删改查）               |
+| `/api/request-logs`   | 查询请求日志（支持过滤和分页）         |
+| `/api/api-keys`       | 管理用户 API Key（增删改查、轮换） |
 
 ---
 

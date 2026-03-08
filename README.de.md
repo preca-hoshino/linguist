@@ -208,10 +208,10 @@ Content-Type: application/json
 
 ## Unterstützte Benutzer-API-Formate
 
-| Format-ID      | Chat-Endpunkt                                                                      | Embedding-Endpunkt                        | Beschreibung                                                |
-| -------------- | ---------------------------------------------------------------------------------- | ----------------------------------------- | ----------------------------------------------------------- |
-| `openaicompat` | `POST /v1/chat/completions` (Streaming: `stream: true`)                            | `POST /v1/embeddings`                     | OpenAI-kompatibles Format, Standard für die meisten Clients |
-| `gemini`       | `POST /v1beta/models/:model:generateContent` (Streaming: `:streamGenerateContent`) | `POST /v1beta/models/:model:embedContent` | Natives Google Gemini-Format                                |
+| Format | Beschreibung    | Chat-Endpunkt                           | Embedding-Endpunkt                      |
+| ------ | --------------- | --------------------------------------- | --------------------------------------- |
+| OpenAI | Kompatibles Format | `/v1/chat/completions`                 | `/v1/embeddings`                       |
+| Gemini | Natives Format  | `/v1beta/models/:model:generateContent` | `/v1beta/models/:model:embedContent`   |
 
 ---
 
@@ -219,51 +219,31 @@ Content-Type: application/json
 
 ### Gateway-API
 
-| Methode | Pfad                                          | Format            | Beschreibung                                                          |
-| ------- | --------------------------------------------- | ----------------- | --------------------------------------------------------------------- |
-| `GET`   | `/api/health`                                 | —                 | Integritätsprüfung, gibt `{ status: "ok", timestamp, uptime }` zurück |
-| `GET`   | `/v1/models`                                  | OpenAI-kompatibel | Gibt Liste der verfügbaren virtuellen Modelle zurück                  |
-| `POST`  | `/v1/chat/completions`                        | OpenAI-kompatibel | Chat-Vervollständigung (unterstützt Streaming: `stream: true`)        |
-| `POST`  | `/v1/embeddings`                              | OpenAI-kompatibel | Text-Embedding                                                        |
-| `POST`  | `/v1beta/models/:model:generateContent`       | Natives Gemini    | Chat-Vervollständigung (nicht-Streaming)                              |
-| `POST`  | `/v1beta/models/:model:streamGenerateContent` | Natives Gemini    | Chat-Vervollständigung (Streaming SSE)                                |
-| `POST`  | `/v1beta/models/:model:embedContent`          | Natives Gemini    | Text-Embedding                                                        |
+| Methode | Pfad                                      | Beschreibung                    |
+| ------- | ----------------------------------------- | ------------------------------- |
+| `GET`   | `/api/health`                             | Integritätsprüfung              |
+| `GET`   | `/v1/models`                              | Modellliste abrufen             |
+| `POST`  | `/v1/chat/completions`                    | OpenAI Chat-Vervollständigung   |
+| `POST`  | `/v1/embeddings`                          | OpenAI Text-Embedding           |
+| `POST`  | `/v1beta/models/:model:generateContent`   | Gemini Chat-Vervollständigung   |
+| `POST`  | `/v1beta/models/:model:streamGenerateContent` | Gemini Streaming-Chat         |
+| `POST`  | `/v1beta/models/:model:embedContent`      | Gemini Text-Embedding           |
 
-### Denkparameter (OpenAI-Format)
+### Erweiterte Parameter
 
-| Feld                     | Typ                               | Beschreibung                                                                                      |
-| ------------------------ | --------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `reasoning_effort`       | `"minimal"∕"low"∕"medium"∕"high"` | Denkaufwand-Level; `minimal` → deaktiviert; andere setzen Budget auf 20%∕50%∕80% von `max_tokens` |
-| `thinking.type`          | `"enabled"∕"disabled"∕"auto"`     | Tiefes Denken schalten (explizite Steuerung, höhere Priorität als `reasoning_effort`)             |
-| `thinking.budget_tokens` | `number`                          | Direkte Angabe des Denk-Token-Budgets, höhere Priorität als `reasoning_effort`                    |
-
-### Denkparameter (Gemini-Format)
-
-| Feld                             | Typ                               | Beschreibung                                                                                                                |
-| -------------------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `thinkingConfig.includeThoughts` | `boolean`                         | Denkmodus aktivieren, Standard `true`                                                                                       |
-| `thinkingConfig.thinkingLevel`   | `"MINIMAL"∕"LOW"∕"MEDIUM"∕"HIGH"` | Denk-Level; `MINIMAL` auf deaktiviert abgebildet; `LOW`∕`MEDIUM`∕`HIGH` setzen Budget auf 20%∕50%∕80% von `maxOutputTokens` |
-| `thinkingConfig.thinkingBudget`  | `number`                          | Direkte Angabe des Denk-Token-Budgets, höhere Priorität als `thinkingLevel`                                                 |
-
-> Wenn `max_tokens` (oder `maxOutputTokens`) nicht angegeben werden, setzen prozentuale Level `budget_tokens` nicht und überlassen es dem Anbieter.
+Weitere Parameter, die von bestimmten Modellen unterstützt werden, finden Sie in der offiziellen Anbieterdokumentation.
 
 ### Management-API
 
 Alle Management-Endpunkte erfordern den Header `Authorization: Bearer <ADMIN_KEY>`.
 
-| Methode          | Pfad                       | Beschreibung                                           |
-| ---------------- | -------------------------- | ------------------------------------------------------ |
-| `GET/POST`       | `/api/providers`           | Anbieter auflisten / erstellen                         |
-| `GET/PUT/DELETE` | `/api/providers/:id`       | Anbieter abfragen / aktualisieren / löschen            |
-| `GET/POST`       | `/api/provider-models`     | Anbietermodelle auflisten / erstellen                  |
-| `GET/PUT/DELETE` | `/api/provider-models/:id` | Anbietermodelle abfragen / aktualisieren / löschen     |
-| `GET/POST`       | `/api/virtual-models`      | Virtuelle Modelle auflisten / erstellen                |
-| `GET/PUT/DELETE` | `/api/virtual-models/:id`  | Virtuelle Modelle abfragen / aktualisieren / löschen   |
-| `GET`            | `/api/request-logs`        | Protokolle abfragen (unterstützt Filterung/Pagination) |
-| `GET`            | `/api/request-logs/:id`    | Einzelne Protokolldetails abfragen                     |
-| `GET/POST`       | `/api/api-keys`            | Benutzer-API-Schlüssel auflisten / erstellen           |
-| `GET/PUT/DELETE` | `/api/api-keys/:id`        | API-Schlüssel abfragen / aktualisieren / löschen       |
-| `POST`           | `/api/api-keys/:id/rotate` | API-Schlüssel drehen (Anmeldedaten neu generieren)     |
+| Pfad                  | Beschreibung                                      |
+| --------------------- | ------------------------------------------------- |
+| `/api/providers`      | Anbieter verwalten (CRUD)                         |
+| `/api/provider-models` | Anbietermodelle verwalten (CRUD)                  |
+| `/api/virtual-models` | Virtuelle Modelle verwalten (CRUD)                |
+| `/api/request-logs`   | Protokolle abfragen (unterstützt Filterung)       |
+| `/api/api-keys`       | Benutzer-API-Schlüssel verwalten (CRUD & Rotation) |
 
 ---
 
