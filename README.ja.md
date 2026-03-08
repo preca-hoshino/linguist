@@ -209,10 +209,10 @@ Content-Type: application/json
 
 ## サポートされているユーザー API フォーマット
 
-| フォーマット ID | チャットエンドポイント                                                                   | 埋め込みエンドポイント                    | 説明                                                    |
-| --------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------- |
-| `openaicompat`  | `POST /v1/chat/completions`（ストリーミング：`stream: true`）                            | `POST /v1/embeddings`                     | OpenAI 互換形式；大多数の クライアントで デフォルト対応 |
-| `gemini`        | `POST /v1beta/models/:model:generateContent`（ストリーミング：`:streamGenerateContent`） | `POST /v1beta/models/:model:embedContent` | Google Gemini ネイティブ形式                            |
+| フォーマット | 説明       | チャットエンドポイント                | 埋め込みエンドポイント              |
+| ------------ | ---------- | ------------------------------------- | ----------------------------------- |
+| OpenAI       | 互換形式    | `/v1/chat/completions`               | `/v1/embeddings`                   |
+| Gemini       | ネイティブ形式 | `/v1beta/models/:model:generateContent` | `/v1beta/models/:model:embedContent` |
 
 ---
 
@@ -220,51 +220,31 @@ Content-Type: application/json
 
 ### ゲートウェイ API
 
-| メソッド | パス                                          | フォーマット      | 説明                                                         |
-| -------- | --------------------------------------------- | ----------------- | ------------------------------------------------------------ |
-| `GET`    | `/api/health`                                 | —                 | ヘルスチェック；`{ status: "ok", timestamp, uptime }` を返す |
-| `GET`    | `/v1/models`                                  | OpenAI 互換       | 利用可能な仮想モデルリストを返す                             |
-| `POST`   | `/v1/chat/completions`                        | OpenAI 互換       | チャット補完（ストリーミング対応：`stream: true`）           |
-| `POST`   | `/v1/embeddings`                              | OpenAI 互換       | テキスト埋め込み                                             |
-| `POST`   | `/v1beta/models/:model:generateContent`       | Gemini ネイティブ | チャット補完（非ストリーミング）                             |
-| `POST`   | `/v1beta/models/:model:streamGenerateContent` | Gemini ネイティブ | チャット補完（ストリーミング SSE）                           |
-| `POST`   | `/v1beta/models/:model:embedContent`          | Gemini ネイティブ | テキスト埋め込み                                             |
+| メソッド | パス                                      | 説明                       |
+| -------- | ----------------------------------------- | -------------------------- |
+| `GET`    | `/api/health`                             | ヘルスチェック             |
+| `GET`    | `/v1/models`                              | モデルリストを取得         |
+| `POST`   | `/v1/chat/completions`                    | OpenAI 形式チャット補完   |
+| `POST`   | `/v1/embeddings`                          | OpenAI 形式テキスト埋め込み |
+| `POST`   | `/v1beta/models/:model:generateContent`   | Gemini 形式チャット補完   |
+| `POST`   | `/v1beta/models/:model:streamGenerateContent` | Gemini 形式ストリーミング |
+| `POST`   | `/v1beta/models/:model:embedContent`      | Gemini 形式テキスト埋め込み |
 
-### シンキングパラメータ（OpenAI 形式）
+### 拡張パラメータ
 
-| フィールド               | 型                                | 説明                                                                          |
-| ------------------------ | --------------------------------- | ----------------------------------------------------------------------------- |
-| `reasoning_effort`       | `"minimal"∕"low"∕"medium"∕"high"` | 推論努力レベル；`minimal` → 無効；その他は `max_tokens` の 20%∕50%∕80% に設定 |
-| `thinking.type`          | `"enabled"∕"disabled"∕"auto"`     | ディープシンキングの切り替え（明示的制御；`reasoning_effort` より優先度高）   |
-| `thinking.budget_tokens` | `number`                          | シンキングトークン予算を直接指定；`reasoning_effort` より優先度高             |
-
-### シンキングパラメータ（Gemini 形式）
-
-| フィールド                       | 型                                | 説明                                                                                                       |
-| -------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `thinkingConfig.includeThoughts` | `boolean`                         | シンキングモードを有効にするかどうか；デフォルト `true`                                                    |
-| `thinkingConfig.thinkingLevel`   | `"MINIMAL"∕"LOW"∕"MEDIUM"∕"HIGH"` | シンキングレベル；`MINIMAL` は無効に映射；`LOW`∕`MEDIUM`∕`HIGH` は `maxOutputTokens` の 20%∕50%∕80% に設定 |
-| `thinkingConfig.thinkingBudget`  | `number`                          | シンキングトークン予算を直接指定；`thinkingLevel` より優先度高                                             |
-
-> `max_tokens`（または `maxOutputTokens`）が指定されない場合、パーセンテージベースのレベルは `budget_tokens` を設定せず、プロバイダのデフォルトに委ねます。
+具体的なモデルがサポートしている追加パラメータについては、公式プロバイダドキュメントを参照してください。
 
 ### 管理 API
 
 すべての管理エンドポイントには `Authorization: Bearer <ADMIN_KEY>` ヘッダーが必要です。
 
-| メソッド         | パス                       | 説明                                                         |
-| ---------------- | -------------------------- | ------------------------------------------------------------ |
-| `GET/POST`       | `/api/providers`           | プロバイダをリスト / 作成                                    |
-| `GET/PUT/DELETE` | `/api/providers/:id`       | プロバイダを照会 / 更新 / 削除                               |
-| `GET/POST`       | `/api/provider-models`     | プロバイダモデルをリスト / 作成                              |
-| `GET/PUT/DELETE` | `/api/provider-models/:id` | プロバイダモデルを照会 / 更新 / 削除                         |
-| `GET/POST`       | `/api/virtual-models`      | 仮想モデルをリスト / 作成                                    |
-| `GET/PUT/DELETE` | `/api/virtual-models/:id`  | 仮想モデルを照会 / 更新 / 削除                               |
-| `GET`            | `/api/request-logs`        | リクエストログを照会（フィルタリング・ページネーション対応） |
-| `GET`            | `/api/request-logs/:id`    | 単一リクエストログの詳細を照会                               |
-| `GET/POST`       | `/api/api-keys`            | ユーザー API キーをリスト / 作成                             |
-| `GET/PUT/DELETE` | `/api/api-keys/:id`        | API キーを照会 / 更新 / 削除                                 |
-| `POST`           | `/api/api-keys/:id/rotate` | API キーをローテーション（認証情報を再生成）                 |
+| パス                  | 説明                                            |
+| --------------------- | ----------------------------------------------- |
+| `/api/providers`      | プロバイダを管理（増削改査）                    |
+| `/api/provider-models` | プロバイダモデルを管理（増削改査）              |
+| `/api/virtual-models` | 仮想モデルを管理（増削改査）                    |
+| `/api/request-logs`   | リクエストログを照会（フィルタリング対応）     |
+| `/api/api-keys`       | ユーザー API キーを管理（増削改査・ローテーション） |
 
 ---
 

@@ -208,10 +208,10 @@ Content-Type: application/json
 
 ## Formats d'API utilisateur pris en charge
 
-| ID de format      | Point de terminaison du chat                                                                   | Point de terminaison d'intégration                        | Description                              |
-| -------------- | ------------------------------------------------------------------------------- | ----------------------------------------- | ---------------------------------------- |
-| `openaicompat` | `POST /v1/chat/completions` (streaming: `stream: true`)                         | `POST /v1/embeddings`                     | Format compatible OpenAI, par défaut pour la plupart des clients |
-| `gemini`       | `POST /v1beta/models/:model:generateContent` (streaming: `:streamGenerateContent`) | `POST /v1beta/models/:model:embedContent` | Format natif Google Gemini              |
+| Format | Description     | Point de terminaison du chat            | Point de terminaison d'intégration       |
+| ------ | --------------- | --------------------------------------- | ---------------------------------------- |
+| OpenAI | Format compatible | `/v1/chat/completions`                 | `/v1/embeddings`                         |
+| Gemini | Format natif     | `/v1beta/models/:model:generateContent` | `/v1beta/models/:model:embedContent`    |
 
 ---
 
@@ -219,51 +219,31 @@ Content-Type: application/json
 
 ### API Gateway
 
-| Méthode | Chemin                                          | Format         | Description                                              |
-| ------ | --------------------------------------------- | -------------- | -------------------------------------------------------- |
-| `GET`  | `/api/health`                                 | —              | Vérification de santé, retourne `{ status: "ok", timestamp, uptime }` |
-| `GET`  | `/v1/models`                                  | Compatible OpenAI | Retourne la liste des modèles virtuels disponibles                |
-| `POST` | `/v1/chat/completions`                        | Compatible OpenAI | Complétion du chat (supporte streaming: `stream: true`)     |
-| `POST` | `/v1/embeddings`                              | Compatible OpenAI | Intégration de texte                                           |
-| `POST` | `/v1beta/models/:model:generateContent`       | Natif Gemini  | Complétion du chat (non-streaming)                          |
-| `POST` | `/v1beta/models/:model:streamGenerateContent` | Natif Gemini  | Complétion du chat (streaming SSE)                          |
-| `POST` | `/v1beta/models/:model:embedContent`          | Natif Gemini  | Intégration de texte                                           |
+| Méthode | Chemin                                      | Description                       |
+| ------ | ----------------------------------------- | --------------------------------- |
+| `GET`  | `/api/health`                             | Vérification de santé            |
+| `GET`  | `/v1/models`                              | Obtenir la liste des modèles     |
+| `POST` | `/v1/chat/completions`                    | Complétion du chat OpenAI        |
+| `POST` | `/v1/embeddings`                          | Intégration de texte OpenAI      |
+| `POST` | `/v1beta/models/:model:generateContent`   | Complétion du chat Gemini        |
+| `POST` | `/v1beta/models/:model:streamGenerateContent` | Chat en continu Gemini         |
+| `POST` | `/v1beta/models/:model:embedContent`      | Intégration de texte Gemini      |
 
-### Paramètres de réflexion (Format OpenAI)
+### Paramètres étendus
 
-| Champ                    | Type                              | Description                                                                                     |
-| ------------------------ | --------------------------------- | ----------------------------------------------------------------------------------------------- |
-| `reasoning_effort`       | `"minimal"∕"low"∕"medium"∕"high"` | Niveau d'effort de raisonnement ; `minimal` → désactivé ; les autres définissent le budget à 20%∕50%∕80% de `max_tokens` |
-| `thinking.type`          | `"enabled"∕"disabled"∕"auto"`     | Commutateur de réflexion profonde (contrôle explicite, priorité plus élevée que `reasoning_effort`)                 |
-| `thinking.budget_tokens` | `number`                          | Spécification directe du budget de token de réflexion, priorité plus élevée que `reasoning_effort`          |
-
-### Paramètres de réflexion (Format Gemini)
-
-| Champ                            | Type                              | Description                                                                                                     |
-| -------------------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `thinkingConfig.includeThoughts` | `boolean`                         | Activer le mode de réflexion, défaut `true`                                                                            |
-| `thinkingConfig.thinkingLevel`   | `"MINIMAL"∕"LOW"∕"MEDIUM"∕"HIGH"` | Niveau de réflexion ; `MINIMAL` mappé à désactivé ; `LOW`∕`MEDIUM`∕`HIGH` définissent le budget à 20%∕50%∕80% de `maxOutputTokens` |
-| `thinkingConfig.thinkingBudget`  | `number`                          | Spécification directe du budget de token de réflexion, priorité plus élevée que `thinkingLevel`                             |
-
-> Quand `max_tokens` (ou `maxOutputTokens`) ne sont pas spécifiés, les niveaux basés sur des pourcentages ne définissent pas `budget_tokens`, en laissant la responsabilité au fournisseur.
+Veuillez vous référer à la documentation officielle du fournisseur pour les paramètres supplémentaires supportés par les modèles spécifiques.
 
 ### API de gestion
 
 Tous les points de terminaison de gestion nécessitent un en-tête `Authorization: Bearer <ADMIN_KEY>`.
 
-| Méthode             | Chemin                       | Description                              |
-| ------------------ | -------------------------- | ---------------------------------------- |
-| `GET/POST`         | `/api/providers`           | Lister / Créer des fournisseurs                  |
-| `GET/PUT/DELETE`   | `/api/providers/:id`       | Interroger / Mettre à jour / Supprimer un fournisseur         |
-| `GET/POST`         | `/api/provider-models`     | Lister / Créer des modèles de fournisseur            |
-| `GET/PUT/DELETE`   | `/api/provider-models/:id` | Interroger / Mettre à jour / Supprimer un modèle de fournisseur   |
-| `GET/POST`         | `/api/virtual-models`      | Lister / Créer des modèles virtuels             |
-| `GET/PUT/DELETE`   | `/api/virtual-models/:id`  | Interroger / Mettre à jour / Supprimer un modèle virtuel    |
-| `GET`              | `/api/request-logs`        | Interroger les journaux (supports du filtrage/pagination) |
-| `GET`              | `/api/request-logs/:id`    | Interroger les détails d'un journal unique                 |
-| `GET/POST`         | `/api/api-keys`            | Lister / Créer des clés API utilisateur              |
-| `GET/PUT/DELETE`   | `/api/api-keys/:id`        | Interroger / Mettre à jour / Supprimer une clé API     |
-| `POST`             | `/api/api-keys/:id/rotate` | Faire tourner la clé API (régénérer les credentials)  |
+| Chemin                | Description                                      |
+| --------------------- | ------------------------------------------------ |
+| `/api/providers`      | Gérer les fournisseurs (CRUD)                    |
+| `/api/provider-models` | Gérer les modèles de fournisseur (CRUD)          |
+| `/api/virtual-models` | Gérer les modèles virtuels (CRUD)                |
+| `/api/request-logs`   | Interroger les journaux (supports du filtrage)   |
+| `/api/api-keys`       | Gérer les clés API utilisateur (CRUD & rotation) |
 
 ---
 
