@@ -1,0 +1,93 @@
+// src/api/openaicompat/index.ts — OpenAI 兼容格式 API 端点
+
+import { Router } from 'express';
+import type { Request, Response } from 'express';
+import { processChatCompletion, processEmbedding } from '../../app';
+import { createLogger, logColors, GatewayError } from '../../utils';
+import { handleError } from '../../users/error-formatting';
+import { validateApiKey } from '../../db';
+import { configManager } from '../../config';
+
+const logger = createLogger('API:OpenAICompat', logColors.bold + logColors.white);
+
+const router = Router();
+
+/**
+ * OpenAI 格式 API Key 提取
+ * 从 Authorization: Bearer <key> 头提取
+ */
+export function extractApiKey(req: Request): string | undefined {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) {
+    return undefined;
+  }
+  const token = header.slice(7);
+  return token.length > 0 ? token : undefined;
+}
+
+/**
+ * GET /v1/models — 返回可调用的虚拟模型列表（OpenAI 规范）
+ * https://platform.openai.com/docs/api-reference/models/list
+ */
+router.get('/v1/models', async (req: Request, res: Response): Promise<void> => {
+  logger.debug({ ip: req.ip ?? req.socket.remoteAddress }, 'GET /v1/models');
+  try {
+    // API Key 鉴权（与其他端点保持一致）
+    const requireApiKey = process.env['REQUIRE_API_KEY'] !== 'false';
+    if (requireApiKey) {
+      const apiKey = extractApiKey(req);
+      if (apiKey === undefined || apiKey === '') {
+        throw new GatewayError(
+          401,
+          'unauthorized',
+          'API key is required. Provide it via Authorization: Bearer <key> header.',
+        );
+      }
+      const valid = await validateApiKey(apiKey);
+      if (!valid) {
+        throw new GatewayError(401, 'invalid_api_key', 'Invalid or expired API key');
+      }
+    }
+
+    const modelNames = configManager.getAllVirtualModels();
+
+    const data = modelNames.map((name) => {
+      const vmConfig = configManager.getVirtualModelConfig(name);
+      return {
+        id: name,
+        object: 'model',
+        created: 0,
+        owned_by: 'linguist',
+        ...(vmConfig ? { model_type: vmConfig.modelType } : {}),
+      };
+    });
+
+    res.json({ object: 'list', data });
+  } catch (err) {
+    handleError(err, res, 'openaicompat');
+  }
+});
+
+/**
+ * POST /v1/chat/completions — OpenAI 兼容格式
+ * model 从请求体 body.model 提取
+ */
+router.post('/v1/chat/completions', async (req: Request, res: Response): Promise<void> => {
+  const requestBody = req.body as Record<string, unknown>;
+  const rawModel = typeof requestBody['model'] === 'string' ? requestBody['model'] : '';
+  logger.debug({ model: rawModel, ip: req.ip ?? req.socket.remoteAddress }, 'POST /v1/chat/completions');
+  await processChatCompletion(req, res, 'openaicompat', rawModel);
+});
+
+/**
+ * POST /v1/embeddings — OpenAI 兼容嵌入格式
+ * model 从请求体 body.model 提取
+ */
+router.post('/v1/embeddings', async (req: Request, res: Response): Promise<void> => {
+  const requestBody = req.body as Record<string, unknown>;
+  const rawModel = typeof requestBody['model'] === 'string' ? requestBody['model'] : '';
+  logger.debug({ model: rawModel, ip: req.ip ?? req.socket.remoteAddress }, 'POST /v1/embeddings');
+  await processEmbedding(req, res, 'openaicompat', rawModel);
+});
+
+export { router as openaiCompatRouter };

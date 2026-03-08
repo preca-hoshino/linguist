@@ -1,0 +1,53 @@
+{
+  "name": "linguist",
+  "version": "1.0.0",
+  "description": "LLM Gateway — 大模型统一网关",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node src/index.ts",
+    "build": "tsc",
+    "start": "npm run build && node dist/index.js",
+    "test": "jest",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "lint:fix": "eslint . --max-warnings 0 --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "db:migrate": "ts-node src/db/migrate.ts",
+    "db:reset": "ts-node src/db/migrate.ts --reset"
+  },
+  "keywords": [
+    "llm",
+    "gateway",
+    "ai"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@types/markdown-it": "^14.1.2",
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "markdown-it": "^14.1.1",
+    "pg": "^8.19.0",
+    "uuid": "^13.0.0",
+    "winston": "^3.19.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^25.3.2",
+    "@types/pg": "^8.16.0",
+    "@types/uuid": "^10.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.56.1",
+    "@typescript-eslint/parser": "^8.56.1",
+    "eslint": "^10.0.2",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.5",
+    "jest": "^30.2.0",
+    "nock": "^14.0.11",
+    "prettier": "^3.8.1",
+    "ts-jest": "^29.4.6",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3"
+  }
+}

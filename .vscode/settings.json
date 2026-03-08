@@ -1,0 +1,28 @@
+{
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": "explicit"
+  },
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[vue]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "debug.javascript.terminalOptions": {
+    "skipFiles": ["<node_internals>/**"]
+  },
+  "debug.node.autoAttach": "off",
+  "extensions.ignoreRecommendations": false,
+  "search.exclude": {
+    "node_modules": true,
+    "dist": true,
+    "coverage": true
+  },
+  "files.exclude": {
+    "node_modules": true,
+    "dist": true,
+    "coverage": true
+  }
+}

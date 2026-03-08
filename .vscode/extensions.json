@@ -1,0 +1,10 @@
+{
+  "recommendations": [
+    "esbenp.prettier-vscode",
+    "dbaeumer.vscode-eslint",
+    "Vue.volar",
+    "Vue.vscode-typescript-vue-plugin",
+    "ms-debugger.debugger-for-chrome",
+    "ms-vscode.vscode-typescript-next"
+  ]
+}
