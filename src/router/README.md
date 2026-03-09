@@ -19,11 +19,10 @@ router/
 
 ### `route(ctx: GatewayContext): void`
 
-1. 调用 `configManager.resolveRoute(ctx.requestModel)` 获取路由元信息
-2. 调用 `configManager.resolveAllBackends(ctx.requestModel)` 获取排序后的全部候选后端列表
-3. 将路由结果一次性写入 `ctx.route` 对象：`{ model, modelType, providerKind, providerId, providerConfig, strategy, capabilities }`，并记录 `timing.routed`
-4. 如模型不存在，抛出 `GatewayError(404, 'model_not_found', ...)`
-5. 如模型类型与请求能力不匹配，抛出 `GatewayError(400, 'model_type_mismatch', ...)`
+1. 调用 `configManager.resolveAllBackends(ctx.requestModel)` 获取排序后的全部候选后端列表
+2. 将首选后端写入 `ctx.route` 对象：`{ model, modelType, providerKind, providerId, providerConfig, strategy, capabilities }`，并记录 `timing.routed`
+3. 如模型不存在，抛出 `GatewayError(404, 'model_not_found', ...)`
+4. 如模型类型与请求能力不匹配，抛出 `GatewayError(400, 'model_type_mismatch', ...)`
 
 ### `assertRouted(ctx): asserts ctx is RoutedGatewayContext`
 
@@ -46,12 +45,12 @@ const model = ctx.route.model;        // 提供商侧实际模型名
 ### 新增路由逻辑
 
 - 虚拟模型和提供商的关联通过管理 API 配置，`router/index.ts` 不需要修改
-- 如需新增路由策略，在 `src/config/manager.ts` 的 `resolveRoute` 方法中添加——参见 [`src/config/README.md`](../config/README.md)
+- 如需新增路由策略，在 `src/config/manager.ts` 的 `resolveAllBackends` 方法中添加——参见 [`src/config/README.md`](../config/README.md)
 
 ### 重构
 
 - **扩展 ctx.route 字段**：在 `src/types/context.ts` 中扩展 `GatewayContext.route` 和 `RoutedGatewayContext` 类型，再在 `router/index.ts` 中赋值
-- **更换路由来源**：修改 `router/index.ts` 中的 `configManager.resolveRoute` 调用，替换为其他路由来源（如读取文件、远程配置等）
+- **更换路由来源**：修改 `router/index.ts` 中的 `configManager.resolveAllBackends` 调用，替换为其他路由来源（如读取文件、远程配置等）
 
 ### 删除
 

@@ -39,7 +39,7 @@ app/
 | `processChatCompletion` | 聊天请求入口，支持流式（SSE）和非流式 |
 | `processEmbedding`      | 嵌入请求入口，仅支持非流式            |
 
-两个入口函数均接收 `(req, res, userFormat, rawModel)` 参数，内部调用 `processRequest()` 统一处理。
+`processChatCompletion` 接收 `(req, res, userFormat, rawModel, options?)` 参数，可选 `options.stream` 用于强制覆盖流式标记（如 Gemini 由 URL 端点决定流式）。`processEmbedding` 接收 `(req, res, userFormat, rawModel)` 参数。两者内部均调用 `processRequest()` 统一处理。
 
 ## 流式传输
 
