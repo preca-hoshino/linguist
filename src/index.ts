@@ -2,16 +2,20 @@ import 'dotenv/config';
 import { app } from './server';
 import { createLogger, logColors } from './utils';
 import { configManager } from './config';
-import { closePool } from './db';
+import { closePool, runMigrations } from './db';
 
 const logger = createLogger('Startup', logColors.bold + logColors.green);
 
 const PORT = parseInt(process.env['PORT'] ?? '3000', 10);
 
-/** 初始化并启动网关服务（加载配置 → 启动 DB 监听 → 启动 HTTP → 注册优雅关闭） */
+/** 初始化并启动网关服务（数据库迁移 → 加载配置 → 启动 DB 监听 → 启动 HTTP → 注册优雅关闭） */
 async function start(): Promise<void> {
   try {
     logger.info('Initializing Linguist LLM Gateway...');
+
+    // 运行数据库迁移（幂等，确保表结构最新）
+    await runMigrations();
+    logger.info('Database migrations applied successfully');
 
     // 加载配置
     await configManager.loadAll();

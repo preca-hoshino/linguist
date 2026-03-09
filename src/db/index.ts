@@ -1,5 +1,6 @@
 // src/db/index.ts — 数据库模块统一出口
 export { db, closePool, withTransaction, createListenClient } from './client';
+export { runMigrations } from './migrate';
 export { generateShortId } from './id-generator';
 export type { QueryExecutor } from './client';
 
