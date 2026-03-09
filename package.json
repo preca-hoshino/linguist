@@ -1,11 +1,12 @@
 {
   "name": "linguist",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "LLM Gateway — 大模型统一网关",
   "main": "dist/index.js",
   "scripts": {
     "dev": "ts-node src/index.ts",
     "build": "tsc",
+    "postbuild": "node -e \"const{cpSync}=require('fs');cpSync('src/db/migrations','dist/db/migrations',{recursive:true})\"",
     "start": "npm run build && node dist/index.js",
     "test": "jest",
     "type-check": "tsc --noEmit",
