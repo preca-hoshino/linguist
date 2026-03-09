@@ -110,30 +110,11 @@ export class ConfigManager {
     for (const row of backendsRes.rows) {
       let config = newVirtualModels.get(row.vm_name);
       if (!config) {
-        const validModelTypes = ['chat', 'embedding'];
-        const modelType = validModelTypes.includes(row.vm_model_type)
-          ? (row.vm_model_type as 'chat' | 'embedding')
-          : 'chat';
-        if (!validModelTypes.includes(row.vm_model_type)) {
-          logger.warn(
-            { virtualModel: row.vm_name, value: row.vm_model_type },
-            'Unknown model_type in database, falling back to "chat"',
-          );
-        }
-        const validStrategies = ['load_balance', 'failover'];
-        const strategy = validStrategies.includes(row.routing_strategy)
-          ? (row.routing_strategy as VirtualModelConfig['routingStrategy'])
-          : 'load_balance';
-        if (!validStrategies.includes(row.routing_strategy)) {
-          logger.warn(
-            { virtualModel: row.vm_name, value: row.routing_strategy },
-            'Unknown routing_strategy in database, falling back to "load_balance"',
-          );
-        }
+        // model_type 和 routing_strategy 由管理 API 创建时严格校验，直接使用类型断言
         config = {
           id: row.vm_id,
-          modelType,
-          routingStrategy: strategy,
+          modelType: row.vm_model_type as 'chat' | 'embedding',
+          routingStrategy: row.routing_strategy as VirtualModelConfig['routingStrategy'],
           backends: [],
         };
         newVirtualModels.set(row.vm_name, config);
@@ -169,48 +150,7 @@ export class ConfigManager {
   }
 
   /**
-   * 根据虚拟模型 ID 解析路由，返回首选后端（用于初始 ctx 填充）
-   *
-   * 所有策略均取 priority 最小的首个后端作为初始值。
-   * 实际的路由策略选择（加权随机、failover 重试等）由 resolveAllBackends 负责，
-   * caller 调用 resolveAllBackends 后会覆盖此处设置的 ctx 字段。
-   *
-   * @param requiredCapabilities 请求所需能力标识，用于过滤不满足的后端
-   */
-  public resolveRoute(virtualModelId: string, requiredCapabilities: string[] = []): ResolvedRoute | undefined {
-    const config = this.virtualModels.get(virtualModelId);
-    if (!config || config.backends.length === 0) {
-      logger.debug({ virtualModelId }, 'No virtual model config found');
-      return undefined;
-    }
-
-    // 按能力要求过滤后端
-    const eligible = this.filterByCapabilities(config.backends, requiredCapabilities);
-    if (eligible.length === 0) {
-      logger.debug({ virtualModelId, requiredCapabilities }, 'No backends satisfy required capabilities');
-      return undefined;
-    }
-
-    // 所有策略统一取首个后端（priority 最小），实际选择逻辑在 resolveAllBackends 中
-    const backend = eligible[0];
-
-    if (backend === undefined) {
-      return undefined;
-    }
-
-    return {
-      actualModel: backend.actualModel,
-      modelType: config.modelType,
-      capabilities: backend.capabilities,
-      providerKind: backend.provider.kind,
-      providerId: backend.provider.id,
-      provider: backend.provider,
-      routingStrategy: config.routingStrategy,
-    };
-  }
-
-  /**
-   * 获取虚拟模型的候选后端列表（用于 caller 调用）
+   * 获取虚拟模型的候选后端列表（路由模块和 caller 共用）
    *
    * - load_balance: 加权随机选一个后端，仅返回该后端（不重试）
    * - failover:     按 priority 升序，返回第一个激活的后端（不重试）

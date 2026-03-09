@@ -98,6 +98,9 @@ export function inferRequiredCapabilities(ctx: GatewayContext): string[] {
  *
  * 自动从 ctx.request 推断所需能力，过滤不满足的后端。
  * 若所有后端均不满足能力要求，抛出错误。
+ *
+ * 本方法仅做虚拟模型校验 + 能力推断 + 首个后端填充 ctx.route，
+ * 实际的路由策略选择（加权随机/failover）由 caller 调用 resolveAllBackends 时完成。
  */
 export function route(ctx: GatewayContext, expectedModelType?: 'chat' | 'embedding'): void {
   logger.debug({ requestModel: ctx.requestModel, requestId: ctx.id }, '[route] resolving...');
@@ -125,8 +128,9 @@ export function route(ctx: GatewayContext, expectedModelType?: 'chat' | 'embeddi
     );
   }
 
-  const resolved = configManager.resolveRoute(ctx.requestModel, requiredCaps);
-  if (!resolved) {
+  // 直接使用 resolveAllBackends 完成路由（避免 resolveRoute + resolveAllBackends 双重解析）
+  const candidates = configManager.resolveAllBackends(ctx.requestModel, requiredCaps);
+  if (candidates.length === 0) {
     // 虚拟模型存在但无后端满足能力要求
     if (vmConfig.backends.length > 0 && requiredCaps.length > 0) {
       throw new GatewayError(
@@ -140,13 +144,16 @@ export function route(ctx: GatewayContext, expectedModelType?: 'chat' | 'embeddi
     throw new GatewayError(503, 'no_backend_available', `No active backends for model: ${ctx.requestModel}`);
   }
 
+  // candidates.length > 0 已在上方分支保证
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+  const selected = candidates[0]!;
   ctx.route = {
-    model: resolved.actualModel,
-    modelType: resolved.modelType,
-    providerKind: resolved.providerKind,
-    providerId: resolved.providerId,
-    providerConfig: resolved.provider,
-    strategy: resolved.routingStrategy,
+    model: selected.actualModel,
+    modelType: selected.modelType,
+    providerKind: selected.providerKind,
+    providerId: selected.providerId,
+    providerConfig: selected.provider,
+    strategy: selected.routingStrategy,
     capabilities: requiredCaps,
   };
   ctx.timing.routed = Date.now();
@@ -155,12 +162,12 @@ export function route(ctx: GatewayContext, expectedModelType?: 'chat' | 'embeddi
     {
       requestId: ctx.id,
       requestModel: ctx.requestModel,
-      routedModel: resolved.actualModel,
-      provider: resolved.providerKind,
-      providerId: resolved.providerId,
-      modelType: resolved.modelType,
+      routedModel: selected.actualModel,
+      provider: selected.providerKind,
+      providerId: selected.providerId,
+      modelType: selected.modelType,
       requiredCapabilities: requiredCaps.length > 0 ? requiredCaps : undefined,
-      backendCapabilities: resolved.capabilities,
+      backendCapabilities: selected.capabilities,
     },
     '[route] resolved',
   );

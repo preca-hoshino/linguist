@@ -14,31 +14,21 @@ import type {
 import type { ProviderChatStreamResponseAdapter } from './chat';
 import { getProviderChatAdapterSet, getProviderEmbeddingAdapterSet } from './index';
 import { configManager } from '../config';
-import { GatewayError, createLogger, logColors, parseSSEStream } from '../utils';
+import { GatewayError, createCachedLoggerFactory, logColors, parseSSEStream } from '../utils';
 import { fetchHeadersToRecord } from './response-parser';
-import type { Logger } from '../utils';
 
 // ========== 动态 Provider Logger ==========
 
-/** providerKind -> 日志标签与颜色映射 */
-const PROVIDER_LOG_SPEC: Record<string, { label: string; color: string }> = {
-  deepseek: { label: 'Provider:DeepSeek', color: logColors.bold + logColors.green },
-  gemini: { label: 'Provider:Gemini', color: logColors.bold + logColors.yellow },
-  volcengine: { label: 'Provider:VolcEngine', color: logColors.bold + logColors.magenta },
-};
-
-const providerLoggerCache: Record<string, Logger> = {};
-
 /** 根据 providerKind 获取（或创建）对应的 Logger */
-function getProviderLogger(providerKind: string): Logger {
-  if (providerLoggerCache[providerKind] === undefined) {
-    const spec = PROVIDER_LOG_SPEC[providerKind];
-    const label = spec !== undefined ? spec.label : `Provider:${providerKind}`;
-    const color = spec !== undefined ? spec.color : logColors.bold + logColors.white;
-    providerLoggerCache[providerKind] = createLogger(label, color);
-  }
-  return providerLoggerCache[providerKind];
-}
+const getProviderLogger = createCachedLoggerFactory(
+  {
+    deepseek: { label: 'Provider:DeepSeek', color: logColors.bold + logColors.green },
+    gemini: { label: 'Provider:Gemini', color: logColors.bold + logColors.yellow },
+    volcengine: { label: 'Provider:VolcEngine', color: logColors.bold + logColors.magenta },
+  },
+  'Provider',
+  logColors.bold + logColors.white,
+);
 
 // ========== 错误消息脱敏 ==========
 
@@ -119,17 +109,9 @@ async function dispatchProvider<TReq, TRes extends InternalResponse>(
   label: string,
 ): Promise<void> {
   const candidates = configManager.resolveAllBackends(ctx.requestModel, ctx.route.capabilities);
-
-  if (candidates.length === 0) {
-    throw new GatewayError(
-      503,
-      'no_available_backend',
-      `No available ${label.toLowerCase()} backends for model: ${ctx.requestModel}`,
-    );
-  }
-
   const candidate = candidates[0];
-  if (candidate === undefined) {
+
+  if (!candidate) {
     throw new GatewayError(
       503,
       'no_available_backend',
@@ -263,13 +245,9 @@ export async function dispatchChatProviderStream(
   chatRequest: InternalChatRequest,
 ): Promise<StreamDispatchResult> {
   const candidates = configManager.resolveAllBackends(ctx.requestModel, ctx.route.capabilities);
-
-  if (candidates.length === 0) {
-    throw new GatewayError(503, 'no_available_backend', `No available chat backends for model: ${ctx.requestModel}`);
-  }
-
   const candidate = candidates[0];
-  if (candidate === undefined) {
+
+  if (!candidate) {
     throw new GatewayError(503, 'no_available_backend', `No available chat backends for model: ${ctx.requestModel}`);
   }
 

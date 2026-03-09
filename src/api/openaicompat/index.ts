@@ -3,10 +3,10 @@
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import { processChatCompletion, processEmbedding } from '../../app';
-import { createLogger, logColors, GatewayError } from '../../utils';
+import { createLogger, logColors } from '../../utils';
 import { handleError } from '../../users/error-formatting';
-import { validateApiKey } from '../../db';
 import { configManager } from '../../config';
+import { validateApiKeyFromRequest } from './auth-helper';
 
 const logger = createLogger('API:OpenAICompat', logColors.bold + logColors.white);
 
@@ -32,22 +32,8 @@ export function extractApiKey(req: Request): string | undefined {
 router.get('/v1/models', async (req: Request, res: Response): Promise<void> => {
   logger.debug({ ip: req.ip ?? req.socket.remoteAddress }, 'GET /v1/models');
   try {
-    // API Key 鉴权（与其他端点保持一致）
-    const requireApiKey = process.env['REQUIRE_API_KEY'] !== 'false';
-    if (requireApiKey) {
-      const apiKey = extractApiKey(req);
-      if (apiKey === undefined || apiKey === '') {
-        throw new GatewayError(
-          401,
-          'unauthorized',
-          'API key is required. Provide it via Authorization: Bearer <key> header.',
-        );
-      }
-      const valid = await validateApiKey(apiKey);
-      if (!valid) {
-        throw new GatewayError(401, 'invalid_api_key', 'Invalid or expired API key');
-      }
-    }
+    // API Key 鉴权（复用统一鉴权逻辑）
+    await validateApiKeyFromRequest(req, extractApiKey);
 
     const modelNames = configManager.getAllVirtualModels();
 

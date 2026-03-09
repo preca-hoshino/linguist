@@ -45,9 +45,8 @@ router.post('/v1beta/models/:model\\:streamGenerateContent', async (req: Request
     { model: rawModel, ip: req.ip ?? req.socket.remoteAddress },
     `POST /v1beta/models/${rawModel}:streamGenerateContent`,
   );
-  // Gemini 流式由 URL 端点决定，注入 stream: true 到 body 中
-  (req.body as Record<string, unknown>)['stream'] = true;
-  await processChatCompletion(req, res, 'gemini', rawModel);
+  // Gemini 流式由 URL 端点决定，通过 options.stream 传递给核心流程
+  await processChatCompletion(req, res, 'gemini', rawModel, { stream: true });
 });
 
 /**

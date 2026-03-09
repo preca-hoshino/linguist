@@ -1,5 +1,5 @@
 export * from './errors';
-export { createLogger, logColors } from './logger';
+export { createLogger, createCachedLoggerFactory, logColors } from './logger';
 export type { Logger } from './logger';
 export * from './query-builder';
 export * from './json';
