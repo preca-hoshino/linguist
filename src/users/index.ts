@@ -10,27 +10,18 @@ import {
 import { GeminiChatRequestAdapter, GeminiChatResponseAdapter, GeminiChatStreamResponseAdapter } from './chat/gemini';
 import { OpenAICompatEmbeddingRequestAdapter, OpenAICompatEmbeddingResponseAdapter } from './embedding/openaicompat';
 import { GeminiEmbeddingRequestAdapter, GeminiEmbeddingResponseAdapter } from './embedding/gemini';
-import { GatewayError, createLogger, logColors } from '../utils';
-import type { Logger } from '../utils';
+import { GatewayError, createLogger, createCachedLoggerFactory, logColors } from '../utils';
 
 // ========== 动态 User Format Logger ==========
 
-const USER_FORMAT_LOG_SPEC: Record<string, { label: string; color: string }> = {
-  openaicompat: { label: 'User:OpenAICompat', color: logColors.bold + logColors.cyan },
-  gemini: { label: 'User:Gemini', color: logColors.bold + logColors.blue },
-};
-
-const userFormatLoggerCache: Record<string, Logger> = {};
-
-function getUserFormatLogger(format: string): Logger {
-  if (userFormatLoggerCache[format] === undefined) {
-    const spec = USER_FORMAT_LOG_SPEC[format];
-    const label = spec !== undefined ? spec.label : `User:${format}`;
-    const color = spec !== undefined ? spec.color : logColors.bold + logColors.cyan;
-    userFormatLoggerCache[format] = createLogger(label, color);
-  }
-  return userFormatLoggerCache[format];
-}
+const getUserFormatLogger = createCachedLoggerFactory(
+  {
+    openaicompat: { label: 'User:OpenAICompat', color: logColors.bold + logColors.cyan },
+    gemini: { label: 'User:Gemini', color: logColors.bold + logColors.blue },
+  },
+  'User',
+  logColors.bold + logColors.cyan,
+);
 
 const registryLogger = createLogger('Users', logColors.bold + logColors.cyan);
 

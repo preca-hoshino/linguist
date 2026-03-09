@@ -20,15 +20,14 @@ config/
 
 ## ConfigManager 主要方法
 
-| 方法                                 | 说明                                                              |
-| ------------------------------------ | ----------------------------------------------------------------- |
-| `loadAll()`                          | 从数据库全量加载配置到内存 Map（每次行为：完全替换缓存）          |
-| `resolveRoute(virtualModelId)`       | 根据虚拟模型 ID 返回首选后端，返回 `ResolvedRoute` 或 `undefined` |
-| `resolveAllBackends(virtualModelId)` | 根据路由策略返回候选后端列表（供 caller 重试逻辑使用）            |
-| `getAllVirtualModels()`              | 返回所有已注册的虚拟模型名列表（`string[]`）                      |
-| `getVirtualModelConfig(id)`          | 按 ID 返回虚拟模型配置（`VirtualModelConfig \| undefined`）       |
-| `startListening()`                   | 启动专用 LISTEN 连接，监听 `config_channel` 频道                  |
-| `stopListening()`                    | 关闭 LISTEN 连接（优雅关闭时调用）                                |
+| 方法                                 | 说明                                                                                     |
+| ------------------------------------ | ---------------------------------------------------------------------------------------- |
+| `loadAll()`                          | 从数据库全量加载配置到内存 Map（每次行为：完全替换缓存）                                 |
+| `resolveAllBackends(virtualModelId)` | 根据路由策略返回候选后端列表，供 router 填充 `ctx.route` 和 caller 重试逻辑使用           |
+| `getAllVirtualModels()`              | 返回所有已注册的虚拟模型名列表（`string[]`）                                             |
+| `getVirtualModelConfig(id)`          | 按 ID 返回虚拟模型配置（`VirtualModelConfig \| undefined`）                              |
+| `startListening()`                   | 启动专用 LISTEN 连接，监听 `config_channel` 频道                                         |
+| `stopListening()`                    | 关闭 LISTEN 连接（优雅关闭时调用）                                                       |
 
 ## 路由策略
 
@@ -46,9 +45,9 @@ import { configManager } from '../config';
 await configManager.loadAll();
 await configManager.startListening();
 
-// 路由查询（返回首选后端，用于初始 ctx 填充）
-const route = configManager.resolveRoute('deepseek-chat');
-// route: ResolvedRoute | undefined
+// 路由查询（返回排序后的全部候选后端列表）
+const candidates = configManager.resolveAllBackends('deepseek-chat');
+// candidates: ResolvedBackend[]（按路由策略排序，长度可能为 0）
 
 // 优雅关闭
 await configManager.stopListening();
@@ -77,6 +76,6 @@ await configManager.stopListening();
 
 ### 删除路由策略
 
-1. 在 `manager.ts` 的 `resolveRoute` 和 `resolveAllBackends` 方法中移除对应 `case` 分支
+1. 在 `manager.ts` 的 `resolveAllBackends` 方法中移除对应 `case` 分支
 2. 在 `src/types/gateway.ts` 中从策略联合类型移除该字符串
 3. 检查数据库中是否有使用该策略的虚拟模型配置

@@ -4,33 +4,24 @@ import type { Request } from 'express';
 import { Router } from 'express';
 import { openaiCompatRouter, extractApiKey as openaiCompatExtractApiKey } from './openaicompat';
 import { geminiRouter, extractApiKey as geminiExtractApiKey } from './gemini';
-import { createLogger, logColors } from '../utils';
-import type { Logger } from '../utils';
+import { createLogger, createCachedLoggerFactory, logColors } from '../utils';
 
 const logger = createLogger('API', logColors.bold + logColors.white);
 
 // ==================== 格式专属 Logger ====================
 
-const FORMAT_LOG_SPEC: Record<string, { label: string; color: string }> = {
-  openaicompat: { label: 'API:OpenAI', color: logColors.bold + logColors.white },
-  gemini: { label: 'API:Gemini', color: logColors.bold + logColors.blue },
-};
-
-const formatLoggerCache: Record<string, Logger> = {};
-
 /**
  * 按 userFormat 获取对应的请求日志 Logger
- * 未在 FORMAT_LOG_SPEC 中注册的格式自动生成默认标签
+ * 未注册的格式自动生成 'API:<format>' 标签
  */
-export function getFormatLogger(userFormat: string): Logger {
-  if (formatLoggerCache[userFormat] === undefined) {
-    const spec = FORMAT_LOG_SPEC[userFormat];
-    const label = spec !== undefined ? spec.label : `API:${userFormat}`;
-    const color = spec !== undefined ? spec.color : logColors.bold + logColors.white;
-    formatLoggerCache[userFormat] = createLogger(label, color);
-  }
-  return formatLoggerCache[userFormat];
-}
+export const getFormatLogger = createCachedLoggerFactory(
+  {
+    openaicompat: { label: 'API:OpenAI', color: logColors.bold + logColors.white },
+    gemini: { label: 'API:Gemini', color: logColors.bold + logColors.blue },
+  },
+  'API',
+  logColors.bold + logColors.white,
+);
 
 /** 从 HTTP 请求中提取 API Key 的函数（各用户格式使用不同的提取策略，如 Bearer token 或 query 参数） */
 export type ApiKeyExtractor = (req: Request) => string | undefined;

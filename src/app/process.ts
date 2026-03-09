@@ -29,14 +29,16 @@ const responseMiddlewares: Middleware[] = [normalizeResponseChatToolCallIds];
 /**
  * 聊天请求核心处理流程
  * 各 API 格式模块（src/api/*）调用此函数，传入格式标识和 model 名称。
+ * @param options.stream — 可选，强制覆盖流式标记（用于 Gemini 等由 URL 端点决定流式的格式）
  */
 export async function processChatCompletion(
   req: Request,
   res: Response,
   userFormat: string,
   modelName: string,
+  options?: { stream?: boolean },
 ): Promise<void> {
-  await processRequest(req, res, userFormat, modelName, 'chat');
+  await processRequest(req, res, userFormat, modelName, 'chat', options);
 }
 
 /**
@@ -76,6 +78,7 @@ async function processRequest(
   userFormat: string,
   modelName: string,
   expectedModelType: 'chat' | 'embedding',
+  options?: { stream?: boolean },
 ): Promise<void> {
   const isChat = expectedModelType === 'chat';
   const label = isChat ? 'Chat completion' : 'Embedding';
@@ -109,10 +112,7 @@ async function processRequest(
     ctx.apiKey = rawApiKey;
     ctx.apiKeyPrefix = rawApiKey !== undefined && rawApiKey !== '' ? rawApiKey.slice(0, 11) : undefined;
 
-    // 3. 校验请求体 & model
-    if (req.body === undefined || req.body === null || typeof req.body !== 'object') {
-      throw new GatewayError(400, 'invalid_request', 'Request body must be a JSON object');
-    }
+    // 3. 校验 model（请求体由 express.json() 中间件保证为对象）
     if (ctx.requestModel === '') {
       throw new GatewayError(400, 'missing_model', 'Request must include a model identifier');
     }
@@ -126,6 +126,10 @@ async function processRequest(
 
     // 记录流式标记
     if (isChat) {
+      // 若调用方通过 options.stream 强制覆盖（如 Gemini streamGenerateContent 端点），使用覆盖值
+      if (options?.stream !== undefined) {
+        (ctx.request as InternalChatRequest).stream = options.stream;
+      }
       ctx.stream = (ctx.request as InternalChatRequest).stream;
     }
 
@@ -136,7 +140,6 @@ async function processRequest(
     // 6. 路由 → 校验路由字段完整性 → INSERT 日志行（fire-and-forget）
     route(ctx, expectedModelType);
     assertRouted(ctx);
-    ctx.timing.routed = Date.now();
     void markProcessing(ctx);
 
     // 7. 调度 + 发送（流式 vs 非流式唯一分叉点）

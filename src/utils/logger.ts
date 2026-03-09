@@ -165,3 +165,39 @@ export function createLogger(service: string, color?: string): Logger {
     debug: log('debug'),
   };
 }
+
+// ==================== 带缓存的 Logger 工厂 ====================
+
+/** Logger 配置规格（标签 + 颜色） */
+interface LoggerSpec {
+  label: string;
+  color: string;
+}
+
+/**
+ * 创建带缓存的 Logger 工厂
+ *
+ * 提供一组预注册的 key → { label, color } 映射，
+ * 首次按 key 获取时创建 Logger 并缓存，后续直接复用。
+ * 未在 specs 中注册的 key 使用默认标签和颜色。
+ *
+ * @param specs 预注册的 key → LoggerSpec 映射
+ * @param defaultPrefix 未注册 key 的标签前缀（如 "Provider"）
+ * @param defaultColor 未注册 key 的默认颜色
+ */
+export function createCachedLoggerFactory(
+  specs: Record<string, LoggerSpec>,
+  defaultPrefix: string,
+  defaultColor: string,
+): (key: string) => Logger {
+  const cache: Record<string, Logger> = {};
+  return (key: string): Logger => {
+    if (cache[key] === undefined) {
+      const spec = specs[key];
+      const label = spec !== undefined ? spec.label : `${defaultPrefix}:${key}`;
+      const color = spec !== undefined ? spec.color : defaultColor;
+      cache[key] = createLogger(label, color);
+    }
+    return cache[key];
+  };
+}

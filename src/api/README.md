@@ -16,7 +16,8 @@
 api/
 ├── index.ts          # 聚合所有格式路由，注册 API Key 提取器，导出 apiRouter
 ├── openaicompat/
-│   └── index.ts      # GET /v1/models、POST /v1/chat/completions、POST /v1/embeddings；从 Authorization: Bearer 提取 API Key
+│   ├── index.ts      # GET /v1/models、POST /v1/chat/completions、POST /v1/embeddings；从 Authorization: Bearer 提取 API Key
+│   └── auth-helper.ts # 共享 API Key 验证逻辑（供非核心流程端点使用，如 /v1/models）
 └── gemini/
     └── index.ts      # POST /v1beta/models/:model:generateContent、:streamGenerateContent、:embedContent；从 x-goog-api-key 或 ?key= 提取 API Key
 ```
