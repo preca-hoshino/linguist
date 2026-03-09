@@ -80,6 +80,14 @@ async function resetDatabase(): Promise<void> {
   logger.info('✅ Database reset completed successfully');
 }
 
+/**
+ * 运行所有数据库迁移（幂等，可安全在服务启动时调用）
+ */
+export async function runMigrations(): Promise<void> {
+  const pool = getPool();
+  await executeMigrationFiles(pool, logger);
+}
+
 // 直接执行入口（npm run db:migrate 或 npm run db:reset）
 if (require.main === module) {
   const isReset = process.argv.includes('--reset');
