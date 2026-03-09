@@ -51,6 +51,21 @@ logger.info({ requestId: ctx.id }, 'Route resolved');
 
 日志级别由 `LOG_LEVEL` 环境变量控制（默认 `info`）。
 
+## createCachedLoggerFactory(specs, defaultPrefix, defaultColor)
+
+创建一个带缓存的 Logger 工厂函数，通过预注册映射表和默认回退避免重复创建 Logger 实例。适用于按运行时 key 动态获取 Logger 的场景（如用户格式、提供商类型）：
+
+```typescript
+const getFormatLogger = createCachedLoggerFactory(
+  { openaicompat: { prefix: 'API:OpenAICompat', color: logColors.white },
+    gemini:       { prefix: 'API:Gemini',       color: logColors.white } },
+  'API',
+  logColors.white,
+);
+// getFormatLogger('openaicompat') → 缓存的 Logger 实例
+// getFormatLogger('unknown')      → 自动创建 'API:unknown' Logger 并缓存
+```
+
 ## buildUpdateSet / buildBatchInsert
 
 ```typescript
