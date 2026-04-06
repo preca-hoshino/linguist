@@ -38,6 +38,7 @@ export function calculatePostBillingCost(
   // 兜底：如果所有阶梯都无法匹配（理论上不会发生，因为 startTokens=0 的阶梯会兜底）
   // 使用排序后的最后一个（即 startTokens 最小的）
   const tier = matchedTier ?? sorted.at(-1);
+  /* istanbul ignore next -- TS type safety fallback, logically unreachable here due to tiers.length check early return */
   if (!tier) {
     return { status: 'skipped', reason: 'no_tiers' };
   }
