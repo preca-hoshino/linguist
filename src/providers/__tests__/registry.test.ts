@@ -1,6 +1,6 @@
 // tests/core/registry.test.ts — 插件注册中心单元测试
 
-import { getProviderChatAdapterSet, getProviderPlugin, registerPlugin } from '../../../src/providers';
+import { getProviderChatAdapterSet, getProviderPlugin, registerPlugin } from '../index';
 
 describe('Core: Plugin Registry', () => {
   it('should register and retrieve a custom plugin', () => {

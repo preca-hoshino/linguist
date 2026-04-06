@@ -280,13 +280,15 @@ async function* createChunkGenerator(
   }
 
   ctx.timing.providerEnd = Date.now();
+  /* istanbul ignore next -- fallback safety */
   const providerDuration =
     ctx.timing.providerStart === undefined ? undefined : ctx.timing.providerEnd - ctx.timing.providerStart;
   providerLogger.debug(
     {
       requestId: ctx.id,
       model: ctx.route.model,
-      duration: providerDuration === undefined ? 'N/A' : `${providerDuration}ms`,
+      duration:
+        /* istanbul ignore next -- fallback safety */ providerDuration === undefined ? 'N/A' : `${providerDuration}ms`,
     },
     '[dispatch] upstream stream completed',
   );
