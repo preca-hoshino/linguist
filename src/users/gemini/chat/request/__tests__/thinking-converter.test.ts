@@ -57,4 +57,14 @@ describe('Gemini Thinking Converter', () => {
       budget_tokens: undefined,
     });
   });
+
+  it('如果 thinkingLevel 是空字符串，应忽略 level 计算', () => {
+    const config: GeminiThinkingConfig = {
+      thinkingLevel: '' as never,
+    };
+    expect(convertThinkingConfig(config, 1000)).toEqual({
+      type: 'enabled',
+      budget_tokens: undefined,
+    });
+  });
 });

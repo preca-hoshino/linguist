@@ -29,7 +29,9 @@ function convertContentParts(parts: OpenAICompatContentPart[]): ContentPart[] {
 
     if (dataMatch) {
       // data:image/jpeg;base64,xxx → base64_data，保留原始 MIME 类型
+      /* istanbul ignore next -- fallback safety, regex + guarantees match */
       const mimeType = dataMatch[1] ?? 'image/jpeg';
+      /* istanbul ignore next -- fallback safety, regex + guarantees match */
       const base64Data = dataMatch[2] ?? '';
       return {
         type: mimeToMediaType(mimeType),

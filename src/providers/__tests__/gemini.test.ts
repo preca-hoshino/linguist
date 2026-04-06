@@ -73,5 +73,13 @@ describe('Provider Plugin: Gemini', () => {
       const info = geminiPlugin.mapError(400, errorBody);
       expect(info.gatewayErrorCode).toBe('invalid_request');
     });
+
+    it('should fallback to default mapping when status is unknown or not mapped', () => {
+      const errorBody = JSON.stringify({
+        error: { message: 'Unknown reason', status: 'SOME_NEW_STATUS' },
+      });
+      const info = geminiPlugin.mapError(403, errorBody);
+      expect(info.gatewayErrorCode).toBe('permission_denied');
+    });
   });
 });

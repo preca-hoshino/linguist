@@ -15,9 +15,8 @@ interface JwtPayload {
 /** 默认有效期：24 小时（秒） */
 const DEFAULT_EXPIRES_IN = 86_400;
 
-function base64url(input: Buffer | string): string {
-  const buf = typeof input === 'string' ? Buffer.from(input) : input;
-  return buf.toString('base64url');
+function base64url(input: string): string {
+  return Buffer.from(input).toString('base64url');
 }
 
 function base64urlDecode(input: string): string {
@@ -60,7 +59,9 @@ export function verifyToken(token: string, secret: string): JwtPayload | null {
   const [header, body, signature] = parts as [string, string, string];
   const expected = crypto.createHmac('sha256', secret).update(`${header}.${body}`).digest('base64url');
 
-  if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) {
+  const sigBuf = Buffer.from(signature);
+  const expBuf = Buffer.from(expected);
+  if (sigBuf.length !== expBuf.length || !crypto.timingSafeEqual(sigBuf, expBuf)) {
     return null;
   }
 

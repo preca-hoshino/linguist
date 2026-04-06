@@ -153,27 +153,29 @@ function convertContent(content: GeminiContent): InternalMessage[] {
   // 优先使用 functionResponse.id，fallback 到函数名
   const toolResponseIdByName = new Map<string, string>();
   for (const frPart of functionResponseParts) {
-    const fr = frPart.functionResponse;
-    if (fr) {
-      const contentStr = extractFunctionResponseContent(fr.response);
-      const existing = toolResponseByName.get(fr.name);
-      if (existing) {
-        existing.push(contentStr);
-      } else {
-        toolResponseByName.set(fr.name, [contentStr]);
-      }
-      // 记录 id（同名只记录第一个）。工具 id 的最终规范化由 process.ts 的 normalizeToolCallIds 统一处理
-      if (!toolResponseIdByName.has(fr.name)) {
-        toolResponseIdByName.set(fr.name, fr.id ?? fr.name);
-      }
+    // biome-ignore lint/style/noNonNullAssertion: valid
+    const fr = frPart.functionResponse!;
+    const contentStr = extractFunctionResponseContent(fr.response);
+    const existing = toolResponseByName.get(fr.name);
+    if (existing) {
+      existing.push(contentStr);
+    } else {
+      toolResponseByName.set(fr.name, [contentStr]);
+    }
+    // 记录 id（同名只记录第一个）。工具 id 的最终规范化由 process.ts 的 normalizeToolCallIds 统一处理
+    if (!toolResponseIdByName.has(fr.name)) {
+      toolResponseIdByName.set(fr.name, fr.id ?? fr.name);
     }
   }
+
   for (const [name, contents] of toolResponseByName) {
+    // istanbul ignore next -- fallback safety
+    const callId = toolResponseIdByName.get(name) ?? name;
     toolMessages.push({
       role: 'tool',
       content: contents.join('\n\n'),
       name,
-      tool_call_id: toolResponseIdByName.get(name) ?? name,
+      tool_call_id: callId,
     });
   }
 

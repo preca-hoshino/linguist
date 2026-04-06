@@ -20,13 +20,17 @@ export function hashPassword(plain: string): string {
  * 验证明文密码与存储的哈希是否匹配
  */
 export function verifyPassword(plain: string, stored: string): boolean {
-  const parts = stored.split(':');
-  if (parts.length !== 3 || parts[0] !== 'scrypt') {
+  const [prefix, salt, storedHash] = stored.split(':');
+  if (
+    prefix !== 'scrypt' ||
+    typeof salt !== 'string' ||
+    salt.length === 0 ||
+    typeof storedHash !== 'string' ||
+    storedHash.length === 0
+  ) {
     return false;
   }
 
-  const salt = parts[1] ?? '';
-  const storedHash = parts[2] ?? '';
   const hash = crypto.scryptSync(plain, salt, SCRYPT_KEYLEN).toString('hex');
 
   return crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(storedHash));

@@ -86,6 +86,61 @@ describe('Gemini Tool Converter', () => {
       ]);
     });
 
+    it('应该处理 array 元素、复合allOf/oneOf和无效 type 字段的回退情况', () => {
+      const tools: GeminiTool[] = [
+        {
+          functionDeclarations: [
+            {
+              name: 'edgeCases',
+              parameters: {
+                type: 'OBJECT',
+                properties: {
+                  multiType: { type: ['STRING', 'NUMBER', 'NULL'] },
+                  numericType: { type: 123 as unknown as string }, // hits typeof type !== string
+                  arrItems: {
+                    type: 'ARRAY',
+                    items: { type: 'integer' },
+                  },
+                  comboOf: {
+                    oneOf: [{ type: 'STRING' }, null as unknown as object, 'not-an-object' as unknown as object],
+                    allOf: [{ type: 'BOOLEAN' }],
+                    anyOf: ['invalid' as unknown as object],
+                  },
+                },
+              },
+            },
+          ],
+        },
+      ];
+
+      const converted = convertTools(tools);
+      expect(converted).toEqual([
+        {
+          type: 'function',
+          function: {
+            name: 'edgeCases',
+            description: undefined,
+            parameters: {
+              type: 'object',
+              properties: {
+                multiType: { type: ['string', 'number'] },
+                numericType: { type: 123 },
+                arrItems: {
+                  type: 'array',
+                  items: { type: 'integer' },
+                },
+                comboOf: {
+                  oneOf: [{ type: 'string' }, null, 'not-an-object'],
+                  allOf: [{ type: 'boolean' }],
+                  anyOf: ['invalid'],
+                },
+              },
+            },
+          },
+        },
+      ]);
+    });
+
     it('如果 parameters 不是 object，应该强制加上 type: object', () => {
       const tools: GeminiTool[] = [
         {
@@ -116,6 +171,33 @@ describe('Gemini Tool Converter', () => {
           type: 'function',
           function: {
             name: 'nullParams',
+            description: undefined,
+            parameters: { type: 'object', properties: {} },
+          },
+        },
+      ]);
+    });
+
+    it('如果 parameters 不是 object 类型而是 string（或其他配置），应包裹一层 object 并添加缺少的 properties', () => {
+      const tools: GeminiTool[] = [
+        {
+          functionDeclarations: [
+            {
+              name: 'stringParams',
+              parameters: {
+                type: 'STRING',
+              } as unknown as Record<string, unknown>,
+            },
+          ],
+        },
+      ];
+
+      const converted = convertTools(tools);
+      expect(converted).toEqual([
+        {
+          type: 'function',
+          function: {
+            name: 'stringParams',
             description: undefined,
             parameters: { type: 'object', properties: {} },
           },
