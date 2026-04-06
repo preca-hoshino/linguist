@@ -145,6 +145,16 @@ export async function markError(ctx: GatewayContext, err: unknown): Promise<void
   const errorCode = err instanceof GatewayError ? err.errorCode : 'internal_error';
   const errorType = inferErrorType(errorCode);
 
+  // 如果没有成功的路由（比如模型不存在、未通过鉴权），直接跳过不录入数据库，
+  // 防止产生大量垃圾日志（如被攻击或填错模型）
+  if (!ctx.route) {
+    logger.warn(
+      { requestId: ctx.id, errorCode, errorMessage: ctx.error },
+      'Request failed before routing, ignored for database [error]',
+    );
+    return;
+  }
+
   try {
     const updateRes = await db.query(
       `UPDATE request_logs
@@ -159,9 +169,9 @@ export async function markError(ctx: GatewayContext, err: unknown): Promise<void
        WHERE id = $1`,
       [
         ctx.id,
-        ctx.route?.model ?? null,
-        ctx.route?.providerKind ?? null,
-        ctx.route?.providerId ?? null,
+        ctx.route.model,
+        ctx.route.providerKind,
+        ctx.route.providerId,
         ctx.error ?? null,
         errorCode,
         errorType,
@@ -178,7 +188,7 @@ export async function markError(ctx: GatewayContext, err: unknown): Promise<void
         [ctx.id, JSON.stringify(ctx.timing), JSON.stringify(buildCtxSnapshot(ctx))],
       );
     } else {
-      // 记录尚不存在（路由期甚至鉴权期爆错），执行 INSERT
+      // 记录尚不存在（路由通过但 markProcessing 写入异常等极端情况），执行 INSERT
       await db.query(
         `INSERT INTO request_logs
            (id, status, api_key_prefix, ip, is_stream, request_model,
@@ -191,9 +201,9 @@ export async function markError(ctx: GatewayContext, err: unknown): Promise<void
           ctx.ip,
           ctx.stream ?? null,
           ctx.requestModel,
-          ctx.route?.model ?? null,
-          ctx.route?.providerKind ?? null,
-          ctx.route?.providerId ?? null,
+          ctx.route.model,
+          ctx.route.providerKind,
+          ctx.route.providerId,
           ctx.error ?? null,
           errorCode,
           errorType,
