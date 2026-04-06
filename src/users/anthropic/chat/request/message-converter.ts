@@ -141,6 +141,7 @@ function convertUserMessage(msg: AnthropicMessage, result: InternalChatRequest['
 
   // tool_result 每个独立拆为 role='tool' 消息（必须置于 user 消息之前，符合 OpenAI API 对消息编排顺序的强制要求）
   for (const block of toolResults) {
+    /* istanbul ignore next -- Already filtered in previous loop */
     if (block.type !== 'tool_result') {
       continue;
     }
