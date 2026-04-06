@@ -1,0 +1,274 @@
+<#
+.SYNOPSIS
+  测试模型网关能力的 PowerShell 脚本
+.DESCRIPTION
+  此脚本用于批量向网关发送对话聊天 (Chat) 和文本嵌入 (Embeddings) 请求。
+  内置多领域的专业测试语料，支持真实的对话历史管理和流式输出。
+#>
+
+# ================= 配置区域 =================
+$BaseUrl         = "http://localhost:23984/v1"   # 网关的基础地址
+$ApiKey          = "lk-31536f274418684ab1e72d32a02355a298669dad67e1324f"      # 访问凭证
+$ChatModel       = "doubao-seed-2-0"        # 用于测试的对话模型
+$EmbeddingModel  = "doubao-embedding-vision"      # 用于测试的嵌入模型
+
+$EnableChatTest  = $false                       # 是否开启对话测试
+$ChatStream      = $true                         # 对话时是否开启流式输出 (Stream) 并测量首字延迟 TTFT
+$EnableChatHistory= $true                        # 是否开启动态历史上下文
+$MaxHistoryTurns = 5                             # 每次携带的最大历史轮数
+$EnableEmbedTest = $true                       # 是否开启嵌入测试
+
+$TestRounds      = 20                             # 默认测试轮次
+$DelaySeconds    = 1                             # 每轮请求的间隔时间(秒)
+$RandomizeThink  = $true                         # 是否在压测中随机组合思考配置
+$ThinkingMode    = "auto"                        # 取值: enabled, disabled, auto (仅非随机下生效)
+$ReasoningEffort = "medium"                      # 取值: minimal, low, medium, high (仅非随机下生效)
+$GlobalHistory   = [System.Collections.Generic.List[PSCustomObject]]::new() # 全局历史记录池
+# ================= 加载语料配置 =================
+$PromptsFile = Join-Path $PSScriptRoot "prompts.json"
+if (-not (Test-Path $PromptsFile)) {
+    Write-Host "错误: 找不到语料配置文件 prompts.json!" -ForegroundColor Red
+    exit 1
+}
+$PromptsData = Get-Content -Raw -Encoding UTF8 $PromptsFile | ConvertFrom-Json
+$SystemPrompts = $PromptsData.SystemPrompts
+$ChatPrompts = $PromptsData.ChatPrompts
+
+Write-Host "================ 测试配置 ================" -ForegroundColor Cyan
+Write-Host "网关地址:`t $BaseUrl"
+Write-Host "对话模型:`t $ChatModel"
+Write-Host "对话压测:`t $EnableChatTest (流式输出: $ChatStream, 动态历史: $EnableChatHistory)"
+if ($RandomizeThink) { Write-Host "思考配置:`t 随机组合测试" } else { Write-Host "思考配置:`t 开关=$ThinkingMode, 深度=$ReasoningEffort" }
+Write-Host "任务总数:`t $TestRounds 组"
+Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "`n初始化完成，共有 $($ChatPrompts.Count) 个测试用例，开始进行网关测试..." -ForegroundColor Green
+
+$successCount = 0
+$failCount = 0
+
+for ($round = 1; $round -le $TestRounds; $round++) {
+    Clear-Host
+    Write-Host "`n>>> [测试轮次 - 第 $($round) 轮]" -ForegroundColor Yellow
+    $Headers = @{ "Authorization" = "Bearer $ApiKey" }
+
+    if ($EnableChatTest) {
+        $sysPrompt = $SystemPrompts | Get-Random
+        $prompt = $ChatPrompts | Get-Random
+        
+        $messages = @()
+        $messages += @{ role = "system"; content = $sysPrompt }
+        
+        if ($EnableChatHistory -and ($GlobalHistory.Count -gt 0)) {
+            $poolSize = $GlobalHistory.Count
+            $maxLimit = [Math]::Min($MaxHistoryTurns, $poolSize)
+            $historyCount = Get-Random -Minimum 1 -Maximum ($maxLimit + 1)
+            
+            $selectedPairs = $GlobalHistory | Get-Random -Count $historyCount
+            $historyTurnsAdded = 0
+            foreach ($h in @($selectedPairs)) {
+                if ($null -ne $h) {
+                    $messages += @{ role = "user"; content = $h.User }
+                    $messages += @{ role = "assistant"; content = $h.Assistant } 
+                    $historyTurnsAdded++
+                }
+            }
+        }
+        
+        if ($RandomizeThink) {
+            if ((Get-Random -Minimum 0 -Maximum 2) -eq 0) {
+                $thinking = "disabled"
+                $effort   = $null
+            } else {
+                $thinking = @("auto", "enabled") | Get-Random
+                $effort   = @("minimal", "low", "medium", "high") | Get-Random
+            }
+        } else {
+            $thinking     = $ThinkingMode
+            $effort       = $ReasoningEffort
+            if ($thinking -eq "disabled") { $effort = $null }
+        }
+
+        $messages += @{ role = "user"; content = $prompt }
+        
+        $chatBodyObj = @{
+            model    = $ChatModel
+            stream   = $ChatStream
+            messages = $messages
+        }
+        if ($null -ne $thinking) { $chatBodyObj["thinking"] = @{ type = $thinking } }
+        if ($null -ne $effort) { $chatBodyObj["reasoning_effort"] = $effort }
+        
+        $chatBody = $chatBodyObj | ConvertTo-Json -Depth 5 -Compress
+        $reqBytes = [System.Text.Encoding]::UTF8.GetBytes($chatBody)
+        
+        $chatStart = Get-Date
+        $ttft = 0; $reply = ""; $errMsg = $null; $success = $false
+        
+        try {
+            if ($ChatStream) {
+                $request = [System.Net.HttpWebRequest]::Create("$BaseUrl/chat/completions")
+                $request.Method = "POST"
+                $request.Headers.Add("Authorization", "Bearer $ApiKey")
+                $request.ContentType = "application/json; charset=utf-8"
+                $reqStream = $request.GetRequestStream()
+                $reqStream.Write($reqBytes, 0, $reqBytes.Length)
+                $reqStream.Close()
+
+                $response = $request.GetResponse()
+                $reader = New-Object System.IO.StreamReader($response.GetResponseStream(), [System.Text.Encoding]::UTF8)
+                
+                Write-Host "----------------------------------" -ForegroundColor DarkGray
+                if ($EnableChatHistory) { Write-Host "[!] 已带入历史上下文：$historyTurnsAdded 轮" -ForegroundColor Cyan }
+                Write-Host "[!] 思考控制：thinking=$thinking | 思考深度：reasoning_effort=$effort" -ForegroundColor Yellow
+                Write-Host "[System] $sysPrompt" -ForegroundColor DarkCyan
+                Write-Host "[User] $prompt`n" -ForegroundColor Magenta
+
+                $thinkingBuf = ""
+                $replyBuf    = ""
+                $inThinking  = $false
+                $thinkPrinted = $false
+
+                while (($line = $reader.ReadLine()) -ne $null) {
+                    if ($line.StartsWith("data: ")) {
+                        $dataStr = $line.Substring(6)
+                        if ($dataStr -eq "[DONE]") { break }
+                        try {
+                            $json = $dataStr | ConvertFrom-Json
+                            $token      = $json.choices[0].delta.content
+                            $thinkToken = $json.choices[0].delta.reasoning_content
+
+                            if ($ttft -eq 0 -and (-not [string]::IsNullOrEmpty($token) -or -not [string]::IsNullOrEmpty($thinkToken))) {
+                                $ttft = ((Get-Date) - $chatStart).TotalMilliseconds
+                            }
+
+                            # 思考内容
+                            if (-not [string]::IsNullOrEmpty($thinkToken)) {
+                                if (-not $inThinking) {
+                                    Write-Host "[Thinking]" -ForegroundColor DarkYellow
+                                    $inThinking = $true
+                                }
+                                Write-Host $thinkToken -NoNewline -ForegroundColor DarkGray
+                                $thinkingBuf += $thinkToken
+                            }
+
+                            # 回复内容
+                            if (-not [string]::IsNullOrEmpty($token)) {
+                                if ($inThinking -and -not $thinkPrinted) {
+                                    # 思考结束，换行后显示回复标题
+                                    Write-Host "`n"
+                                    Write-Host "[Reply]" -ForegroundColor Green
+                                    $thinkPrinted = $true
+                                } elseif (-not $inThinking -and -not $thinkPrinted) {
+                                    Write-Host "[Reply]" -ForegroundColor Green
+                                    $thinkPrinted = $true
+                                }
+                                Write-Host $token -NoNewline -ForegroundColor White
+                                $replyBuf += $token
+                            }
+                        } catch {}
+                    }
+                }
+                $reader.Close(); $response.Close()
+                Write-Host "`n"
+                $reply = $replyBuf
+                $success = $true
+            } else {
+                if ($EnableChatHistory) { Write-Host "[!] 已带入历史上下文：$historyTurnsAdded 轮" -ForegroundColor Cyan }
+                Write-Host "[!] 思考控制：thinking=$thinking | 思考深度：reasoning_effort=$effort" -ForegroundColor Yellow
+                Write-Host "[System] $sysPrompt" -ForegroundColor DarkCyan
+                Write-Host "[User] $prompt`n" -ForegroundColor Magenta
+
+                $resp = Invoke-RestMethod -Uri "$BaseUrl/chat/completions" -Method Post -Headers $Headers -ContentType "application/json; charset=utf-8" -Body $reqBytes -ErrorAction Stop
+
+                $msgContent = $resp.choices[0].message.content
+                $msgThink   = $resp.choices[0].message.reasoning_content
+
+                if (-not [string]::IsNullOrEmpty($msgThink)) {
+                    Write-Host "[Thinking]" -ForegroundColor DarkYellow
+                    Write-Host $msgThink -ForegroundColor DarkGray
+                    Write-Host ""
+                }
+                Write-Host "[Reply]" -ForegroundColor Green
+                Write-Host $msgContent -ForegroundColor White
+
+                $reply = $msgContent
+                $ttft  = 0
+                $success = $true
+            }
+        } catch {
+            # PowerShell 流式路径：GetResponse() 抛出 MethodInvocationException，
+            # 真正的 WebException（含 Response）在 InnerException 中
+            $webEx = $_.Exception.InnerException
+            if ($null -ne $webEx -and $null -ne $webEx.Response) {
+                try {
+                    $errStream = $webEx.Response.GetResponseStream()
+                    $errReader = New-Object System.IO.StreamReader($errStream, [System.Text.Encoding]::UTF8)
+                    $errBody   = $errReader.ReadToEnd()
+                    $errReader.Close()
+                    # 尝试解析 JSON 取出 error.message
+                    $errJson = $errBody | ConvertFrom-Json -ErrorAction SilentlyContinue
+                    $errMsg  = if ($errJson.error.message) { "[HTTP $($webEx.Response.StatusCode)] $($errJson.error.message)" } else { "[HTTP $($webEx.Response.StatusCode)] $errBody" }
+                } catch {
+                    $errMsg = $_.Exception.Message
+                }
+            } else {
+                $errMsg = $_.Exception.Message
+            }
+        }
+        
+        if ($success) {
+            $GlobalHistory.Add([PSCustomObject]@{ User = $prompt; Assistant = $reply })
+            
+            $replyClean = $reply -replace "`r", "" -replace "`n", " "
+            if ($replyClean.Length -gt 60) { $replyClean = $replyClean.Substring(0, 60) + "..." }
+            $msg = "  [完成] 总耗时: $([math]::Round(((Get-Date) - $chatStart).TotalMilliseconds))ms"
+            if ($ChatStream) { $msg += " | 首字延迟(TTFT): $([math]::Round($ttft))ms" }
+            Write-Host "$msg | 摘要: $replyClean" -ForegroundColor DarkGreen
+            $successCount++
+        } else {
+            Write-Host "  [请求失败] $errMsg" -ForegroundColor Red
+            $failCount++
+        }
+    }
+    
+    if ($EnableEmbedTest) {
+        $prompt = $ChatPrompts | Get-Random
+        $embedBody = @{ model = $EmbeddingModel; input = $prompt } | ConvertTo-Json -Depth 5 -Compress
+        $reqBytes = [System.Text.Encoding]::UTF8.GetBytes($embedBody)
+
+        Write-Host "`n  [Embed] 文本 : $prompt" -ForegroundColor Magenta
+        $embedStart = Get-Date
+        try {
+            $resp = Invoke-RestMethod -Uri "$BaseUrl/embeddings" -Method Post -Headers $Headers -ContentType "application/json; charset=utf-8" -Body $reqBytes -ErrorAction Stop
+            Write-Host "  [完成] 耗时: $([math]::Round(((Get-Date) - $embedStart).TotalMilliseconds))ms | 维度: $($resp.data[0].embedding.Count) | Tokens: $($resp.usage.total_tokens)" -ForegroundColor DarkGreen
+            $successCount++
+        } catch {
+            $ex = $_.Exception
+            if ($null -ne $ex -and $null -ne $ex.Response) {
+                try {
+                    $errStream = $ex.Response.GetResponseStream()
+                    $errReader = New-Object System.IO.StreamReader($errStream, [System.Text.Encoding]::UTF8)
+                    $errBody   = $errReader.ReadToEnd()
+                    $errReader.Close()
+                    $errJson = $errBody | ConvertFrom-Json -ErrorAction SilentlyContinue
+                    $errMsg  = if ($errJson.error.message) { "[HTTP $($ex.Response.StatusCode)] $($errJson.error.message)" } else { "[HTTP $($ex.Response.StatusCode)] $errBody" }
+                } catch {
+                    $errMsg = $ex.Message
+                }
+            } else {
+                $errMsg = $ex.Message
+            }
+            Write-Host "  [请求失败] $errMsg" -ForegroundColor Red
+            $failCount++
+        }
+    }
+    
+    if ($round -lt $TestRounds) { Start-Sleep -Seconds $DelaySeconds }
+}
+
+Write-Host "`n============== 性能测试最终报表 ==============" -ForegroundColor Cyan
+$totalReqs = 0; if ($EnableChatTest) { $totalReqs += $TestRounds }; if ($EnableEmbedTest) { $totalReqs += $TestRounds }
+Write-Host "总请求数: $totalReqs"
+Write-Host "成功数: $successCount" -ForegroundColor Green
+if ($failCount -gt 0) { Write-Host "失败数: $failCount" -ForegroundColor Red } else { Write-Host "失败数: 0" -ForegroundColor Green }
+Write-Host "==========================================" -ForegroundColor Cyan

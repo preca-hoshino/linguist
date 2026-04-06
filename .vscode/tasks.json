@@ -1,0 +1,156 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "gateway:install-deps",
+      "type": "shell",
+      "command": "npm",
+      "args": ["install"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      },
+      "runOptions": {
+        "runOn": "folderOpen"
+      }
+    },
+    {
+      "label": "ui:install-deps",
+      "type": "shell",
+      "command": "npm",
+      "args": ["install"],
+      "options": {
+        "cwd": "${workspaceFolder}/ui"
+      },
+      "presentation": {
+        "reveal": "silent",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "gateway:dev",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "dev"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^.*$",
+          "file": 1,
+          "location": 2,
+          "message": 3
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^.*ts-node.*",
+          "endsPattern": "^.*listening on.*"
+        }
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": true
+      }
+    },
+    {
+      "label": "ui:dev",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "dev"],
+      "options": {
+        "cwd": "${workspaceFolder}/ui"
+      },
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": {
+          "regexp": "^.*$",
+          "file": 1,
+          "location": 2,
+          "message": 3
+        },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "^.*vite.*",
+          "endsPattern": "^.*Local:.*http://localhost.*"
+        }
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": true
+      }
+    },
+    {
+      "label": "startup:all",
+      "dependsOn": ["gateway:install-deps", "ui:install-deps"],
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "silent"
+      }
+    },
+    {
+      "label": "gateway:build",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "build"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "ui:build",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "build"],
+      "options": {
+        "cwd": "${workspaceFolder}/ui"
+      },
+      "group": {
+        "kind": "build",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "shared"
+      }
+    },
+    {
+      "label": "lint:gateway",
+      "type": "shell",
+      "command": "npm",
+      "args": ["run", "lint"],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": {
+        "kind": "test",
+        "isDefault": false
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "panel": "shared"
+      }
+    }
+  ]
+}

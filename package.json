@@ -1,0 +1,61 @@
+{
+  "name": "linguist",
+  "version": "0.1.4",
+  "description": "LLM Gateway — 大模型统一网关",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node -r tsconfig-paths/register src/index.ts",
+    "build:tsc": "tsc",
+    "build:alias": "tsc-alias",
+    "build:copy": "node -e \"const{cpSync}=require('fs');cpSync('src/db/migrations','dist/db/migrations',{recursive:true})\"",
+    "build": "run-s build:tsc build:alias build:copy",
+    "start:run": "node dist/index.js",
+    "start": "run-s build start:run",
+    "check:format": "biome format --write src",
+    "check:lint": "biome lint src && eslint . --fix --cache --max-warnings 0",
+    "check:types": "tsc --noEmit",
+    "check:deps": "knip",
+    "check:test": "jest --reporters=summary",
+    "check": "run-s check:format check:lint check:types check:deps check:test",
+    "db": "ts-node -r tsconfig-paths/register src/db/migrate.ts"
+  },
+  "keywords": [
+    "llm",
+    "gateway",
+    "ai"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "dotenv": "^17.3.1",
+    "express": "^5.2.1",
+    "pg": "^8.19.0",
+    "winston": "^3.19.0",
+    "winston-transport": "^4.9.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.4.10",
+    "@swc/core": "^1.15.24",
+    "@swc/jest": "^0.2.39",
+    "@types/express": "^5.0.6",
+    "@types/jest": "^30.0.0",
+    "@types/node": "^25.3.2",
+    "@types/pg": "^8.16.0",
+    "@types/supertest": "^7.2.0",
+    "@typescript-eslint/eslint-plugin": "^8.56.1",
+    "@typescript-eslint/parser": "^8.56.1",
+    "eslint": "^10.0.2",
+    "eslint-config-biome": "^2.1.3",
+    "eslint-plugin-boundaries": "^6.0.2",
+    "jest": "^30.2.0",
+    "knip": "^6.3.0",
+    "nock": "^14.0.11",
+    "npm-run-all2": "^8.0.4",
+    "supertest": "^7.2.2",
+    "ts-node": "^10.9.2",
+    "tsc-alias": "^1.8.16",
+    "tsconfig-paths": "^4.2.0",
+    "typescript": "^5.9.3"
+  }
+}

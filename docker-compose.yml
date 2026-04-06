@@ -1,0 +1,64 @@
+version: '3.9'
+
+services:
+  # PostgreSQL 数据库服务
+  # 后端网关服务
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    container_name: linguist-gateway
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: ${PORT:-3000}
+      DB_HOST: ${DB_HOST:-postgres}
+      DB_PORT: ${DB_PORT:-5432}
+      DB_NAME: ${DB_NAME:-linguist}
+      DB_USER: ${DB_USER:-linguist}
+      DB_PASSWORD: ${DB_PASSWORD:-sdsM27FnXttxrr2h}
+      ADMIN_KEY: ${ADMIN_KEY:-your-admin-key-here}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    ports:
+      - '${PORT:-3000}:${PORT:-3000}'
+    healthcheck:
+      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://localhost:3000/health']
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - linguist-network
+    volumes:
+      - ./dist:/app/dist
+      - ./node_modules:/app/node_modules
+
+  # 反向代理和负载均衡（可选）
+  # 如果需要统一入口，可取消注释下面的 nginx 配置
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: linguist-nginx
+  #   restart: unless-stopped
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
+  #     - ./ssl:/etc/nginx/ssl:ro
+  #   depends_on:
+  #     - gateway
+  #     - ui
+  #   networks:
+  #     - linguist-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  linguist-network:
+    driver: bridge

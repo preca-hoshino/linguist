@@ -1,0 +1,157 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.4.10/schema.json",
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
+  "files": {
+    "includes": ["**", "!!**/dist"]
+  },
+  "formatter": {
+    "enabled": true,
+    "formatWithErrors": false,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineEnding": "lf",
+    "lineWidth": 120,
+    "attributePosition": "auto",
+    "bracketSameLine": false,
+    "bracketSpacing": true,
+    "expand": "auto",
+    "useEditorconfig": true
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "recommended": true,
+      "a11y": {
+        "recommended": true
+      },
+      "complexity": {
+        "recommended": true
+      },
+      "correctness": {
+        "recommended": true
+      },
+      "performance": {
+        "recommended": true
+      },
+      "security": {
+        "recommended": true
+      },
+      "style": {
+        "recommended": true
+      },
+      "suspicious": {
+        "recommended": true
+      }
+    },
+    "includes": ["**", "!dist/", "!node_modules/", "!coverage/", "!ui/", "!shadcn-admin/", "!ui-compat/"]
+  },
+  "javascript": {
+    "formatter": {
+      "jsxQuoteStyle": "double",
+      "quoteProperties": "asNeeded",
+      "trailingCommas": "all",
+      "semicolons": "always",
+      "arrowParentheses": "always",
+      "bracketSameLine": false,
+      "quoteStyle": "single",
+      "attributePosition": "auto",
+      "bracketSpacing": true
+    },
+    "globals": []
+  },
+  "html": {
+    "formatter": {
+      "indentScriptAndStyle": false,
+      "selfCloseVoidElements": "always"
+    }
+  },
+  "overrides": [
+    {
+      "includes": ["src/**/*.ts"],
+      "javascript": {
+        "globals": []
+      },
+      "linter": {
+        "rules": {
+          "complexity": {
+            "noStaticOnlyClass": "error",
+            "noUselessConstructor": "error",
+            "noUselessTypeConstraint": "error",
+            "useLiteralKeys": "error",
+            "useOptionalChain": "error"
+          },
+          "correctness": {
+            "noInvalidUseBeforeDeclaration": "error",
+            "noUnusedVariables": "error"
+          },
+          "security": {
+            "noGlobalEval": "error"
+          },
+          "style": {
+            "noCommonJs": "error",
+            "noInferrableTypes": "error",
+            "noNamespace": "error",
+            "noNonNullAssertion": "error",
+            "noParameterAssign": "error",
+            "useArrayLiterals": "error",
+            "useAsConstAssertion": "error",
+            "useBlockStatements": "error",
+            "useConsistentArrayType": "error",
+            "useConsistentMemberAccessibility": {
+              "level": "error",
+              "options": {
+                "accessibility": "explicit"
+              }
+            },
+            "useConsistentTypeDefinitions": "error",
+            "useConst": "error",
+            "useDefaultParameterLast": "error",
+            "useForOf": "error",
+            "useLiteralEnumMembers": "error",
+            "useReadonlyClassProperties": "error",
+            "useShorthandFunctionType": "error",
+            "useUnifiedTypeSignatures": "error"
+          },
+          "suspicious": {
+            "noConfusingVoidType": "error",
+            "noConsole": "error",
+            "noDoubleEquals": "error",
+            "noEmptyBlockStatements": "error",
+            "noExplicitAny": "error",
+            "noExtraNonNullAssertion": "error",
+            "noMisleadingInstantiator": "error",
+            "noNonNullAssertedOptionalChain": "error",
+            "noUnsafeDeclarationMerging": "error",
+            "noUnusedExpressions": "off",
+            "noVar": "error",
+            "useAdjacentOverloadSignatures": "error",
+            "useAwait": "error",
+            "useNamespaceKeyword": "error"
+          }
+        }
+      }
+    },
+    {
+      "includes": ["!**/*.svelte", "!**/*.vue", "**"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnusedVariables": "off"
+          }
+        }
+      }
+    }
+  ],
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        "organizeImports": "on"
+      }
+    }
+  }
+}

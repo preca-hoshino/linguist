@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+
+PREV_HEAD=$1
+NEW_HEAD=$2
+CHECKOUT_TYPE=$3
+
+# type=1 代表改变分支的 checkout
+if [ "$CHECKOUT_TYPE" = "1" ]; then
+    BRANCH_NAME=$(git rev-parse --abbrev-ref HEAD)
+    
+    # 忽略处于游离的 HEAD 状态（detached HEAD）
+    if [ "$BRANCH_NAME" != "HEAD" ]; then
+        PATTERN='^(master|develop|feat/.+|ref/.+|fix/.+|release/.+|docs/.+|chore/.+|test/.+)$'
+        if ! echo "$BRANCH_NAME" | grep -qE "$PATTERN"; then
+            echo ""
+            echo "=========================================================="
+            echo "⚠️  警告：您当前签出的分支名 ($BRANCH_NAME) 不符合项目规范！"
+            echo "=========================================================="
+            echo "这将会阻拦您未来的 Push，为了维持仓库整洁，规范的分支建议格式为："
+            echo "  - master / develop (主分支)"
+            echo "  - release/xxxx (发版分支)"
+            echo "  - feat/xxxx (新功能分支)"
+            echo "  - ref/xxxx (重构分支)"
+            echo "  - fix/xxxx (修复分支)"
+            echo "  - docs/xxxx (文档分支)"
+            echo "  - chore/xxxx (工程维保分支)"
+            echo "  - test/xxxx (测试专补分支)"
+            echo "请考虑尽早用 'git branch -m <新建名>' 进行修改！"
+            echo "=========================================================="
+            echo ""
+        fi
+    fi
+fi
