@@ -87,5 +87,12 @@ describe('Provider Plugin: DeepSeek', () => {
       const info = deepseekPlugin.mapError(500, 'Internal Server Error');
       expect(info.gatewayErrorCode).toBe('provider_error');
     });
+
+    it('should map other defined status codes correctly (400, 402, 422, 503)', () => {
+      expect(deepseekPlugin.mapError(400, 'err').gatewayErrorCode).toBe('invalid_request');
+      expect(deepseekPlugin.mapError(402, 'err').gatewayErrorCode).toBe('insufficient_balance');
+      expect(deepseekPlugin.mapError(422, 'err').gatewayErrorCode).toBe('invalid_parameter');
+      expect(deepseekPlugin.mapError(503, 'err').gatewayErrorCode).toBe('provider_unavailable');
+    });
   });
 });

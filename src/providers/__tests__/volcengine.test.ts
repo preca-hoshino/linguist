@@ -74,5 +74,29 @@ describe('Provider Plugin: VolcEngine', () => {
       const info = volcenginePlugin.mapError(500, errorBody);
       expect(info.gatewayErrorCode).toBe('provider_error');
     });
+
+    it('should map token exceed messages to context_length_exceeded via exact provider error codes', () => {
+      const errorBody = JSON.stringify({ error: { code: 'OutofContextError', message: 'Token max limit exceeded' } });
+      const info = volcenginePlugin.mapError(400, errorBody);
+      expect(info.gatewayErrorCode).toBe('context_length_exceeded');
+    });
+
+    it('should map token exceed messages to context_length_exceeded via fallback regex', () => {
+      const errorBody = JSON.stringify({ error: { code: 'Unknown', message: 'The context length is too long.' } });
+      const info = volcenginePlugin.mapError(400, errorBody);
+      expect(info.gatewayErrorCode).toBe('context_length_exceeded');
+    });
+
+    it('should fallback to 403 mappings correctly for overdue errors', () => {
+      const overrideError = JSON.stringify({ error: { code: 'AccountOverdue', message: 'balance empty' } });
+      expect(volcenginePlugin.mapError(403, overrideError).gatewayErrorCode).toBe('insufficient_balance');
+
+      const genericDenied = JSON.stringify({ error: { code: 'OperationDenied', message: 'denied' } });
+      expect(volcenginePlugin.mapError(403, genericDenied).gatewayErrorCode).toBe('permission_denied');
+    });
+
+    it('should default to generic fallback when pattern fails', () => {
+      expect(volcenginePlugin.mapError(429, 'just a text').gatewayErrorCode).toBe('rate_limit_exceeded');
+    });
   });
 });
