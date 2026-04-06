@@ -270,45 +270,34 @@ function extractUsage(ctx: GatewayContext): {
 function inferErrorType(errorCode: string): ErrorType {
   const code = errorCode.toLowerCase();
 
-  switch (code) {
-    case 'rate_limit_exceeded':
-    case 'quota_exceeded': {
-      return 'rate_limit';
-    }
-    case 'provider_timeout': {
-      return 'timeout';
-    }
-    case 'authentication_error':
-    case 'unauthorized':
-    case 'invalid_api_key':
-    case 'permission_denied':
-    case 'insufficient_balance': {
-      return 'auth_error';
-    }
-    case 'invalid_request':
-    case 'invalid_parameter':
-    case 'missing_model':
-    case 'model_type_mismatch':
-    case 'capability_not_supported':
-    case 'content_filtered':
-    case 'model_not_found':
-    case 'not_found': {
-      return 'invalid_request';
-    }
-    case 'internal_error':
-    case 'route_error': {
-      return 'internal_error';
-    }
-    case 'provider_error':
-    case 'provider_unavailable':
-    case 'no_backend_available':
-    case 'no_available_backend':
-    case 'provider_response_invalid': {
-      return 'provider_error';
-    }
-    default: {
-      break;
-    }
+  const errorMap: Record<string, ErrorType> = {
+    rate_limit_exceeded: 'rate_limit',
+    quota_exceeded: 'rate_limit',
+    provider_timeout: 'timeout',
+    authentication_error: 'auth_error',
+    unauthorized: 'auth_error',
+    invalid_api_key: 'auth_error',
+    permission_denied: 'auth_error',
+    insufficient_balance: 'auth_error',
+    invalid_request: 'invalid_request',
+    invalid_parameter: 'invalid_request',
+    missing_model: 'invalid_request',
+    model_type_mismatch: 'invalid_request',
+    capability_not_supported: 'invalid_request',
+    content_filtered: 'invalid_request',
+    model_not_found: 'invalid_request',
+    not_found: 'invalid_request',
+    internal_error: 'internal_error',
+    route_error: 'internal_error',
+    provider_error: 'provider_error',
+    provider_unavailable: 'provider_error',
+    no_backend_available: 'provider_error',
+    no_available_backend: 'provider_error',
+    provider_response_invalid: 'provider_error',
+  };
+
+  if (errorMap[code]) {
+    return errorMap[code];
   }
 
   // 关键词回退匹配（兼容旧错误码）
