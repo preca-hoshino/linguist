@@ -3,7 +3,10 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { processChatCompletion } from '@/app';
+import { configManager } from '@/config';
+import { handleError } from '@/users';
 import { createLogger, logColors } from '@/utils';
+import { validateApiKeyFromRequest } from '../auth-helper';
 
 const logger = createLogger('API:Anthropic', logColors.bold + logColors.magenta);
 
@@ -35,6 +38,32 @@ router.post('/v1/messages', async (req: Request, res: Response): Promise<void> =
   logger.debug({ model: rawModel, stream: isStream, ip: req.ip ?? req.socket.remoteAddress }, 'POST /v1/messages');
 
   await processChatCompletion(req, res, 'anthropic', rawModel, { stream: isStream });
+});
+
+/**
+ * GET /v1/models — 返回可调用的虚拟模型列表（Anthropic 规范）
+ */
+router.get('/v1/models', async (req: Request, res: Response): Promise<void> => {
+  logger.debug({ ip: req.ip ?? req.socket.remoteAddress }, 'GET /v1/models');
+  try {
+    await validateApiKeyFromRequest(req, extractApiKey, 'API key is required. Provide it via x-api-key header.');
+
+    const modelNames = configManager.getAllVirtualModels();
+
+    const data = modelNames.map((name) => {
+      const vmConfig = configManager.getVirtualModelConfig(name);
+      return {
+        type: 'model',
+        id: name,
+        display_name: name,
+        created_at: vmConfig ? vmConfig.createdAt.toISOString() : new Date(0).toISOString(),
+      };
+    });
+
+    res.json({ type: 'list', data });
+  } catch (error) {
+    handleError(error, res, 'anthropic');
+  }
 });
 
 export { router as anthropicRouter };

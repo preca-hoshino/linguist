@@ -3,7 +3,10 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { processChatCompletion, processEmbedding } from '@/app';
+import { configManager } from '@/config';
+import { handleError } from '@/users';
 import { createLogger, logColors } from '@/utils';
+import { validateApiKeyFromRequest } from '../auth-helper';
 
 const logger = createLogger('API:Gemini', logColors.bold + logColors.white);
 
@@ -64,6 +67,35 @@ router.post(String.raw`/v1beta/models/:model\:embedContent`, async (req: Request
     `POST /v1beta/models/${rawModel}:embedContent`,
   );
   await processEmbedding(req, res, 'gemini', rawModel);
+});
+
+/**
+ * GET /v1beta/models — 返回可调用的虚拟模型列表（Gemini 规范）
+ */
+router.get('/v1beta/models', async (req: Request, res: Response): Promise<void> => {
+  logger.debug({ ip: req.ip ?? req.socket.remoteAddress }, 'GET /v1beta/models');
+  try {
+    await validateApiKeyFromRequest(
+      req,
+      extractApiKey,
+      'API key is required. Provide it via x-goog-api-key header or key query parameter.',
+    );
+
+    const modelNames = configManager.getAllVirtualModels();
+
+    const models = modelNames.map((name) => {
+      return {
+        name,
+        version: '1.0',
+        displayName: name,
+        description: 'Linguist Virtual Model',
+      };
+    });
+
+    res.json({ models });
+  } catch (error) {
+    handleError(error, res, 'gemini');
+  }
 });
 
 export { router as geminiRouter };
