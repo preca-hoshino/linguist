@@ -83,6 +83,7 @@ export class ConfigManager {
       routing_strategy: string;
       vm_rpm_limit: number | null;
       vm_tpm_limit: number | null;
+      vm_created_at: Date;
       pm_id: string;
       pm_name: string;
       model_type: string;
@@ -106,6 +107,7 @@ export class ConfigManager {
         vm.routing_strategy,
         vm.rpm_limit       AS vm_rpm_limit,
         vm.tpm_limit       AS vm_tpm_limit,
+        vm.created_at      AS vm_created_at,
         pm.id              AS pm_id,
         pm.name            AS pm_name,
         pm.model_type,
@@ -141,6 +143,7 @@ export class ConfigManager {
           backends: [],
           rpmLimit: row.vm_rpm_limit ?? undefined,
           tpmLimit: row.vm_tpm_limit ?? undefined,
+          createdAt: row.vm_created_at,
         };
         newVirtualModels.set(row.vm_name, config);
       }

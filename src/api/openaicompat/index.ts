@@ -6,7 +6,7 @@ import { processChatCompletion, processEmbedding } from '@/app';
 import { configManager } from '@/config';
 import { handleError } from '@/users';
 import { createLogger, logColors } from '@/utils';
-import { validateApiKeyFromRequest } from './auth-helper';
+import { validateApiKeyFromRequest } from '../auth-helper';
 
 const logger = createLogger('API:OpenAICompat', logColors.bold + logColors.white);
 
@@ -42,7 +42,7 @@ router.get('/v1/models', async (req: Request, res: Response): Promise<void> => {
       return {
         id: name,
         object: 'model',
-        created: 0,
+        created: vmConfig ? Math.floor(vmConfig.createdAt.getTime() / 1000) : 0,
         owned_by: 'linguist',
         ...(vmConfig ? { model_type: vmConfig.modelType } : {}),
       };

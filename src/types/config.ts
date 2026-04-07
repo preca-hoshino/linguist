@@ -125,6 +125,8 @@ export interface VirtualModelConfig {
   rpmLimit?: number | undefined;
   /** 每分钟 Token 数上限（undefined = 不限制） */
   tpmLimit?: number | undefined;
+  /** 模型首创时间 */
+  createdAt: Date;
 }
 
 // ==================== 路由解析结果 ====================

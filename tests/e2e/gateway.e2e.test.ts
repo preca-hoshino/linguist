@@ -52,6 +52,7 @@ describe('Gateway E2E Tests', () => {
             credential: { key: 'sk-123' },
             base_url: 'https://test.local',
             provider_config: {},
+            vm_created_at: new Date('2024-01-01T00:00:00Z'),
           },
         ],
         command: 'SELECT',
@@ -92,7 +93,7 @@ describe('Gateway E2E Tests', () => {
     });
 
     it('should process Gemini format error if in Gemini path', async () => {
-      const response = await request(app).get('/v1beta/models');
+      const response = await request(app).get('/v1beta/unknown-endpoint');
       
       expect(response.status).toBe(404);
       expect(response.body).toHaveProperty('error');
