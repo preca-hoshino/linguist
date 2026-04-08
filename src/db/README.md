@@ -1,7 +1,5 @@
 # src/db — 数据库访问模块
 
-# src/db — 数据库访问模块
-
 > 项目总览：参见 [README.md](../README.md)
 > 
 > 相关模块：[`src/config/README.md`](../config/README.md)（配置存储）、[`src/admin/README.md`](../admin/README.md)（管理 API）
@@ -25,6 +23,11 @@ db/
 │   ├── queries.ts               #   CRUD + 轮换 + 验证
 │   └── index.ts
 │
+├── billing/                     # 计费模块
+│   ├── calculator.ts            #   后置计费纯函数（calculatePostBillingCost）
+│   ├── lookup.ts                #   阶梯价格查询（lookupPricingTiers）
+│   └── index.ts
+│
 ├── request-logs/                # 请求日志模块
 │   ├── types.ts                 #   类型定义 + ENTRY_COLUMNS 查询列常量
 │   ├── write.ts                 #   写入操作（markProcessing / markCompleted / markError）
@@ -42,16 +45,17 @@ db/
 │   ├── breakdown.ts             #   getStatsBreakdown（分组占比）
 │   └── index.ts
 │
+├── users/                       # 用户模块
+│   ├── repository.ts            #   用户数据访问层（findByEmail / findById / listUsers / createUser / updateUser / deleteUser）
+│   └── index.ts
+│
 └── migrations/
-    ├── 001_init.sql
-    ├── 002_request_logs.sql
-    ├── 003_api_keys.sql
-    ├── 004_routing_strategy.sql
-    ├── 005_stats_fields.sql
-    ├── 006_stream_and_timing.sql
-    ├── 007_routing_strategy_simplify.sql
-    ├── 008_audit_context_refactor.sql
-    └── 009_monitoring_indexes.sql
+    ├── 01_core_users_apikeys.sql
+    ├── 02_core_providers_models.sql
+    ├── 03_core_request_logs.sql
+    ├── 04_triggers_and_functions.sql
+    ├── 05_partition_request_logs.sql
+    └── 06_add_rate_limits.sql
 ```
 
 ## 请求日志操作
@@ -96,6 +100,32 @@ gateway_context.audit.userResponse.headers / .body
 | `buildDimensionFilter(...)` / `buildDimensionFilterAliased(...)` | 构建维度过滤子句（带/不带表别名）                  |
 | `buildBucketExpr(interval)`                                      | 生成时间分桶 SQL 表达式                            |
 | `autoInterval(range)` / `autoIntervalForDates(from, to)`         | 自动选择时间粒度                                   |
+
+## 计费模块
+
+`billing/` 提供后置计费功能，根据上游返回的实际 token 用量和模型配置的阶梯价格计算费用：
+
+| 函数                         | 说明                                                               |
+| ---------------------------- | ------------------------------------------------------------------ |
+| `calculatePostBillingCost()` | 后置费用计算纯函数（不碰 DB），根据阶梯价格计算本次请求费用        |
+| `lookupPricingTiers()`       | 根据 provider_id 和模型名查询 `provider_models` 表中的阶梯价格配置 |
+
+计费设计为无副作用纯函数（`calculatePostBillingCost`），方便单元测试覆盖。
+
+## 用户模块
+
+`users/repository.ts` 提供用户数据访问层：
+
+| 函数                  | 说明                                   |
+| --------------------- | -------------------------------------- |
+| `findByEmail()`       | 按邮箱查找用户（返回含 password_hash） |
+| `findById()`          | 按 ID 查找用户（安全字段）             |
+| `listUsers()`         | 分页列出用户（支持搜索）               |
+| `createUser()`        | 创建新用户                             |
+| `updateUser()`        | 更新用户信息                           |
+| `deleteUser()`        | 删除用户                               |
+| `countUsers()`        | 统计用户总数                           |
+| `getUserAvatarData()` | 获取用户头像数据                       |
 
 ## 数据库命令
 
