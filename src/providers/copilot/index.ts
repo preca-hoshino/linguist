@@ -1,0 +1,20 @@
+// src/providers/copilot/index.ts — Copilot 提供商插件入口
+
+import type { ProviderPlugin } from '@/providers/types';
+import { CopilotChatClient } from './chat/client';
+import { CopilotChatRequestAdapter } from './chat/request';
+import { CopilotChatResponseAdapter } from './chat/response';
+import { CopilotChatStreamResponseAdapter } from './chat/response/stream';
+import { mapCopilotError } from './error-mapping';
+
+export const copilotPlugin: ProviderPlugin = {
+  kind: 'copilot',
+  getChatAdapterSet: (config) => ({
+    requestAdapter: new CopilotChatRequestAdapter(),
+    responseAdapter: new CopilotChatResponseAdapter(),
+    streamResponseAdapter: new CopilotChatStreamResponseAdapter(),
+    // 传入完整 config，因为 client 需要通过 credential.accessToken 动态获取 Token
+    client: new CopilotChatClient(config),
+  }),
+  mapError: (status, body) => mapCopilotError(status, body),
+};
