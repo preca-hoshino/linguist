@@ -26,6 +26,7 @@ const getProviderLogger = createCachedLoggerFactory(
     deepseek: { label: 'Provider:DeepSeek', color: logColors.bold + logColors.green },
     gemini: { label: 'Provider:Gemini', color: logColors.bold + logColors.yellow },
     volcengine: { label: 'Provider:VolcEngine', color: logColors.bold + logColors.magenta },
+    copilot: { label: 'Provider:Copilot', color: logColors.bold + logColors.cyan },
   },
   'Provider',
   logColors.bold + logColors.white,
