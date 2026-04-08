@@ -24,7 +24,7 @@ export class CopilotEmbeddingClient implements ProviderEmbeddingClient {
 
   public async call(providerReq: Record<string, unknown>, model: string): Promise<ProviderCallResult> {
     const { token, apiEndpoint } = await this.resolveToken();
-    const url = `${apiEndpoint}/v1/embeddings`;
+    const url = `${apiEndpoint}/embeddings`;
 
     logger.debug({ url, model, providerId: this.config.id }, 'Calling Copilot Embedding API');
 
