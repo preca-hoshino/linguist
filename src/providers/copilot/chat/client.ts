@@ -29,7 +29,7 @@ export class CopilotChatClient implements ProviderChatClient {
 
   public async call(providerReq: Record<string, unknown>, model: string): Promise<ProviderCallResult> {
     const { token, apiEndpoint } = await this.resolveToken();
-    const url = `${apiEndpoint}/chat/completions`;
+    const url = `${apiEndpoint}/v1/chat/completions`;
 
     logger.debug({ url, model, providerId: this.config.id }, 'Calling Copilot API');
 
@@ -60,7 +60,7 @@ export class CopilotChatClient implements ProviderChatClient {
 
   public async callStream(providerReq: Record<string, unknown>, model: string): Promise<ProviderStreamResult> {
     const { token, apiEndpoint } = await this.resolveToken();
-    const url = `${apiEndpoint}/chat/completions`;
+    const url = `${apiEndpoint}/v1/chat/completions`;
 
     logger.debug({ url, model, providerId: this.config.id }, 'Calling Copilot API (stream)');
 
