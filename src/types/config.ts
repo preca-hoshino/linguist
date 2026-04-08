@@ -23,8 +23,15 @@ export interface NoCredential {
   type: 'none';
 }
 
+/** GitHub Copilot 认证方式（OAuth Device Flow） */
+export interface CopilotCredential {
+  type: 'copilot';
+  /** GitHub OAuth access_token (ghu_xxx)，长效，由 Device Flow 换取 */
+  accessToken: string;
+}
+
 /** 提供商凭证（判别联合） */
-export type ProviderCredential = ApiKeyCredential | OAuth2Credential | NoCredential;
+export type ProviderCredential = ApiKeyCredential | OAuth2Credential | CopilotCredential | NoCredential;
 
 // ==================== 高级配置 ====================
 
@@ -76,6 +83,10 @@ export function resolveApiKey(credential: ProviderCredential): string {
     }
     case 'oauth2': {
       return credential.accessToken;
+    }
+    case 'copilot': {
+      // Copilot 不使用静态 API Key，短效 Token 由 CopilotTokenManager 动态获取
+      return '';
     }
     case 'none': {
       return '';
