@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import 'dotenv/config';
 import { configManager } from './config';
 import { closePool, countUsers, createUser, runMigrations } from './db';
@@ -16,16 +17,21 @@ async function seedAdminUser(): Promise<void> {
     return;
   }
 
-  const email = process.env.ADMIN_EMAIL ?? 'admin@linguist.local';
-  const password = process.env.ADMIN_PASSWORD ?? 'Admin@123456';
+  const email = 'admin@linguist.local';
   const username = 'admin';
+  const password = crypto.randomBytes(8).toString('hex');
 
   const user = await createUser({ username, email, password });
-  logger.info({ userId: user.id, username, email }, 'Seed admin user created');
 
-  if (process.env.ADMIN_EMAIL === undefined || process.env.ADMIN_PASSWORD === undefined) {
-    logger.warn('⚠️  Using default admin credentials. Change them in .env (ADMIN_EMAIL / ADMIN_PASSWORD)');
-  }
+  logger.warn('='.repeat(60));
+  logger.warn('⚠️  ADMIN ACCOUNT CREATED ON FRESH STARTUP');
+  logger.warn('='.repeat(60));
+  logger.warn(`   UserId:   ${user.id}`);
+  logger.warn(`   Email:    ${email}`);
+  logger.warn(`   Password: ${password}`);
+  logger.warn('='.repeat(60));
+  logger.warn('⚠️  Please save these credentials immediately!');
+  logger.warn('='.repeat(60));
 }
 
 /** 初始化并启动网关服务（数据库迁移 → 种子 → 加载配置 → 启动 DB 监听 → 启动 HTTP → 注册优雅关闭） */
