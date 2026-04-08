@@ -17,7 +17,7 @@ interface ProviderBody {
   kind?: string | undefined;
   base_url?: string | undefined;
   /** 凭证类型 */
-  credential_type?: 'api_key' | 'oauth2' | 'none' | undefined;
+  credential_type?: 'api_key' | 'oauth2' | 'copilot' | 'none' | undefined;
   /** 凭证数据（JSONB） */
   credential?: Record<string, unknown> | undefined;
   /** 高级配置 */
@@ -106,7 +106,7 @@ router.post('/', async (req: Request, res: Response) => {
       throw new GatewayError(400, 'invalid_request', 'Fields name, kind are required');
     }
 
-    if (typeof base_url !== 'string' || base_url === '') {
+    if (typeof base_url !== 'string' || (base_url === '' && kind !== 'copilot')) {
       throw new GatewayError(400, 'invalid_request', 'Field base_url is required');
     }
 
