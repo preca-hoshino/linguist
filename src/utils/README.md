@@ -19,6 +19,11 @@ utils/
 ├── media.ts            # 媒体类型处理
 ├── sse.ts              # SSE 流式传输工具
 ├── constants.ts        # 常量定义
+├── hash.ts             # 密码哈希工具（scrypt）
+├── jwt.ts              # JWT 工具
+├── uuid.ts             # UUID v4/v5 生成器
+├── tool-id.ts          # 工具调用 ID → UUID v5 规范化
+├── rate-limiter.ts     # 内存限流器
 └── index.ts            # 统一再导出
 ```
 
@@ -50,6 +55,55 @@ logger.info({ requestId: ctx.id }, 'Route resolved');
 ```
 
 日志级别由 `LOG_LEVEL` 环境变量控制（默认 `info`）。
+
+## hashPassword / verifyPassword
+
+基于 Node.js 内置 `crypto.scryptSync` 的密码哈希工具，输出格式 `scrypt:<salt_hex>:<hash_hex>`：
+
+```typescript
+const hash = hashPassword('myPassword');
+const valid = verifyPassword('myPassword', hash);
+```
+
+## jwt.sign / jwt.verify
+
+JWT 签发与验证工具（使用 `jose` 库）：
+
+```typescript
+const token = jwt.sign({ sub: 'user123' }, secret, { expiresIn: '1h' });
+const payload = jwt.verify(token, secret);
+```
+
+## uuid.v4 / uuid.v5
+
+UUID 生成工具：
+
+```typescript
+import { v4, v5, DNS_NAMESPACE } from '../utils';
+
+// 随机 UUID v4
+const id = v4();
+
+// 基于名称的 UUID v5（确定性）
+const uuid = v5('tool_call_id', DNS_NAMESPACE);
+```
+
+## tool-id.ts
+
+将工具调用 ID 确定性映射为 UUID v5，确保消息中所有相关 ID 保持一致：
+
+```typescript
+const normalized = normalizeToolIds(messages);
+```
+
+## rateLimiter
+
+基于内存的滑动窗口限流器：
+
+```typescript
+const limiter = rateLimiter({ windowMs: 60000, max: 100 });
+const result = await limiter.consume('user_123');
+```
 
 ## createCachedLoggerFactory(specs, defaultPrefix, defaultColor)
 
