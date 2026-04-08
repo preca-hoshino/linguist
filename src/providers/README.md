@@ -21,19 +21,60 @@ providers/
 │   ├── index.ts               # 统一导出入口
 │   ├── error-mapping.ts       # DeepSeek 错误映射
 │   └── chat/                  # Chat 适配器
-│       ├── client.ts
-│       ├── request/
-│       └── response/
+│       ├── client.ts          # HTTP 客户端
+│       ├── request/           # 请求适配层
+│       │   ├── index.ts       # 适配器类（编排层）
+│       │   ├── message-converter.ts
+│       │   └── __tests__/     # 单元测试
+│       └── response/          # 响应适配层
+│           ├── index.ts       # 适配器类（编排层）
+│           ├── stream.ts      # 流式响应处理
+│           └── types.ts       # 响应类型定义
 ├── gemini/                    # Gemini 适配器
-│   ├── index.ts
-│   ├── error-mapping.ts
-│   ├── chat/
-│   └── embedding/
+│   ├── index.ts               # 统一导出入口
+│   ├── error-mapping.ts       # Gemini 错误映射
+│   ├── chat/                  # Chat 适配器
+│   │   ├── client.ts          # HTTP 客户端
+│   │   ├── request/           # 请求适配层
+│   │   │   ├── index.ts       # 适配器类（编排层）
+│   │   │   ├── config-builder.ts
+│   │   │   ├── message-converter.ts
+│   │   │   ├── tool-converter.ts
+│   │   │   ├── types.ts       # 请求类型定义
+│   │   │   └── __tests__/     # 单元测试
+│   │   └── response/          # 响应适配层
+│   │       ├── index.ts       # 适配器类（编排层）
+│   │       ├── candidate-converter.ts
+│   │       ├── stream.ts      # 流式响应处理
+│   │       ├── types.ts       # 响应类型定义
+│   │       ├── usage-converter.ts
+│   │       └── __tests__/     # 单元测试
+│   └── embedding/             # Embedding 适配器
+│       ├── client.ts          # HTTP 客户端
+│       ├── request/           # 请求适配层
+│       │   └── index.ts       # 适配器类
+│       └── response/          # 响应适配层
+│           └── index.ts       # 适配器类
 └── volcengine/                # 火山引擎适配器
-    ├── index.ts
-    ├── error-mapping.ts
-    ├── chat/
-    └── embedding/
+    ├── index.ts               # 统一导出入口
+    ├── error-mapping.ts       # 火山引擎错误映射
+    ├── chat/                  # Chat 适配器
+    │   ├── client.ts          # HTTP 客户端
+    │   ├── request/           # 请求适配层
+    │   │   ├── index.ts       # 适配器类（编排层）
+    │   │   ├── message-converter.ts
+    │   │   ├── types.ts       # 请求类型定义
+    │   │   └── __tests__/     # 单元测试
+    │   └── response/          # 响应适配层
+    │       ├── index.ts       # 适配器类（编排层）
+    │       ├── stream.ts      # 流式响应处理
+    │       └── types.ts       # 响应类型定义
+    └── embedding/             # Embedding 适配器
+        ├── client.ts          # HTTP 客户端
+        ├── request/           # 请求适配层
+        │   └── index.ts       # 适配器类
+        └── response/          # 响应适配层
+            └── index.ts       # 适配器类
 ```
 
 ## 文件组织规范
@@ -117,11 +158,11 @@ const validKinds: Set<string> = getRegisteredProviderKinds();
 
 提供商返回的错误被各提供商目录下的 `error-mapping.ts` 转换为网关内部错误：
 
-| 文件                          | 提供商   | 解析方式                                        |
-| ----------------------------- | -------- | ----------------------------------------------- |
-| `deepseek/error-mapping.ts`   | DeepSeek | 按 HTTP 状态码映射（OpenAI 兼容格式）           |
-| `volcengine/error-mapping.ts` | 火山引擎 | 解析 `error.code` 字段后按正则匹配              |
-| `gemini/error-mapping.ts`     | Gemini   | 解析 `error.status` gRPC 状态字符串             |
+| 文件                          | 提供商   | 解析方式                              |
+| ----------------------------- | -------- | ------------------------------------- |
+| `deepseek/error-mapping.ts`   | DeepSeek | 按 HTTP 状态码映射（OpenAI 兼容格式） |
+| `volcengine/error-mapping.ts` | 火山引擎 | 解析 `error.code` 字段后按正则匹配    |
+| `gemini/error-mapping.ts`     | Gemini   | 解析 `error.status` gRPC 状态字符串   |
 
 `http-utils.ts` 中的 `parseProviderResponse()` 负责在提供商返回非 2xx 响应时调用 `mapProviderError` 解析错误并抛出 `GatewayError`。
 
@@ -155,24 +196,44 @@ const validKinds: Set<string> = getRegisteredProviderKinds();
 
 ## 已实现提供商
 
-| 目录                    | 提供商        | kind         | 类型      |
-| ----------------------- | ------------- | ------------ | --------- |
-| `deepseek/`             | DeepSeek      | `deepseek`   | Chat      |
-| `gemini/`               | Google Gemini | `gemini`     | Chat / Embed |
-| `volcengine/`           | 火山引擎      | `volcengine` | Chat / Embed |
+| 目录          | 提供商        | kind         | 类型         |
+| ------------- | ------------- | ------------ | ------------ |
+| `deepseek/`   | DeepSeek      | `deepseek`   | Chat         |
+| `gemini/`     | Google Gemini | `gemini`     | Chat / Embed |
+| `volcengine/` | 火山引擎      | `volcengine` | Chat / Embed |
 
 ## 新增 / 重构 / 删除向导
 
 ### 新增提供商适配器
 
 1. 在 `src/providers/<provider>/` 下新建目录
-2. 实现文件：
-   - `chat/request/index.ts` — 实现 `toProviderRequest(req, model)` 方法
-   - `chat/response/index.ts` — 实现 `fromProviderResponse(res)` 方法
-   - `chat/client.ts` — 实现 `call(req, model)` 方法
-   - `error-mapping.ts` — 提供商错误映射逻辑
-   - `index.ts` — 导出适配器实例
-3. 在 `src/providers/index.ts` 中使用 `registerChatProvider`（或 `registerEmbeddingProvider`）注册工厂函数：
+2. 实现 Chat 适配器（参考 `deepseek/` 的完整结构）：
+   ```
+   <provider>/
+   ├── index.ts               # 导出适配器实例
+   ├── error-mapping.ts       # 提供商错误映射逻辑
+   └── chat/
+       ├── client.ts          # 实现 `call(req, model)` 方法
+       ├── request/
+       │   ├── index.ts       # 实现 `toProviderRequest(req, model)` 方法
+       │   ├── message-converter.ts  # 消息转换逻辑（可选）
+       │   ├── types.ts       # 请求类型定义（可选）
+       │   └── __tests__/     # 单元测试（可选）
+       └── response/
+           ├── index.ts       # 实现 `fromProviderResponse(res)` 方法
+           ├── stream.ts      # 流式响应处理（可选）
+           └── types.ts       # 响应类型定义（可选）
+   ```
+3. 如需支持 Embedding，另加：
+   ```
+   └── embedding/
+       ├── client.ts
+       ├── request/
+       │   └── index.ts
+       └── response/
+           └── index.ts
+   ```
+4. 在 `src/providers/index.ts` 中使用 `registerChatProvider`（或 `registerEmbeddingProvider`）注册工厂函数：
    ```typescript
    registerChatProvider('myprovider', (config: ProviderConfig) => ({
      requestAdapter: myRequestAdapter,    // 单例
@@ -180,16 +241,16 @@ const validKinds: Set<string> = getRegisteredProviderKinds();
      client: new MyProviderClient(config.apiKey, config.baseUrl),
    }));
    ```
-4. 在管理 API 中创建提供商记录时使用对应的 `kind` 字段即可路由
+5. 在管理 API 中创建提供商记录时使用对应的 `kind` 字段即可路由
 
 ### 重构
 
-- **拆分复杂转换逻辑**：在对应的 `request/` 或 `response/` 目录下新建子文件（如 `message-converter.ts`、`tool-converter.ts`），并在编排层 `index.ts` 中调用
+- **拆分复杂转换逻辑**：在对应的 `request/` 或 `response/` 目录下新建子文件（如 `message-converter.ts`、`tool-converter.ts`、`candidate-converter.ts`），并在编排层 `index.ts` 中调用
 - **更改 Client 的 HTTP 层**：只修改 `client.ts`，请求/响应适配器不受影响
-- **更新厂商 API 字段**：添加初始包含厂商请求格式类型定义的 `types.ts` 文件，尞寽适配器的转换逻辑
+- **更新厂商 API 字段**：添加包含厂商请求格式类型定义的 `types.ts` 文件，供适配器的转换逻辑使用
 
 ### 删除提供商
 
 1. 删除 `src/providers/<provider>/` 目录
-2. 在 `src/providers/index.ts` 中移除重配置信息
+2. 在 `src/providers/index.ts` 中移除注册信息
 3. 确认数据库中无使用该 `kind` 的提供商和提供商模型记录（如有需通过管理 API 删除）

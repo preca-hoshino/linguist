@@ -12,11 +12,13 @@
 
 ```
 types/
-├── context.ts    # GatewayContext、RoutedGatewayContext
-├── config.ts     # ProviderConfig、VirtualModelBackend、VirtualModelConfig、ResolvedRoute
-├── provider.ts   # HttpHeaders、ProviderCallResult、ProviderStreamResult、ProviderErrorDetail
+├── api.ts        # ApiErrorType、ApiErrorBody、ApiErrorResponse（管理 API 公共类型系统）
+├── billing.ts    # PricingTier、CostBreakdown、BillingResult（阶梯计费类型）
 ├── chat.ts       # InternalMessage、InternalChatRequest、InternalChatResponse、ThinkingConfig、ChatUsage 等
+├── config.ts     # ProviderConfig、VirtualModelBackend、VirtualModelConfig、ResolvedRoute
+├── context.ts    # GatewayContext、RoutedGatewayContext
 ├── embedding.ts  # InternalEmbeddingRequest、InternalEmbeddingResponse
+├── provider.ts   # HttpHeaders、ProviderCallResult、ProviderStreamResult、ProviderErrorDetail
 └── index.ts      # 统一 export type * 再导出
 ```
 
@@ -74,7 +76,7 @@ ThinkingConfig { type: 'enabled' | 'disabled' | 'auto'; budget_tokens?: number }
 
 ### 新增字段或类型
 
-1. 将新字段添加到对应的 `.ts` 文件（`context.ts`、`config.ts`、`provider.ts`、`chat.ts` 或 `embedding.ts`）
+1. 将新字段添加到对应的 `.ts` 文件（`api.ts`、`billing.ts`、`context.ts`、`config.ts`、`provider.ts`、`chat.ts` 或 `embedding.ts`）
 2. 如是新文件，在 `index.ts` 中添加 `export type *` 语句
 3. TypeScript 编译器会高亮所有需要更新的调用位置，按错误人工更新
 

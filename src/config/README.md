@@ -1,7 +1,5 @@
 # src/config — 动态配置管理
 
-# src/config — 动态配置管理
-
 > 项目总览：参见 [README.md](../README.md)
 > 
 > 相关模块：[`src/router/README.md`](../router/README.md)（使用方）、[`src/db/README.md`](../db/README.md)（数据源）
@@ -20,14 +18,14 @@ config/
 
 ## ConfigManager 主要方法
 
-| 方法                                 | 说明                                                                                     |
-| ------------------------------------ | ---------------------------------------------------------------------------------------- |
-| `loadAll()`                          | 从数据库全量加载配置到内存 Map（每次行为：完全替换缓存）                                 |
-| `resolveAllBackends(virtualModelId)` | 根据路由策略返回候选后端列表，供 router 填充 `ctx.route` 和 caller 重试逻辑使用           |
-| `getAllVirtualModels()`              | 返回所有已注册的虚拟模型名列表（`string[]`）                                             |
-| `getVirtualModelConfig(id)`          | 按 ID 返回虚拟模型配置（`VirtualModelConfig \| undefined`）                              |
-| `startListening()`                   | 启动专用 LISTEN 连接，监听 `config_channel` 频道                                         |
-| `stopListening()`                    | 关闭 LISTEN 连接（优雅关闭时调用）                                                       |
+| 方法                                               | 说明                                                                                     |
+| -------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `loadAll()`                                        | 从数据库全量加载配置到内存 Map（每次行为：完全替换缓存）                                 |
+| `resolveAllBackends(virtualModelId, requiredCapabilities?)` | 根据路由策略 + 实时流控状态返回候选后端列表，供 router 填充 `ctx.route` 和 caller 重试逻辑使用 |
+| `getAllVirtualModels()`                            | 返回所有已注册的虚拟模型名列表（`string[]`）                                             |
+| `getVirtualModelConfig(id)`                        | 按 ID 返回虚拟模型配置（`VirtualModelConfig \| undefined`）                              |
+| `startListening()`                                 | 启动专用 LISTEN 连接，监听 `config_channel` 频道                                         |
+| `stopListening()`                                  | 关闭 LISTEN 连接（优雅关闭时调用）                                                       |
 
 ## 路由策略
 
@@ -35,6 +33,15 @@ config/
 | -------------- | ---------------------------------------------------------------- |
 | `load_balance` | 按 `weight` 字段加权随机选择单个后端；失败即返回错误，**不重试** |
 | `failover`     | 按 `priority` 升序取第一个激活的后端；失败即返回错误，**不重试** |
+
+## 流控感知路由
+
+`resolveAllBackends` 方法在选择后端前会进行两层过滤：
+
+1. **按能力过滤**：后端必须拥有 `requiredCapabilities` 中列出的所有能力才被保留
+2. **按流控过滤**：剔除 RPM 或 TPM 任一已达上限的后端（通过 `rateLimiter` 实时检测）
+
+当所有后端均因流控满载不可用时，会记录警告日志供诊断。
 
 ## 使用方式
 
@@ -45,9 +52,13 @@ import { configManager } from '../config';
 await configManager.loadAll();
 await configManager.startListening();
 
-// 路由查询（返回排序后的全部候选后端列表）
+// 路由查询（返回按路由策略排序的候选后端列表，长度可能为 0）
 const candidates = configManager.resolveAllBackends('deepseek-chat');
-// candidates: ResolvedBackend[]（按路由策略排序，长度可能为 0）
+// candidates: ResolvedRoute[]（按路由策略排序，长度可能为 0）
+
+// 可选：按请求所需能力过滤后端
+const candidatesWithCaps = configManager.resolveAllBackends('deepseek-chat', ['vision', 'tools']);
+// 只会返回同时具备 vision 和 tools 能力的后端
 
 // 优雅关闭
 await configManager.stopListening();

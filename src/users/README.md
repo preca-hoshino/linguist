@@ -14,23 +14,47 @@
 users/
 ├── index.ts                        # 注册中心：getUserChatAdapter / getUserEmbeddingAdapter
 ├── types.ts                        # 用户适配层基础接口定义
+├── error-handler.ts                # 通用错误处理函数
 ├── openaicompat/                   # OpenAI 兼容格式（格式标识：openaicompat）
 │   ├── index.ts
 │   ├── error-formatting.ts         # OpenAI 格式错误响应
 │   ├── chat/                       # OpenAI Chat 适配器
 │   │   ├── index.ts
 │   │   ├── request/                # 请求转换逻辑
+│   │   │   └── index.ts
 │   │   └── response/               # 响应转换逻辑
+│   │       └── index.ts
 │   └── embedding/                  # OpenAI Embedding 适配器
+│       ├── index.ts
+│       ├── request/                # 嵌入请求转换
+│       │   ├── index.ts
+│       │   └── types.ts
+│       └── response/               # 嵌入响应转换
+│           └── index.ts
 ├── gemini/                         # Gemini 原生格式（格式标识：gemini）
 │   ├── index.ts
 │   ├── error-formatting.ts         # Gemini 格式错误响应
 │   ├── chat/                       # Gemini Chat 适配器
+│   │   ├── index.ts
+│   │   ├── request/                # 请求转换逻辑
+│   │   │   └── index.ts
+│   │   └── response/               # 响应转换逻辑
+│   │       └── index.ts
 │   └── embedding/                  # Gemini Embedding 适配器
+│       ├── index.ts
+│       ├── request/                # 嵌入请求转换
+│       │   └── index.ts
+│       └── response/               # 嵌入响应转换
+│           └── index.ts
 └── anthropic/                      # Anthropic 原生格式（格式标识：anthropic）
     ├── index.ts
     ├── error-formatting.ts         # Anthropic 格式错误响应
     └── chat/                       # Anthropic Chat 适配器
+        ├── index.ts
+        ├── request/                # 请求转换逻辑
+        │   └── index.ts
+        └── response/               # 响应转换逻辑
+            └── index.ts
 ```
 
 > **嵌入接口限制**：嵌入 API 每次请求仅处理**单条输入**，不支持批量（数组）输入。OpenAI 格式的 `input` 字段必须为 `string`（传入数组将返回 400 `batch_not_supported`）。
