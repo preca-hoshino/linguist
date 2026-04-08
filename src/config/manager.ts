@@ -201,6 +201,12 @@ export class ConfigManager {
           tokenEndpoint: str(credential.tokenEndpoint),
         };
       }
+      case 'copilot': {
+        return {
+          type: 'copilot',
+          accessToken: str(credential.accessToken),
+        };
+      }
       default: {
         return { type: 'none' };
       }
