@@ -1,27 +1,76 @@
 # src/api — 用户 API 格式路由
 
-# src/api — 用户 API 格式路由
-
 > 项目总览：参见 [README.md](../README.md)
-> 
+>
 > 相关模块：[`src/app/README.md`](../app/README.md)（核心流程）、[`src/users/README.md`](../users/README.md)（用户适配器）
 
 ## 简介
 
-负责将各种用户 API 格式（OpenAI 格式、Gemini 原生格式等）的 HTTP 端点注册到 Express，提取请求中的 `model` 字段和 API Key，然后将处理委托给 `src/app/` 中格式无关的核心流程（`processChatCompletion` / `processEmbedding`）。每种格式是独立的子目录，互不干扰。
+负责将各种用户 API 格式（OpenAI 兼容格式、Anthropic 格式、Gemini 原生格式等）的 HTTP 端点注册到 Express，提取请求中的 `model` 字段和 API Key，然后将处理委托给 `src/app/` 中格式无关的核心流程（`processChatCompletion` / `processEmbedding`）。每种格式是独立的子目录，互不干扰。
 
 ## 目录结构
 
 ```
 api/
-├── index.ts          # 聚合所有格式路由，注册 API Key 提取器，导出 apiRouter
+├── index.ts              # 聚合所有格式路由，注册 API Key 提取器，导出 apiRouter
+├── auth-helper.ts        # 共享 API Key 验证逻辑（供非核心流程端点使用，如 /v1/models）
 ├── openaicompat/
-│   ├── index.ts      # GET /v1/models、POST /v1/chat/completions、POST /v1/embeddings；从 Authorization: Bearer 提取 API Key
-│   └── auth-helper.ts # 共享 API Key 验证逻辑（供非核心流程端点使用，如 /v1/models）
+│   └── index.ts          # OpenAI 兼容格式端点
 ├── anthropic/
-│   └── index.ts      # POST /v1/messages；从 x-api-key 提取 API Key
+│   └── index.ts          # Anthropic Messages API 端点
 └── gemini/
-    └── index.ts      # POST /v1beta/models/:model:generateContent、:streamGenerateContent、:embedContent；从 x-goog-api-key 或 ?key= 提取 API Key
+    └── index.ts          # Gemini 原生格式端点
+```
+
+## 已支持的 API 格式
+
+### OpenAI 兼容格式 (`openaicompat`)
+
+| 端点                   | 方法 | model 来源   | API Key 来源                  |
+| ---------------------- | ---- | ------------ | ----------------------------- |
+| `/v1/models`           | GET  | —            | `Authorization: Bearer <key>` |
+| `/v1/chat/completions` | POST | `body.model` | `Authorization: Bearer <key>` |
+| `/v1/embeddings`       | POST | `body.model` | `Authorization: Bearer <key>` |
+
+### Anthropic 格式 (`anthropic`)
+
+| 端点           | 方法 | model 来源   | API Key 来源       |
+| -------------- | ---- | ------------ | ------------------ |
+| `/v1/models`   | GET  | —            | `x-api-key` header |
+| `/v1/messages` | POST | `body.model` | `x-api-key` header |
+
+### Gemini 原生格式 (`gemini`)
+
+| 端点                                          | 方法 | model 来源        | API Key 来源                                |
+| --------------------------------------------- | ---- | ----------------- | ------------------------------------------- |
+| `/v1beta/models`                              | GET  | —                 | `x-goog-api-key` header 或 `?key=` 查询参数 |
+| `/v1beta/models/:model:generateContent`       | POST | URL 路径 `:model` | `x-goog-api-key` header 或 `?key=` 查询参数 |
+| `/v1beta/models/:model:streamGenerateContent` | POST | URL 路径 `:model` | `x-goog-api-key` header 或 `?key=` 查询参数 |
+| `/v1beta/models/:model:embedContent`          | POST | URL 路径 `:model` | `x-goog-api-key` header 或 `?key=` 查询参数 |
+
+## 核心组件
+
+### API Key 提取器注册中心
+
+`api/index.ts` 维护了一个 `apiKeyExtractors` 字典，按用户格式存储对应的 API Key 提取函数：
+
+```typescript
+// 注册提取器
+registerApiKeyExtractor('openaicompat', openaiCompatExtractApiKey);
+registerApiKeyExtractor('gemini', geminiExtractApiKey);
+registerApiKeyExtractor('anthropic', claudeExtractApiKey);
+
+// 获取提取器（找不到时抛出错误）
+const extractor = getApiKeyExtractor(format);
+```
+
+### 路由聚合
+
+```typescript
+const apiRouter: Router = Router();
+apiRouter.use(openaiCompatRouter);
+apiRouter.use(geminiRouter);
+apiRouter.use(anthropicRouter);
 ```
 
 ## 新增 / 重构 / 删除向导
