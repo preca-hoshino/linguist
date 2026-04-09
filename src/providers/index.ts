@@ -3,6 +3,7 @@
 import type { ProviderConfig } from '@/types';
 import { createLogger, GatewayError, logColors } from '@/utils';
 // 后续将在下一步重组的各厂商插件
+import { copilotPlugin } from './copilot';
 import { deepseekPlugin } from './deepseek';
 import { geminiPlugin } from './gemini';
 import type { ProviderChatAdapterSet, ProviderEmbeddingAdapterSet, ProviderPlugin } from './types';
@@ -28,6 +29,7 @@ export function registerPlugin(plugin: ProviderPlugin): void {
 registerPlugin(deepseekPlugin);
 registerPlugin(geminiPlugin);
 registerPlugin(volcenginePlugin);
+registerPlugin(copilotPlugin);
 
 /**
  * 获取注册的插件对象

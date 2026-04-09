@@ -3,6 +3,7 @@
 import { Router } from 'express';
 import { apiKeysRouter } from './api-keys';
 import { adminAuth } from './auth';
+import { copilotOAuthRouter } from './copilot-oauth';
 import { loginRouter } from './login';
 import { meRouter } from './me';
 import { providerModelsRouter } from './provider-models';
@@ -30,5 +31,6 @@ adminRouter.use('/api-keys', apiKeysRouter);
 adminRouter.use('/stats', statsRouter);
 adminRouter.use('/users', usersRouter);
 adminRouter.use('/me', meRouter);
+adminRouter.use('/oauth/copilot', copilotOAuthRouter);
 
 export { adminRouter };
