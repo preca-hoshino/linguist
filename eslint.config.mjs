@@ -178,7 +178,7 @@ export default defineConfig([
   },
 
   {
-    ignores: ['dist/', 'node_modules/', 'coverage/', 'ui/', 'shadcn-admin/', 'ui-compat/'],
+    ignores: ['dist/', 'node_modules/', 'coverage/', 'ui/', 'shadcn-admin/', 'ui-compat/', 'copilot-api/'],
   },
   {
     files: ['src/**/*.test.ts'],
