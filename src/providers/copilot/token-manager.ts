@@ -1,7 +1,14 @@
 // src/providers/copilot/token-manager.ts — Copilot 短效 Token 获取与缓存管理
 
 import { createLogger, GatewayError, logColors } from '@/utils';
-import { COPILOT_EDITOR_HEADERS, COPILOT_TOKEN_URL, TOKEN_REFRESH_MARGIN_SECONDS } from './constants';
+import {
+  COPILOT_EDITOR_HEADERS,
+  COPILOT_MODELS_CACHE_TTL_MS,
+  COPILOT_TOKEN_URL,
+  TOKEN_REFRESH_MARGIN_SECONDS,
+} from './constants';
+import { resolveEndpointType } from './chat/fallback/endpoint-resolver';
+import type { CopilotEndpointType } from './chat/fallback/types';
 
 const logger = createLogger('Provider:Copilot:Token', logColors.bold + logColors.cyan);
 
@@ -27,6 +34,24 @@ interface CopilotTokenResponse {
   };
 }
 
+/** Copilot GET /models 单条模型信息（仅提取关注字段） */
+interface CopilotModelInfo {
+  id: string;
+  supported_endpoints?: string[];
+}
+
+/** Copilot GET /models 响应结构 */
+interface CopilotModelsResponse {
+  data: CopilotModelInfo[];
+}
+
+/** 模型列表缓存条目 */
+interface ModelsCacheEntry {
+  models: CopilotModelInfo[];
+  /** 缓存写入时间（Date.now() 毫秒） */
+  fetchedAt: number;
+}
+
 /**
  * Copilot Token 管理器
  *
@@ -35,12 +60,15 @@ interface CopilotTokenResponse {
  * - 按 providerId 隔离缓存，支持多个 Copilot 提供商实例并存
  * - 在 Token 过期前 TOKEN_REFRESH_MARGIN_SECONDS 秒自动刷新
  * - 防止同一 Provider 的并发刷新请求（使用 pending Map）
+ * - 缓存 GET /models 结果（TTL 1小时），用于端点类型自动探测
  */
 export class CopilotTokenManager {
   /** providerId → CopilotTokenInfo */
   private readonly cache = new Map<string, CopilotTokenInfo>();
   /** providerId → 正在进行的刷新 Promise（防止并发请求） */
   private readonly pending = new Map<string, Promise<CopilotTokenInfo>>();
+  /** providerId → 模型列表缓存（TTL 1小时） */
+  private readonly modelCache = new Map<string, ModelsCacheEntry>();
 
   /**
    * 获取有效的 Copilot Token（缓存命中时直接返回，否则自动刷新）
@@ -87,6 +115,41 @@ export class CopilotTokenManager {
   }
 
   /**
+   * 获取指定模型应使用的端点类型
+   *
+   * 流程：
+   * 1. 从缓存中查找模型列表（TTL 1小时）
+   * 2. 缓存未命中 → 使用已有 token 调用 GET /models → 缓存结果
+   * 3. 委托 endpoint-resolver 解析 supported_endpoints → CopilotEndpointType
+   * 4. 查询失败时静默回退 'chat-completions'（向后兼容）
+   *
+   * @param providerId - 提供商 ID（用于隔离模型缓存）
+   * @param accessToken - 已获取的短效 Copilot Token
+   * @param apiEndpoint - API 基地址（来自 resolveToken）
+   * @param modelId - 需要查询的模型 ID
+   */
+  public async getEndpointType(
+    providerId: string,
+    accessToken: string,
+    apiEndpoint: string,
+    modelId: string,
+  ): Promise<CopilotEndpointType> {
+    try {
+      const models = await this.getModels(providerId, accessToken, apiEndpoint);
+      const modelInfo = models.find((m) => m.id === modelId);
+      const endpointType = resolveEndpointType(modelInfo?.supported_endpoints);
+      logger.debug(
+        { providerId, modelId, endpointType, supported: modelInfo?.supported_endpoints },
+        'Resolved endpoint type',
+      );
+      return endpointType;
+    } catch (err: unknown) {
+      logger.warn({ providerId, modelId, err }, 'Failed to resolve endpoint type, falling back to chat-completions');
+      return 'chat-completions';
+    }
+  }
+
+  /**
    * 清除指定 Provider 的 Token 缓存（强制下次重新获取）
    */
   public invalidate(providerId: string): void {
@@ -128,6 +191,51 @@ export class CopilotTokenManager {
       expiresAt: data.expires_at,
       apiEndpoint: data.endpoints.api,
     };
+  }
+
+  /**
+   * 获取模型列表（带 TTL 缓存）
+   * 优先从缓存读取，缓存失效时发起 GET /models 请求
+   */
+  private async getModels(providerId: string, accessToken: string, apiEndpoint: string): Promise<CopilotModelInfo[]> {
+    const cached = this.modelCache.get(providerId);
+    const now = Date.now();
+
+    if (cached !== undefined && now - cached.fetchedAt < COPILOT_MODELS_CACHE_TTL_MS) {
+      logger.debug({ providerId }, 'Copilot models cache hit');
+      return cached.models;
+    }
+
+    logger.debug({ providerId }, 'Fetching Copilot models list');
+    const models = await this.fetchModels(accessToken, apiEndpoint);
+    this.modelCache.set(providerId, { models, fetchedAt: now });
+    logger.info({ providerId, count: models.length }, 'Copilot models list cached');
+    return models;
+  }
+
+  /**
+   * 调用 Copilot GET /models 获取模型列表
+   * 失败时抛出异常（由 getEndpointType 捕获并回退）
+   */
+  private async fetchModels(accessToken: string, apiEndpoint: string): Promise<CopilotModelInfo[]> {
+    const url = `${apiEndpoint}/models`;
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+        ...COPILOT_EDITOR_HEADERS,
+      },
+    });
+
+    if (!response.ok) {
+      const body = await response.text();
+      logger.warn({ status: response.status, body }, 'Copilot GET /models failed');
+      throw new GatewayError(502, 'provider_error', `Copilot GET /models returned HTTP ${String(response.status)}`);
+    }
+
+    const data = (await response.json()) as CopilotModelsResponse;
+    return Array.isArray(data.data) ? data.data : [];
   }
 }
 

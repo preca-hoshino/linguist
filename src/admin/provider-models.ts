@@ -27,6 +27,8 @@ interface ProviderModelBody {
   model_type?: string | undefined;
   capabilities?: string[] | undefined;
   parameters?: Record<string, unknown> | undefined;
+  /** 提供商模型级专属配置（如 Copilot 端点覆盖、特殊 Header 等，无深层校验） */
+  model_config?: Record<string, unknown> | undefined;
   max_tokens?: number | undefined;
   is_active?: boolean | undefined;
   pricing_tiers?: PricingTierInput[] | undefined;
@@ -167,7 +169,7 @@ router.get('/', async (req: Request, res: Response) => {
 
     const sql = `
       SELECT pm.id, pm.provider_id, pm.name, pm.model_type, pm.capabilities, pm.parameters,
-             pm.max_tokens, pm.is_active, pm.pricing_tiers, pm.rpm_limit, pm.tpm_limit,
+             pm.model_config, pm.max_tokens, pm.is_active, pm.pricing_tiers, pm.rpm_limit, pm.tpm_limit,
              pm.created_at, pm.updated_at,
              p.name AS provider_name, p.kind AS provider_kind,
              COUNT(*) OVER() AS full_count
@@ -208,7 +210,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 
     const result = await db.query(
       `SELECT pm.id, pm.provider_id, pm.name, pm.model_type, pm.capabilities, pm.parameters,
-              pm.max_tokens, pm.is_active, pm.pricing_tiers, pm.rpm_limit, pm.tpm_limit,
+              pm.model_config, pm.max_tokens, pm.is_active, pm.pricing_tiers, pm.rpm_limit, pm.tpm_limit,
               pm.created_at, pm.updated_at,
               p.name AS provider_name, p.kind AS provider_kind
        FROM provider_models pm
@@ -231,8 +233,18 @@ router.get('/:id', async (req: Request, res: Response) => {
 router.post('/', async (req: Request, res: Response) => {
   try {
     const body = req.body as ProviderModelBody;
-    const { provider_id, name, model_type, capabilities, parameters, max_tokens, pricing_tiers, rpm_limit, tpm_limit } =
-      body;
+    const {
+      provider_id,
+      name,
+      model_type,
+      capabilities,
+      parameters,
+      model_config,
+      max_tokens,
+      pricing_tiers,
+      rpm_limit,
+      tpm_limit,
+    } = body;
     logger.debug({ provider_id, name, model_type }, 'Creating provider model');
 
     if (
@@ -268,9 +280,9 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     const result = await db.query(
-      `INSERT INTO provider_models (id, provider_id, name, model_type, capabilities, parameters, max_tokens, pricing_tiers, rpm_limit, tpm_limit)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-       RETURNING id, provider_id, name, model_type, capabilities, parameters, max_tokens, pricing_tiers, rpm_limit, tpm_limit, is_active, created_at, updated_at`,
+      `INSERT INTO provider_models (id, provider_id, name, model_type, capabilities, parameters, model_config, max_tokens, pricing_tiers, rpm_limit, tpm_limit)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       RETURNING id, provider_id, name, model_type, capabilities, parameters, model_config, max_tokens, pricing_tiers, rpm_limit, tpm_limit, is_active, created_at, updated_at`,
       [
         await generateShortId('provider_models'),
         provider_id,
@@ -278,6 +290,7 @@ router.post('/', async (req: Request, res: Response) => {
         model_type,
         capabilities ?? [],
         JSON.stringify(parameters ?? {}),
+        JSON.stringify(model_config ?? {}),
         finalMaxTokens,
         JSON.stringify(pricing_tiers ?? []),
         rpm_limit ?? null,
@@ -298,8 +311,18 @@ router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const body = req.body as ProviderModelBody;
-    const { name, model_type, capabilities, parameters, max_tokens, is_active, pricing_tiers, rpm_limit, tpm_limit } =
-      body;
+    const {
+      name,
+      model_type,
+      capabilities,
+      parameters,
+      model_config,
+      max_tokens,
+      is_active,
+      pricing_tiers,
+      rpm_limit,
+      tpm_limit,
+    } = body;
     logger.debug({ id }, 'Updating provider model');
 
     if (model_type !== undefined && !['chat', 'embedding'].includes(model_type)) {
@@ -333,6 +356,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
       model_type,
       capabilities,
       parameters: parameters === undefined ? undefined : JSON.stringify(parameters),
+      model_config: model_config === undefined ? undefined : JSON.stringify(model_config),
       max_tokens,
       is_active,
       pricing_tiers: pricing_tiers === undefined ? undefined : JSON.stringify(pricing_tiers),
@@ -347,7 +371,8 @@ router.patch('/:id', async (req: Request, res: Response) => {
     update.values.push(id);
     const result = await db.query(
       `UPDATE provider_models SET ${update.setClause} WHERE id = $${String(update.nextIdx)}
-       RETURNING id, provider_id, name, model_type, capabilities, parameters, max_tokens, pricing_tiers, rpm_limit, tpm_limit, is_active, created_at, updated_at`,
+       RETURNING id, provider_id, name, model_type, capabilities, parameters, model_config, max_tokens, pricing_tiers, rpm_limit, tpm_limit, is_active, created_at, updated_at`,
+
       update.values,
     );
 

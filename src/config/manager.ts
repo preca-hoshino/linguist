@@ -90,6 +90,7 @@ export class ConfigManager {
       pm_capabilities: string[];
       pm_rpm_limit: number | null;
       pm_tpm_limit: number | null;
+      pm_model_config: Record<string, unknown> | null;
       weight: number;
       priority: number;
       provider_id: string;
@@ -114,6 +115,7 @@ export class ConfigManager {
         pm.capabilities    AS pm_capabilities,
         pm.rpm_limit       AS pm_rpm_limit,
         pm.tpm_limit       AS pm_tpm_limit,
+        pm.model_config    AS pm_model_config,
         vmb.weight,
         vmb.priority,
         p.id               AS provider_id,
@@ -170,6 +172,7 @@ export class ConfigManager {
         },
         rpmLimit: row.pm_rpm_limit ?? undefined,
         tpmLimit: row.pm_tpm_limit ?? undefined,
+        modelConfig: row.pm_model_config ?? {},
       });
     }
 
