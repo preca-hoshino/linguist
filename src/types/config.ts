@@ -118,6 +118,8 @@ export interface VirtualModelBackend {
   rpmLimit?: number | undefined;
   /** 每分钟 Token 数上限（undefined = 不限制） */
   tpmLimit?: number | undefined;
+  /** 提供商模型级专属配置（来自 provider_models.model_config，各提供商插件按需读取） */
+  modelConfig?: Record<string, unknown> | undefined;
 }
 
 /**
