@@ -27,7 +27,7 @@ param (
     [Parameter(Mandatory=$true)]
     [int]$Count,
     
-    [int]$Concurrency = 1,
+    [int]$Concurrency = 40,
 
     [switch]$DisableChatStream,
     [switch]$DisableChatHistory,
@@ -78,6 +78,11 @@ for ($i = 0; $i -lt $Concurrency; $i++) {
 
 $WorkerScript = {
     param($ArgsConfig)
+
+    # 突破 .NET 默认的并发连接数限制 (默认仅为 2) 
+    # 这是导致高并发压测时本地抛出 GetResponse 异常而服务端无感知的根本原因
+    [System.Net.ServicePointManager]::DefaultConnectionLimit = 10000
+    [System.Net.ServicePointManager]::Expect100Continue = $false
 
     $TaskOffset = $ArgsConfig.TaskOffset
     $SlotId     = $ArgsConfig.SlotId
@@ -169,6 +174,8 @@ $WorkerScript = {
                 $request.Method = "POST"
                 $request.Headers.Add("Authorization", "Bearer $($Config.ApiKey)")
                 $request.ContentType = "application/json; charset=utf-8"
+                $request.KeepAlive = $false
+                $request.Timeout = 120000
                 
                 $reqStream = $request.GetRequestStream()
                 $reqStream.Write($reqBytes, 0, $reqBytes.Length)
