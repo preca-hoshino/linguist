@@ -20,57 +20,65 @@ export type RateLimitScope = 'pm' | 'vm';
 function buildKey(scope: RateLimitScope, metric: 'rpm' | 'tpm', id: string): string {
   return `${scope}:${metric}:${id}`;
 }
-
 /**
- * 滑动窗口计数器 (60 秒)
- * - 划分为 60 个 1 秒的桶
- * - 通过 Float64Array 存储数据，满足大数值 TPM (最大 9 万亿 Token/秒，无需担忧溢出)
+ * 主流 O(1) 滑动窗口计数器（基于 Cloudflare / Redis 实践）
+ *
+ * 核心逻辑：
+ * 维持当前窗口（一分钟）和上一个窗口的计数。
+ * 当前总使用量 = 上个窗口计数 * (1 - 当前窗口已过时间比例) + 当前窗口计数
+ *
+ * 优势体现在：
+ * 1. 内存极低：每个限流 Key 仅需 3 个数字记录状态 (数十字节 vs. 数组方案的数百字节)。
+ * 2. 算力开销 O(1)：查询时不需遍历 60 个数组桶循环累加。
+ * 3. 抹平毛刺：假定流量在窗口期内均匀分布，能极其平滑地实现降级过渡。
  */
 class SlidingWindowCounter {
-  private readonly buckets = new Float64Array(60);
-  private lastSecond: number;
+  private prevCount = 0;
+  private currCount = 0;
+  private currWindowStart: number;
+  private readonly windowSizeMs = 60_000; // 60秒固定窗口大小
 
   public constructor() {
-    this.lastSecond = Math.floor(Date.now() / 1000);
+    this.currWindowStart = this.getCurrentWindowStart();
+  }
+
+  private getCurrentWindowStart(): number {
+    return Math.floor(Date.now() / this.windowSizeMs) * this.windowSizeMs;
+  }
+
+  private advance(): void {
+    const nowStart = this.getCurrentWindowStart();
+    if (nowStart > this.currWindowStart) {
+      // 刚好滑动到下一个相邻窗口，保留当前数据到 prev
+      // 若滑动跨越了多个窗口（证明长期间隔），则 prev 归零
+      if (nowStart - this.currWindowStart === this.windowSizeMs) {
+        this.prevCount = this.currCount;
+      } else {
+        this.prevCount = 0;
+      }
+      this.currCount = 0;
+      this.currWindowStart = nowStart;
+    }
   }
 
   public add(amount: number): number {
     this.advance();
-    const curr = Math.floor(Date.now() / 1000) % 60;
-    this.buckets[curr] = (this.buckets[curr] ?? 0) + amount;
-    return this.getSum();
+    this.currCount += amount;
+    return this.get();
   }
 
   public get(): number {
     this.advance();
-    return this.getSum();
-  }
-
-  private advance(): void {
-    const nowSec = Math.floor(Date.now() / 1000);
-    const diff = nowSec - this.lastSecond;
-    if (diff > 0) {
-      if (diff >= 60) {
-        this.buckets.fill(0);
-      } else {
-        for (let i = 1; i <= diff; i++) {
-          this.buckets[(this.lastSecond + i) % 60] = 0;
-        }
-      }
-      this.lastSecond = nowSec;
-    }
-  }
-
-  private getSum(): number {
-    let sum = 0;
-    for (let i = 0; i < 60; i++) {
-      sum += this.buckets[i] ?? 0;
-    }
-    return sum;
+    const now = Date.now();
+    const progress = (now - this.currWindowStart) / this.windowSizeMs;
+    // 权重：上个窗口在剩余滑动区间内所占的比例
+    const weight = Math.max(0, 1 - progress);
+    return Math.round(this.prevCount * weight + this.currCount);
   }
 
   public isStale(nowSec: number): boolean {
-    return nowSec - this.lastSecond >= 60;
+    // 若距当前窗口起点超过 2 分钟未更新，该对象则属于静默并可安全回收
+    return nowSec * 1000 - this.currWindowStart >= this.windowSizeMs * 2;
   }
 }
 
