@@ -3,7 +3,7 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { db, generateShortId, withTransaction } from '@/db';
-import { buildBatchInsert, buildUpdateSet, createLogger, GatewayError, logColors } from '@/utils';
+import { buildBatchInsert, buildUpdateSet, createLogger, GatewayError, logColors, rateLimiter } from '@/utils';
 import { handleAdminError } from './error';
 
 const logger = createLogger('Admin:VirtualModels', logColors.bold + logColors.blue);
@@ -98,6 +98,14 @@ function withObjectType<T extends Record<string, unknown>>(vm: T): T & { object:
   return { object: 'virtual_model', ...vm };
 }
 
+function withThroughput<T extends { id: string }>(vm: T): T & { throughput: { rpm: number; tpm: number } } {
+  const throughput = {
+    rpm: rateLimiter.getRpmUsage('vm', vm.id),
+    tpm: rateLimiter.getTpmUsage('vm', vm.id),
+  };
+  return { ...vm, throughput };
+}
+
 // ==================== 列出所有虚拟模型 ====================
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -179,10 +187,12 @@ router.get('/', async (req: Request, res: Response) => {
     }
 
     const finalData = data.map((vm) =>
-      withObjectType({
-        ...vm,
-        backends: backendsByVm.get(vm.id) ?? [],
-      }),
+      withThroughput(
+        withObjectType({
+          ...vm,
+          backends: backendsByVm.get(vm.id) ?? [],
+        }),
+      ),
     );
 
     const hasMore = offsetNum + data.length < total;
@@ -203,7 +213,7 @@ router.get('/:id', async (req: Request, res: Response) => {
     if (!vm) {
       throw new GatewayError(404, 'not_found', `Virtual model ${id} not found`);
     }
-    res.json(withObjectType(vm));
+    res.json(withThroughput(withObjectType(vm)));
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -277,7 +287,7 @@ router.post('/', async (req: Request, res: Response) => {
 
     const result = await loadVirtualModelWithBackends(id);
     logger.info({ id, name, strategy, backendsCount: backends.length }, 'Virtual model created');
-    res.status(201).json(result ? withObjectType(result) : null);
+    res.status(201).json(result ? withThroughput(withObjectType(result)) : null);
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -382,7 +392,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
       { id, fieldsUpdated: update?.values.length ?? 0, backendsReplaced: backends !== undefined },
       'Virtual model updated',
     );
-    res.json(result ? withObjectType(result) : null);
+    res.json(result ? withThroughput(withObjectType(result)) : null);
   } catch (error) {
     handleAdminError(error, res);
   }
