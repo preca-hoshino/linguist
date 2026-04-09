@@ -31,3 +31,6 @@ export const COPILOT_CHAT_HEADERS: Readonly<Record<string, string>> = {
 
 /** Token 提前刷新余量（秒），在过期前 5 分钟触发刷新 */
 export const TOKEN_REFRESH_MARGIN_SECONDS = 300;
+
+/** Copilot 模型列表缓存 TTL（毫秒），1 小时 */
+export const COPILOT_MODELS_CACHE_TTL_MS = 3_600_000;
