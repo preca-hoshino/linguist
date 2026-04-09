@@ -95,6 +95,16 @@ $WorkerScript = {
         $State[$SlotId] = "[Task $($TaskOffset.ToString('000'))] $text"
     }
 
+    function Format-Time([double]$ms) {
+        if ($ms -lt 1000) { return "$([math]::Round($ms))ms" }
+        $s = $ms / 1000
+        if ($s -lt 60) { return "$([math]::Round($s, 2))s" }
+        $m = $s / 60
+        if ($m -lt 60) { return "$([math]::Round($m, 2))m" }
+        $h = $m / 60
+        return "$([math]::Round($h, 2))h"
+    }
+
     function Get-RandomArrayItem($Arr) {
         if ($Arr -eq $null -or $Arr.Count -eq 0) { return $null }
         $idx = Get-Random -Minimum 0 -Maximum $Arr.Count
@@ -186,6 +196,8 @@ $WorkerScript = {
 
                 $replyAccumulator = ""
                 $ttft = 0
+                $promptTokens = 0
+                $completionTokens = 0
 
                 while (($line = $reader.ReadLine()) -ne $null) {
                     if ($line.StartsWith("data: ")) {
@@ -195,6 +207,11 @@ $WorkerScript = {
                             $json = $dataStr | ConvertFrom-Json
                             $token = $json.choices[0].delta.content
                             $thinkToken = $json.choices[0].delta.reasoning_content
+
+                            if ($null -ne $json.usage) {
+                                if ($null -ne $json.usage.prompt_tokens) { $promptTokens = $json.usage.prompt_tokens }
+                                if ($null -ne $json.usage.completion_tokens) { $completionTokens = $json.usage.completion_tokens }
+                            }
 
                             if ($ttft -eq 0 -and (-not [string]::IsNullOrEmpty($token) -or -not [string]::IsNullOrEmpty($thinkToken))) {
                                 $ttft = ((Get-Date) - $chatStart).TotalMilliseconds
@@ -207,7 +224,7 @@ $WorkerScript = {
                             # 同步热更新耗时状态
                             $currTime = ((Get-Date) - $chatStart).TotalMilliseconds
                             if ($ttft -ne 0) {
-                                Set-State "🔵 正在回复 (距首字 $([math]::Round($currTime - $ttft))ms)..."
+                                Set-State "🔵 正在回复 (距首字 $(Format-Time ($currTime - $ttft)))..."
                             }
                         } catch {}
                     }
@@ -219,12 +236,19 @@ $WorkerScript = {
                 }
                 $totalTime = ((Get-Date) - $chatStart).TotalMilliseconds
                 $Stats.AddOrUpdate("Success", 1, { param($k, $v) $v + 1 }) | Out-Null
-                Set-State "🟢 已完成 (TTFT: $([math]::Round($ttft))ms / 总: $([math]::Round($totalTime))ms)"
+                Set-State "🟢 已完成 (TTFT: $(Format-Time $ttft) / 总: $(Format-Time $totalTime) | ↑$promptTokens ↓$completionTokens)"
 
             } else {
                 # [阻塞式处理引擎]
                 $Headers = @{ "Authorization" = "Bearer $($Config.ApiKey)" }
                 $resp = Invoke-RestMethod -Uri "$($Config.BaseUrl)/chat/completions" -Method Post -Headers $Headers -ContentType "application/json; charset=utf-8" -Body $reqBytes -ErrorAction Stop
+                
+                $promptTokens = 0; $completionTokens = 0
+                if ($null -ne $resp.usage) {
+                    if ($null -ne $resp.usage.prompt_tokens) { $promptTokens = $resp.usage.prompt_tokens }
+                    if ($null -ne $resp.usage.completion_tokens) { $completionTokens = $resp.usage.completion_tokens }
+                }
+
                 $replyAccumulator = $resp.choices[0].message.content
                 if (-not [string]::IsNullOrEmpty($replyAccumulator)) {
                     $History.Add([PSCustomObject]@{ User = $chatPrompt; Assistant = $replyAccumulator })
@@ -232,7 +256,7 @@ $WorkerScript = {
                 
                 $totalTime = ((Get-Date) - $chatStart).TotalMilliseconds
                 $Stats.AddOrUpdate("Success", 1, { param($k, $v) $v + 1 }) | Out-Null
-                Set-State "🟢 已完成 (总: $([math]::Round($totalTime))ms)"
+                Set-State "🟢 已完成 (总: $(Format-Time $totalTime) | ↑$promptTokens ↓$completionTokens)"
             }
         }
 
@@ -246,9 +270,15 @@ $WorkerScript = {
             $Headers = @{ "Authorization" = "Bearer $($Config.ApiKey)" }
             $resp = Invoke-RestMethod -Uri "$($Config.BaseUrl)/embeddings" -Method Post -Headers $Headers -ContentType "application/json; charset=utf-8" -Body $em_reqBytes -ErrorAction Stop
             
+            $promptTokens = 0; $completionTokens = 0
+            if ($null -ne $resp.usage) {
+                if ($null -ne $resp.usage.prompt_tokens) { $promptTokens = $resp.usage.prompt_tokens }
+                if ($null -ne $resp.usage.completion_tokens) { $completionTokens = $resp.usage.completion_tokens }
+            }
+
             $Stats.AddOrUpdate("Success", 1, { param($k, $v) $v + 1 }) | Out-Null
             $totalTime = ((Get-Date) - $emStart).TotalMilliseconds
-            Set-State "🟢 Embed 完成 (耗时: $([math]::Round($totalTime))ms)"
+            Set-State "🟢 Embed 完成 (耗时: $(Format-Time $totalTime) | ↑$promptTokens ↓$completionTokens)"
         }
 
         # 如果队列仍有后续，并且请求了强制阻塞间歇延迟
@@ -297,6 +327,39 @@ $ConfigObj = @{
 }
 
 Clear-Host
+Write-Host "================ 连通性支持预检 ================" -ForegroundColor Cyan
+
+$SharedHeaders = @{ "Authorization" = "Bearer $($ApiKey)" }
+
+# 1. /models 检查
+try {
+    $resp = Invoke-RestMethod -Uri "$($BaseUrl)/models" -Method Get -Headers $SharedHeaders -TimeoutSec 5 -ErrorAction Stop
+    $count = if ($resp.data) { $resp.data.Count } else { 0 }
+    Write-Host "  /models 接口`t`t ✅ 正常 ($count models)" -ForegroundColor Green
+} catch {
+    Write-Host "  /models 接口`t`t ❌ 异常 ($($_.Exception.Message))" -ForegroundColor Red
+}
+
+# 2. /chat/completions 检查
+try {
+    $body = @{ model = $ModelName; messages = @(@{ role = "user"; content = "Hi" }); max_tokens = 1 }
+    $req = $body | ConvertTo-Json -Depth 5 -Compress
+    $resp = Invoke-RestMethod -Uri "$($BaseUrl)/chat/completions" -Method Post -Headers $SharedHeaders -ContentType "application/json" -Body $req -TimeoutSec 15 -ErrorAction Stop
+    Write-Host "  /chat/completions 接口`t ✅ 正常" -ForegroundColor Green
+} catch {
+    Write-Host "  /chat/completions 接口`t ❌ 异常 ($($_.Exception.Message))" -ForegroundColor Red
+}
+
+# 3. /embeddings 检查
+try {
+    $body = @{ model = $ModelName; input = "Hi" }
+    $req = $body | ConvertTo-Json -Depth 5 -Compress
+    $resp = Invoke-RestMethod -Uri "$($BaseUrl)/embeddings" -Method Post -Headers $SharedHeaders -ContentType "application/json" -Body $req -TimeoutSec 15 -ErrorAction Stop
+    Write-Host "  /embeddings 接口`t`t ✅ 正常" -ForegroundColor Green
+} catch {
+    Write-Host "  /embeddings 接口`t`t ❌ 异常 ($($_.Exception.Message))" -ForegroundColor Red
+}
+
 Write-Host "================ 测试概览 (并发支持) ================" -ForegroundColor Cyan
 Write-Host "网关地址: `t $BaseUrl"
 Write-Host "服务目标: `t $Provider"
