@@ -1,9 +1,9 @@
 <#
 .SYNOPSIS
-  测试模型网关能力的 PowerShell 性能/压测脚本
+  测试模型网关能力的 PowerShell 性能/压测脚本 (高并发终端定制版)
 .DESCRIPTION
-  此脚本用于批量向网关发送对话聊天 (Chat) 和文本嵌入 (Embeddings) 请求。
-  已剥离内部硬编码设定，全部依赖参数输入。
+  此脚本引入了底层的 RunspacePool 实现多线程请求模型。
+  支持了类似 Docker Pull 的多行原位进度条刷新 UI 效果。
 #>
 
 param (
@@ -26,6 +26,8 @@ param (
 
     [Parameter(Mandatory=$true)]
     [int]$Count,
+    
+    [int]$Concurrency = 40,
 
     [switch]$DisableChatStream,
     [switch]$DisableChatHistory,
@@ -38,8 +40,6 @@ param (
 $ChatStream = -not $DisableChatStream
 $EnableChatHistory = -not $DisableChatHistory
 $MaxHistoryTurns = 5
-
-$GlobalHistory = [System.Collections.Generic.List[PSCustomObject]]::new()
 
 $PromptsFile = Join-Path $PSScriptRoot "prompts.json"
 if (-not (Test-Path $PromptsFile)) {
@@ -55,351 +55,544 @@ if (-not (Test-Path $PromptsFile)) {
 }
 
 $PromptsData = Get-Content -Raw -Encoding UTF8 $PromptsFile | ConvertFrom-Json
-$SystemPrompts = $PromptsData.SystemPrompts
-$ChatPrompts = $PromptsData.ChatPrompts
-
-$script:successCount = 0
-$script:failCount = 0
-$script:totalReqs = 0
 
 # =========================================================================
-# 核心通信模块
+# 共享状态与数据大盘 (并发线程安全)
 # =========================================================================
 
-function Invoke-GatewayChat {
-    param (
-        [System.Collections.Hashtable]$Body,
-        [string]$sysPrompt,
-        [string]$userPrompt,
-        [int]$historyTurnsAdded
-    )
+$SharedHistory = [System.Collections.Concurrent.ConcurrentBag[PSCustomObject]]::new()
+$SharedState = [System.Collections.Concurrent.ConcurrentDictionary[int, string]]::new()
+$SharedStats = [System.Collections.Concurrent.ConcurrentDictionary[string, int]]::new()
 
-    $reqBytes = [System.Text.Encoding]::UTF8.GetBytes(($Body | ConvertTo-Json -Depth 5 -Compress))
-    $chatStart = Get-Date
-    $ttft = 0; $reply = ""; $errMsg = $null; $success = $false
+$SharedStats["Success"] = 0
+$SharedStats["Fail"] = 0
+$SharedStats["TotalDone"] = 0
 
-    Write-Host "----------------------------------" -ForegroundColor DarkGray
-    if ($historyTurnsAdded -gt 0) { Write-Host "[!] 已带入历史上下文：$historyTurnsAdded 轮" -ForegroundColor Cyan }
-    Write-Host "[System] $sysPrompt" -ForegroundColor DarkCyan
-    Write-Host "[User] $userPrompt`n" -ForegroundColor Magenta
+for ($i = 0; $i -lt $Concurrency; $i++) {
+    $SharedState[$i] = "🟢 空闲"
+}
+
+# =========================================================================
+# 多线程 Worker 引擎 (在隔离的 Runspace 中无限复用)
+# =========================================================================
+
+$WorkerScript = {
+    param($ArgsConfig)
+
+    # 突破 .NET 默认的并发连接数限制 (默认仅为 2) 
+    # 这是导致高并发压测时本地抛出 GetResponse 异常而服务端无感知的根本原因
+    [System.Net.ServicePointManager]::DefaultConnectionLimit = 10000
+    [System.Net.ServicePointManager]::Expect100Continue = $false
+
+    $TaskOffset = $ArgsConfig.TaskOffset
+    $SlotId     = $ArgsConfig.SlotId
+    $Config     = $ArgsConfig.Config
+    $State      = $ArgsConfig.State
+    $Stats      = $ArgsConfig.Stats
+    $History    = $ArgsConfig.History
+
+    function Set-State([string]$text) {
+        $State[$SlotId] = "[Task $($TaskOffset.ToString('000'))] $text"
+    }
+
+    function Format-Time([double]$ms) {
+        if ($ms -lt 1000) { return "$([math]::Round($ms))ms" }
+        $s = $ms / 1000
+        if ($s -lt 60) { return "$([math]::Round($s, 2))s" }
+        $m = $s / 60
+        if ($m -lt 60) { return "$([math]::Round($m, 2))m" }
+        $h = $m / 60
+        return "$([math]::Round($h, 2))h"
+    }
+
+    function Get-RandomArrayItem($Arr) {
+        if ($Arr -eq $null -or $Arr.Count -eq 0) { return $null }
+        $idx = Get-Random -Minimum 0 -Maximum $Arr.Count
+        return $Arr[$idx]
+    }
 
     try {
-        if ($Body.stream -eq $true) {
-            $request = [System.Net.HttpWebRequest]::Create("$BaseUrl/chat/completions")
-            $request.Method = "POST"
-            $request.Headers.Add("Authorization", "Bearer $ApiKey")
-            $request.ContentType = "application/json; charset=utf-8"
-            $reqStream = $request.GetRequestStream()
-            $reqStream.Write($reqBytes, 0, $reqBytes.Length)
-            $reqStream.Close()
+        $sysPrompt = Get-RandomArrayItem $Config.SystemPrompts
+        $chatPrompt = Get-RandomArrayItem $Config.ChatPrompts
 
-            $response = $request.GetResponse()
-            $reader = New-Object System.IO.StreamReader($response.GetResponseStream(), [System.Text.Encoding]::UTF8)
+        $enableChat = ($Config.ModelType -eq "chat" -or $Config.ModelType -eq "both")
+        $enableEmbed = ($Config.ModelType -eq "embedding" -or $Config.ModelType -eq "both")
 
-            $thinkingBuf = ""; $replyBuf = ""; $inThinking = $false; $thinkPrinted = $false
+        if ($Config.Provider -in @("claude", "anthropic")) {
+            $chatUrl = "$($Config.BaseUrl)/v1/messages"
+            $authHeaders = @{ "x-api-key" = $Config.ApiKey; "anthropic-version" = "2023-06-01" }
+            $enableEmbed = $false
+        } elseif ($Config.Provider -eq "gemini") {
+            $streamStr = if ($Config.ChatStream) { "streamGenerateContent?alt=sse" } else { "generateContent" }
+            $chatUrl = "$($Config.BaseUrl)/v1beta/models/$($Config.ModelName):$streamStr"
+            $emUrl = "$($Config.BaseUrl)/v1beta/models/$($Config.ModelName):embedContent"
+            $authHeaders = @{ "x-goog-api-key" = $Config.ApiKey }
+        } else {
+            $chatUrl = "$($Config.BaseUrl)/chat/completions"
+            $emUrl = "$($Config.BaseUrl)/embeddings"
+            $authHeaders = @{ "Authorization" = "Bearer $($Config.ApiKey)" }
+        }
 
-            while (($line = $reader.ReadLine()) -ne $null) {
-                if ($line.StartsWith("data: ")) {
-                    $dataStr = $line.Substring(6)
-                    if ($dataStr -eq "[DONE]") { break }
-                    try {
-                        $json = $dataStr | ConvertFrom-Json
-                        $token = $json.choices[0].delta.content
-                        $thinkToken = $json.choices[0].delta.reasoning_content
-
-                        if ($ttft -eq 0 -and (-not [string]::IsNullOrEmpty($token) -or -not [string]::IsNullOrEmpty($thinkToken))) {
-                            $ttft = ((Get-Date) - $chatStart).TotalMilliseconds
+        # ======== 执行 CHAT ========
+        if ($enableChat) {
+            $body = @{}
+            
+            # 组装对应厂商的原生 Payload
+            if ($Config.Provider -in @("claude", "anthropic")) {
+                $body["model"] = $Config.ModelName
+                $body["stream"] = $Config.ChatStream
+                $body["max_tokens"] = 4096
+                $body["system"] = $sysPrompt
+                $claudeMsgs = @()
+                if ($Config.EnableChatHistory) {
+                    $snap = $History.ToArray()
+                    if ($snap.Count -gt 0) {
+                        $maxLimit = [Math]::Min($Config.MaxHistoryTurns, $snap.Count)
+                        $historyCount = Get-Random -Minimum 1 -Maximum ($maxLimit + 1)
+                        $picked = $snap | Select-Object -First $historyCount
+                        foreach ($h in $picked) {
+                            $claudeMsgs += @{ role = "user"; content = $h.User }
+                            $claudeMsgs += @{ role = "assistant"; content = $h.Assistant }
                         }
-
-                        if (-not [string]::IsNullOrEmpty($thinkToken)) {
-                            if (-not $inThinking) { Write-Host "[Thinking]" -ForegroundColor DarkYellow; $inThinking = $true }
-                            Write-Host $thinkToken -NoNewline -ForegroundColor DarkGray
-                            $thinkingBuf += $thinkToken
+                    }
+                }
+                $claudeMsgs += @{ role = "user"; content = $chatPrompt }
+                $body["messages"] = $claudeMsgs
+                
+                $doThink = $false
+                if ($Config.RandomizeThink) { $doThink = ((Get-Random -Minimum 0 -Maximum 2) -eq 1) }
+                else { $doThink = ($Config.ThinkingMode -eq "auto" -or $Config.ThinkingMode -eq "enabled") }
+                if ($doThink) { $body["thinking"] = @{ type = "enabled"; budget_tokens = 2048 } }
+                
+            } elseif ($Config.Provider -eq "gemini") {
+                $geminiContents = @()
+                if ($Config.EnableChatHistory) {
+                    $snap = $History.ToArray()
+                    if ($snap.Count -gt 0) {
+                        $maxLimit = [Math]::Min($Config.MaxHistoryTurns, $snap.Count)
+                        $historyCount = Get-Random -Minimum 1 -Maximum ($maxLimit + 1)
+                        $picked = $snap | Select-Object -First $historyCount
+                        foreach ($h in $picked) {
+                            $geminiContents += @{ role = "user"; parts = @(@{ text = $h.User }) }
+                            $geminiContents += @{ role = "model"; parts = @(@{ text = $h.Assistant }) }
                         }
-
-                        if (-not [string]::IsNullOrEmpty($token)) {
-                            if ($inThinking -and -not $thinkPrinted) { Write-Host "`n[Reply]" -ForegroundColor Green; $thinkPrinted = $true }
-                            elseif (-not $inThinking -and -not $thinkPrinted) { Write-Host "[Reply]" -ForegroundColor Green; $thinkPrinted = $true }
-                            Write-Host $token -NoNewline -ForegroundColor White
-                            $replyBuf += $token
+                    }
+                }
+                $geminiContents += @{ role = "user"; parts = @(@{ text = $chatPrompt }) }
+                $body["contents"] = $geminiContents
+                $body["systemInstruction"] = @{ parts = @(@{ text = $sysPrompt }) }
+            } else {
+                # OpenAI 原生
+                $body["model"] = $Config.ModelName
+                $body["stream"] = $Config.ChatStream
+                $messages = @()
+                $messages += @{ role = "system"; content = $sysPrompt }
+                if ($Config.EnableChatHistory) {
+                    $snap = $History.ToArray()
+                    if ($snap.Count -gt 0) {
+                        $maxLimit = [Math]::Min($Config.MaxHistoryTurns, $snap.Count)
+                        $historyCount = Get-Random -Minimum 1 -Maximum ($maxLimit + 1)
+                        $picked = $snap | Select-Object -First $historyCount
+                        foreach ($h in $picked) {
+                            $messages += @{ role = "user"; content = $h.User }
+                            $messages += @{ role = "assistant"; content = $h.Assistant }
                         }
-                    } catch {}
+                    }
+                }
+                $messages += @{ role = "user"; content = $chatPrompt }
+                $body["messages"] = $messages
+                
+                if ($Config.RandomizeThink) {
+                    $efforts = @($null, "minimal", "low", "medium", "high")
+                    $eff = Get-RandomArrayItem $efforts
+                    if ($null -ne $eff) { $body["reasoning_effort"] = $eff }
+                } elseif ($Config.ThinkingMode -ne "disabled") {
+                    $body["reasoning_effort"] = $Config.ReasoningEffort
                 }
             }
-            $reader.Close(); $response.Close()
-            Write-Host "`n"
-            $reply = $replyBuf; $success = $true
-        } else {
-            $Headers = @{ "Authorization" = "Bearer $ApiKey" }
-            $resp = Invoke-RestMethod -Uri "$BaseUrl/chat/completions" -Method Post -Headers $Headers -ContentType "application/json; charset=utf-8" -Body $reqBytes -ErrorAction Stop
-            
-            $msgContent = $resp.choices[0].message.content
-            $msgThink   = $resp.choices[0].message.reasoning_content
 
-            if (-not [string]::IsNullOrEmpty($msgThink)) {
-                Write-Host "[Thinking]" -ForegroundColor DarkYellow
-                Write-Host $msgThink -ForegroundColor DarkGray
-                Write-Host ""
+            Set-State "🟡 等待 Chat 首流..."
+            $reqBytes = [System.Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 5 -Compress))
+            $chatStart = Get-Date
+
+            if ($Config.ChatStream -eq $true) {
+                # [流式处理引擎] 实时截获网络数据包
+                $request = [System.Net.HttpWebRequest]::Create($chatUrl)
+                $request.Method = "POST"
+                foreach ($key in $authHeaders.Keys) { $request.Headers.Add($key, $authHeaders[$key]) }
+                $request.ContentType = "application/json"
+                $request.KeepAlive = $false
+                $request.Timeout = 120000
+                
+                $reqStream = $request.GetRequestStream()
+                $reqStream.Write($reqBytes, 0, $reqBytes.Length)
+                $reqStream.Close()
+
+                $response = $request.GetResponse()
+                $reader = New-Object System.IO.StreamReader($response.GetResponseStream(), [System.Text.Encoding]::UTF8)
+
+                $replyAccumulator = ""
+                $ttft = 0
+                $promptTokens = 0
+                $completionTokens = 0
+
+                while (($line = $reader.ReadLine()) -ne $null) {
+                    if ($line.StartsWith("data: ")) {
+                        $dataStr = $line.Substring(6)
+                        if ($dataStr -eq "[DONE]") { break }
+                        try {
+                            $json = $dataStr | ConvertFrom-Json
+                            $token = ""
+                            $thinkToken = ""
+                            
+                            if ($Config.Provider -in @("claude", "anthropic")) {
+                                if ($json.type -eq "content_block_delta" -and $json.delta.type -eq "text_delta") {
+                                    $token = $json.delta.text
+                                } elseif ($json.type -eq "message_start") {
+                                    if ($null -ne $json.message.usage.input_tokens) { $promptTokens = $json.message.usage.input_tokens }
+                                } elseif ($json.type -eq "message_delta") {
+                                    if ($null -ne $json.usage.output_tokens) { $completionTokens = $json.usage.output_tokens }
+                                }
+                            } elseif ($Config.Provider -eq "gemini") {
+                                if ($null -ne $json.candidates[0].content.parts[0].text) {
+                                    $token = $json.candidates[0].content.parts[0].text
+                                }
+                                if ($null -ne $json.usageMetadata) {
+                                    if ($null -ne $json.usageMetadata.promptTokenCount) { $promptTokens = $json.usageMetadata.promptTokenCount }
+                                    if ($null -ne $json.usageMetadata.candidatesTokenCount) { $completionTokens = $json.usageMetadata.candidatesTokenCount }
+                                }
+                            } else {
+                                $token = $json.choices[0].delta.content
+                                $thinkToken = $json.choices[0].delta.reasoning_content
+                                if ($null -ne $json.usage) {
+                                    if ($null -ne $json.usage.prompt_tokens) { $promptTokens = $json.usage.prompt_tokens }
+                                    if ($null -ne $json.usage.completion_tokens) { $completionTokens = $json.usage.completion_tokens }
+                                }
+                            }
+
+                            if ($ttft -eq 0 -and (-not [string]::IsNullOrEmpty($token) -or ($Config.Provider -eq "openai" -and -not [string]::IsNullOrEmpty($thinkToken)))) {
+                                $ttft = ((Get-Date) - $chatStart).TotalMilliseconds
+                            }
+
+                            if (-not [string]::IsNullOrEmpty($token)) {
+                                $replyAccumulator += $token
+                            }
+
+                            $currTime = ((Get-Date) - $chatStart).TotalMilliseconds
+                            if ($ttft -ne 0) {
+                                Set-State "🔵 正在回复 (距首字 $(Format-Time ($currTime - $ttft)))..."
+                            }
+                        } catch {}
+                    }
+                }
+                $reader.Close(); $response.Close()
+
+                if (-not [string]::IsNullOrEmpty($replyAccumulator)) {
+                    $History.Add([PSCustomObject]@{ User = $chatPrompt; Assistant = $replyAccumulator })
+                }
+                $totalTime = ((Get-Date) - $chatStart).TotalMilliseconds
+                $Stats.AddOrUpdate("Success", 1, { param($k, $v) $v + 1 }) | Out-Null
+                Set-State "🟢 已完成 (TTFT: $(Format-Time $ttft) / 总: $(Format-Time $totalTime) | ↑$promptTokens ↓$completionTokens)"
+
+            } else {
+                # [阻塞式处理引擎]
+                $resp = Invoke-RestMethod -Uri $chatUrl -Method Post -Headers $authHeaders -ContentType "application/json" -Body $reqBytes -ErrorAction Stop
+                
+                $promptTokens = 0; $completionTokens = 0
+                $replyAccumulator = ""
+                
+                if ($Config.Provider -in @("claude", "anthropic")) {
+                    $replyAccumulator = $resp.content[0].text
+                    if ($null -ne $resp.usage) {
+                        $promptTokens = $resp.usage.input_tokens
+                        $completionTokens = $resp.usage.output_tokens
+                    }
+                } elseif ($Config.Provider -eq "gemini") {
+                    if ($null -ne $resp.candidates) {
+                        $replyAccumulator = $resp.candidates[0].content.parts[0].text
+                    }
+                    if ($null -ne $resp.usageMetadata) {
+                        $promptTokens = $resp.usageMetadata.promptTokenCount
+                        $completionTokens = $resp.usageMetadata.candidatesTokenCount
+                    }
+                } else {
+                    if ($null -ne $resp.choices) {
+                        $replyAccumulator = $resp.choices[0].message.content
+                    }
+                    if ($null -ne $resp.usage) {
+                        if ($null -ne $resp.usage.prompt_tokens) { $promptTokens = $resp.usage.prompt_tokens }
+                        if ($null -ne $resp.usage.completion_tokens) { $completionTokens = $resp.usage.completion_tokens }
+                    }
+                }
+
+                if (-not [string]::IsNullOrEmpty($replyAccumulator)) {
+                    $History.Add([PSCustomObject]@{ User = $chatPrompt; Assistant = $replyAccumulator })
+                }
+                
+                $totalTime = ((Get-Date) - $chatStart).TotalMilliseconds
+                $Stats.AddOrUpdate("Success", 1, { param($k, $v) $v + 1 }) | Out-Null
+                Set-State "🟢 已完成 (总: $(Format-Time $totalTime) | ↑$promptTokens ↓$completionTokens)"
             }
-            Write-Host "[Reply]" -ForegroundColor Green
-            Write-Host $msgContent -ForegroundColor White
-
-            $reply = $msgContent; $success = $true; $ttft = 0
         }
-    } catch {
-        $webEx = $_.Exception.InnerException
-        if ($null -ne $webEx -and $null -ne $webEx.Response) {
-            try {
-                $errStream = $webEx.Response.GetResponseStream()
-                $errReader = New-Object System.IO.StreamReader($errStream, [System.Text.Encoding]::UTF8)
-                $errBody   = $errReader.ReadToEnd()
-                $errReader.Close()
-                $errJson = $errBody | ConvertFrom-Json -ErrorAction SilentlyContinue
-                $errMsg  = if ($errJson.error.message) { "[HTTP $($webEx.Response.StatusCode)] $($errJson.error.message)" } else { "[HTTP $($webEx.Response.StatusCode)] $errBody" }
-            } catch { $errMsg = $_.Exception.Message }
-        } else { $errMsg = $_.Exception.Message }
-    }
 
-    if ($success) {
-        $GlobalHistory.Add([PSCustomObject]@{ User = $userPrompt; Assistant = $reply })
-        $replyClean = $reply -replace "`r", "" -replace "`n", " "
-        if ($replyClean.Length -gt 60) { $replyClean = $replyClean.Substring(0, 60) + "..." }
-        $msg = "  [完成] 总耗时: $([math]::Round(((Get-Date) - $chatStart).TotalMilliseconds))ms"
-        if ($Body.stream -eq $true) { $msg += " | 首字延迟(TTFT): $([math]::Round($ttft))ms" }
-        Write-Host "$msg | 摘要: $replyClean" -ForegroundColor DarkGreen
-        $script:successCount++
-    } else {
-        Write-Host "  [请求失败] $errMsg" -ForegroundColor Red
-        $script:failCount++
+        # ======== 执行 EMBED ========
+        if ($enableEmbed) {
+            Set-State "🟡 等待 Embed 响应..."
+            $em_prompt = Get-RandomArrayItem $Config.ChatPrompts
+            
+            if ($Config.Provider -in @("claude", "anthropic")) {
+                 # No-op natively
+                 $body = @{} 
+            } elseif ($Config.Provider -eq "gemini") {
+                 $body = @{ content = @{ parts = @(@{text=$em_prompt}) } }
+            } else {
+                 $body = @{ model = $Config.ModelName; input = $em_prompt }
+            }
+            
+            $em_reqBytes = [System.Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 5 -Compress))
+            $emStart = Get-Date
+
+            $resp = Invoke-RestMethod -Uri $emUrl -Method Post -Headers $authHeaders -ContentType "application/json" -Body $em_reqBytes -ErrorAction Stop
+            
+            $promptTokens = 0; $completionTokens = 0
+            if ($Config.Provider -eq "gemini") {
+                # gemini embed parsing ignored for brevity
+            } else {
+                if ($null -ne $resp.usage) {
+                    if ($null -ne $resp.usage.prompt_tokens) { $promptTokens = $resp.usage.prompt_tokens }
+                    if ($null -ne $resp.usage.completion_tokens) { $completionTokens = $resp.usage.completion_tokens }
+                }
+            }
+
+            $Stats.AddOrUpdate("Success", 1, { param($k, $v) $v + 1 }) | Out-Null
+            $totalTime = ((Get-Date) - $emStart).TotalMilliseconds
+            Set-State "🟢 Embed 完成 (耗时: $(Format-Time $totalTime) | ↑$promptTokens ↓$completionTokens)"
+        }
+
+        # 如果队列仍有后续，并且请求了强制阻塞间歇延迟
+        if ($Config.DelaySeconds -gt 0) {
+            Start-Sleep -Seconds $Config.DelaySeconds
+        }
+
+    } catch {
+        $Stats.AddOrUpdate("Fail", 1, { param($k, $v) $v + 1 }) | Out-Null
+        $errMsg = $_.Exception.Message
+        if ($_.Exception.InnerException -and $_.Exception.InnerException.Response) {
+            try {
+                $errStream = $_.Exception.InnerException.Response.GetResponseStream()
+                $errReader = New-Object System.IO.StreamReader($errStream, [System.Text.Encoding]::UTF8)
+                $errMsg = $errReader.ReadToEnd()
+                $errReader.Close()
+            } catch {}
+        }
+        $errMsgClean = $errMsg -replace "`r", "" -replace "`n", ""
+        if ($errMsgClean.Length -gt 35) { $errMsgClean = $errMsgClean.Substring(0, 35) + "..." }
+        Set-State "🔴 异常 ($errMsgClean)"
+    } finally {
+        $Stats.AddOrUpdate("TotalDone", 1, { param($k, $v) $v + 1 }) | Out-Null
     }
 }
 
-function Invoke-GatewayEmbed {
-    param (
-        [string]$Model,
-        [string]$InputText
-    )
-    $reqBytes = [System.Text.Encoding]::UTF8.GetBytes((@{ model = $Model; input = $InputText } | ConvertTo-Json -Depth 5 -Compress))
-    Write-Host "`n  [Embed] 文本 : $InputText" -ForegroundColor Magenta
-    $embedStart = Get-Date
+# =========================================================================
+# 调度与编排大盘 (UI Render Thread)
+# =========================================================================
 
+$ConfigObj = @{
+    BaseUrl           = $BaseUrl
+    ApiKey            = $ApiKey
+    Provider          = $Provider
+    ModelName         = $ModelName
+    ModelType         = $ModelType
+    ChatStream        = $ChatStream
+    EnableChatHistory = $EnableChatHistory
+    MaxHistoryTurns   = $MaxHistoryTurns
+    RandomizeThink    = $RandomizeThink
+    ThinkingMode      = $ThinkingMode
+    ReasoningEffort   = $ReasoningEffort
+    DelaySeconds      = $DelaySeconds
+    SystemPrompts     = @($SystemPrompts)
+    ChatPrompts       = @($ChatPrompts)
+}
+
+Clear-Host
+Write-Host "================ 连通性支持预检 ================" -ForegroundColor Cyan
+
+$SharedHeaders = @{}
+$ModelPath = "/models"
+$ChatPath = "/chat/completions"
+$EmbedPath = "/embeddings"
+
+if ($Provider -in @('claude', 'anthropic')) { 
+    $SharedHeaders["x-api-key"] = $ApiKey 
+    $SharedHeaders["anthropic-version"] = "2023-06-01"
+    $ModelPath = "/v1/models"
+    $ChatPath = "/v1/messages"
+} elseif ($Provider -eq 'gemini') {
+    $SharedHeaders["x-goog-api-key"] = $ApiKey
+    $ModelPath = "/v1beta/models"
+    $ChatPath = "/v1beta/models/$($ModelName):generateContent"
+    $EmbedPath = "/v1beta/models/$($ModelName):embedContent"
+} else {
+    $SharedHeaders["Authorization"] = "Bearer $ApiKey"
+}
+
+# 1. 厂商模型列表接口预检
+try {
+    $resp = Invoke-RestMethod -Uri "$($BaseUrl)$ModelPath" -Method Get -Headers $SharedHeaders -TimeoutSec 5 -ErrorAction Stop
+    $count = if ($resp.data) { $resp.data.Count } elseif ($resp.models) { $resp.models.Count } else { 0 }
+    Write-Host "  $ModelPath 接口`t`t ✅ 正常 ($count models)" -ForegroundColor Green
+} catch {
+    Write-Host "  $ModelPath 接口`t`t ❌ 异常 ($($_.Exception.Message))" -ForegroundColor Red
+}
+
+# 2. 厂商生成接口预检
+try {
+    if ($Provider -in @("claude", "anthropic")) {
+        $body = @{ model = $ModelName; messages = @(@{ role = "user"; content = "Hi" }); max_tokens = 1 }
+    } elseif ($Provider -eq "gemini") {
+        $body = @{ contents = @(@{ role = "user"; parts = @(@{ text = "Hi" }) }) }
+    } else {
+        $body = @{ model = $ModelName; messages = @(@{ role = "user"; content = "Hi" }); max_tokens = 1 }
+    }
+    $req = $body | ConvertTo-Json -Depth 5 -Compress
+    
+    $resp = Invoke-RestMethod -Uri "$($BaseUrl)$ChatPath" -Method Post -Headers $SharedHeaders -ContentType "application/json" -Body $req -TimeoutSec 15 -ErrorAction Stop
+    Write-Host "  $ChatPath 接口`t ✅ 正常" -ForegroundColor Green
+} catch {
+    Write-Host "  $ChatPath 接口`t ❌ 异常 ($($_.Exception.Message))" -ForegroundColor Red
+}
+
+# 3. 厂商 Embed 接口预检 (Anthropic原生不支持嵌入，跳过)
+if ($Provider -notin @("claude", "anthropic")) {
     try {
-        $Headers = @{ "Authorization" = "Bearer $ApiKey" }
-        $resp = Invoke-RestMethod -Uri "$BaseUrl/embeddings" -Method Post -Headers $Headers -ContentType "application/json; charset=utf-8" -Body $reqBytes -ErrorAction Stop
-        Write-Host "  [完成] 耗时: $([math]::Round(((Get-Date) - $embedStart).TotalMilliseconds))ms | 维度: $($resp.data[0].embedding.Count) | Tokens: $($resp.usage.total_tokens)" -ForegroundColor DarkGreen
-        $script:successCount++
-    } catch {
-        $ex = $_.Exception
-        if ($null -ne $ex -and $null -ne $ex.Response) {
-            try {
-                $errStream = $ex.Response.GetResponseStream()
-                $errReader = New-Object System.IO.StreamReader($errStream, [System.Text.Encoding]::UTF8)
-                $errBody   = $errReader.ReadToEnd()
-                $errReader.Close()
-                $errJson = $errBody | ConvertFrom-Json -ErrorAction SilentlyContinue
-                $errMsg  = if ($errJson.error.message) { "[HTTP $($ex.Response.StatusCode)] $($errJson.error.message)" } else { "[HTTP $($ex.Response.StatusCode)] $errBody" }
-            } catch {
-                $errMsg = $ex.Message
-            }
+        if ($Provider -eq "gemini") {
+            $body = @{ content = @{ parts = @(@{ text = "Hi" }) } }
         } else {
-            $errMsg = $ex.Message
+            $body = @{ model = $ModelName; input = "Hi" }
         }
-        Write-Host "  [请求失败] $errMsg" -ForegroundColor Red
-        $script:failCount++
+        $req = $body | ConvertTo-Json -Depth 5 -Compress
+        $resp = Invoke-RestMethod -Uri "$($BaseUrl)$EmbedPath" -Method Post -Headers $SharedHeaders -ContentType "application/json" -Body $req -TimeoutSec 15 -ErrorAction Stop
+        Write-Host "  $EmbedPath 接口`t`t ✅ 正常" -ForegroundColor Green
+    } catch {
+        Write-Host "  $EmbedPath 接口`t`t ❌ 异常 ($($_.Exception.Message))" -ForegroundColor Red
     }
 }
 
-# =========================================================================
-# 三家服务商实现
-# =========================================================================
-
-function Get-TestMessages {
-    $sysPrompt = $SystemPrompts | Get-Random
-    $prompt = $ChatPrompts | Get-Random
-    
-    $messages = @()
-    $messages += @{ role = "system"; content = $sysPrompt }
-    
-    $historyCountAdded = 0
-    if ($EnableChatHistory -and ($GlobalHistory.Count -gt 0)) {
-        $poolSize = $GlobalHistory.Count
-        $maxLimit = [Math]::Min($MaxHistoryTurns, $poolSize)
-        $historyCount = Get-Random -Minimum 1 -Maximum ($maxLimit + 1)
-        
-        $selectedPairs = $GlobalHistory | Get-Random -Count $historyCount
-        foreach ($h in @($selectedPairs)) {
-            if ($null -ne $h) {
-                $messages += @{ role = "user"; content = $h.User }
-                $messages += @{ role = "assistant"; content = $h.Assistant } 
-                $historyCountAdded++
-            }
-        }
-    }
-    $messages += @{ role = "user"; content = $prompt }
-    return @{ sys = $sysPrompt; user = $prompt; messages = $messages; historyCount = $historyCountAdded }
-}
-
-function Test-ProviderOpenAI {
-    $enableChat = ($ModelType -eq "chat" -or $ModelType -eq "both")
-    $enableEmbed = ($ModelType -eq "embedding" -or $ModelType -eq "both")
-
-    Write-Host "`n==========================================" -ForegroundColor Cyan
-    Write-Host ">>> 执行目标: OpenAI API" -ForegroundColor Cyan
-    Write-Host "    应用模型: $ModelName | 类型: $ModelType" -ForegroundColor DarkCyan
-    Write-Host "==========================================" -ForegroundColor Cyan
-
-    for ($round = 1; $round -le $Count; $round++) {
-        Write-Host "`n> [OpenAI - 轮次 $round]" -ForegroundColor Yellow
-        
-        if ($enableChat) {
-            $msgData = Get-TestMessages
-            $body = @{
-                model    = $ModelName
-                stream   = $ChatStream
-                messages = $msgData.messages
-            }
-            
-            if ($RandomizeThink) {
-                $effort = @($null, "minimal", "low", "medium", "high") | Get-Random
-                if ($null -ne $effort) { 
-                    $body["reasoning_effort"] = $effort
-                    Write-Host "[!] OpenAI 策略: reasoning_effort=$effort" -ForegroundColor Yellow 
-                }
-            } else {
-                if ($ThinkingMode -ne "disabled") {
-                    $body["reasoning_effort"] = $ReasoningEffort
-                    Write-Host "[!] OpenAI 策略: reasoning_effort=$ReasoningEffort" -ForegroundColor Yellow
-                }
-            }
-
-            $script:totalReqs++
-            Invoke-GatewayChat -Body $body -sysPrompt $msgData.sys -userPrompt $msgData.user -historyTurnsAdded $msgData.historyCount
-        }
-        
-        if ($enableEmbed) {
-            $script:totalReqs++
-            $embedPrompt = $ChatPrompts | Get-Random
-            Invoke-GatewayEmbed -Model $ModelName -InputText $embedPrompt
-        }
-
-        if ($round -lt $Count) { Start-Sleep -Seconds $DelaySeconds }
-    }
-}
-
-function Test-ProviderClaude {
-    $enableChat = ($ModelType -eq "chat" -or $ModelType -eq "both")
-    $enableEmbed = $false # 强制禁用嵌入 "选择claude就把嵌入排掉"
-
-    Write-Host "`n==========================================" -ForegroundColor Cyan
-    Write-Host ">>> 执行目标: Anthropic Claude API" -ForegroundColor Cyan
-    if ($ModelType -eq "both" -or $ModelType -eq "embedding") {
-        Write-Host "    应用模型: $ModelName | 类型: $ModelType (⚠️已为您强制排掉嵌入验证)" -ForegroundColor DarkCyan
-    } else {
-        Write-Host "    应用模型: $ModelName | 类型: $ModelType" -ForegroundColor DarkCyan
-    }
-    Write-Host "==========================================" -ForegroundColor Cyan
-
-    for ($round = 1; $round -le $Count; $round++) {
-        Write-Host "`n> [Claude - 轮次 $round]" -ForegroundColor Yellow
-        
-        if ($enableChat) {
-            $msgData = Get-TestMessages
-            $body = @{
-                model    = $ModelName
-                stream   = $ChatStream
-                messages = $msgData.messages
-            }
-            
-            $enableThinking = $false
-            if ($RandomizeThink) {
-                $enableThinking = (Get-Random -Minimum 0 -Maximum 2) -eq 1
-            } else {
-                $enableThinking = ($ThinkingMode -eq "auto" -or $ThinkingMode -eq "enabled")
-            }
-
-            if ($enableThinking) {
-                $body["thinking"] = @{ type = "enabled"; budget_tokens = 2048 }
-                Write-Host "[!] Claude 策略: 启用扩展思考 (budget_tokens: 2048)" -ForegroundColor Yellow
-            }
-
-            $script:totalReqs++
-            Invoke-GatewayChat -Body $body -sysPrompt $msgData.sys -userPrompt $msgData.user -historyTurnsAdded $msgData.historyCount
-        }
-        
-        if ($round -lt $Count) { Start-Sleep -Seconds $DelaySeconds }
-    }
-}
-
-function Test-ProviderGemini {
-    $enableChat = ($ModelType -eq "chat" -or $ModelType -eq "both")
-    $enableEmbed = ($ModelType -eq "embedding" -or $ModelType -eq "both")
-
-    Write-Host "`n==========================================" -ForegroundColor Cyan
-    Write-Host ">>> 执行目标: Google Gemini API" -ForegroundColor Cyan
-    Write-Host "    应用模型: $ModelName | 类型: $ModelType" -ForegroundColor DarkCyan
-    Write-Host "==========================================" -ForegroundColor Cyan
-
-    for ($round = 1; $round -le $Count; $round++) {
-        Write-Host "`n> [Gemini - 轮次 $round]" -ForegroundColor Yellow
-        
-        if ($enableChat) {
-            $msgData = Get-TestMessages
-            $body = @{
-                model    = $ModelName
-                stream   = $ChatStream
-                messages = $msgData.messages
-            }
-            
-            $enableThinking = $false
-            if ($RandomizeThink) {
-                $enableThinking = (Get-Random -Minimum 0 -Maximum 2) -eq 1
-            } else {
-                $enableThinking = ($ThinkingMode -eq "auto" -or $ThinkingMode -eq "enabled")
-            }
-
-            if ($enableThinking) {
-                $body["thinking"] = @{ type = "enabled" }
-                Write-Host "[!] Gemini 策略: 启用标准思考" -ForegroundColor Yellow
-            }
-
-            $script:totalReqs++
-            Invoke-GatewayChat -Body $body -sysPrompt $msgData.sys -userPrompt $msgData.user -historyTurnsAdded $msgData.historyCount
-        }
-        
-        if ($enableEmbed) {
-            $script:totalReqs++
-            $embedPrompt = $ChatPrompts | Get-Random
-            Invoke-GatewayEmbed -Model $ModelName -InputText $embedPrompt
-        }
-
-        if ($round -lt $Count) { Start-Sleep -Seconds $DelaySeconds }
-    }
-}
-
-# =========================================================================
-# 执行引擎入口
-# =========================================================================
-
-Write-Host "================ 测试概览 ================" -ForegroundColor Cyan
+Write-Host "================ 测试概览 (并发支持) ================" -ForegroundColor Cyan
 Write-Host "网关地址: `t $BaseUrl"
 Write-Host "服务目标: `t $Provider"
 Write-Host "所测模型: `t $ModelName ($ModelType)"
-Write-Host "流式输出: `t $ChatStream"
-Write-Host "动态历史: `t $EnableChatHistory"
+Write-Host "流式输出: `t $ChatStream | 动态历史: $EnableChatHistory"
 Write-Host "任务总数: `t $Count 组"
-Write-Host "==========================================" -ForegroundColor Cyan
-Write-Host "`n语料初始化完成: $($ChatPrompts.Count) 组对话样例." -ForegroundColor Green
+Write-Host "并发级别: `t $Concurrency 线程并驾齐驱"
+Write-Host "=====================================================" -ForegroundColor Cyan
+Write-Host "`n"
 
-if ($Provider -eq "openai") {
-    Test-ProviderOpenAI
-} elseif ($Provider -eq "claude" -or $Provider -eq "anthropic") {
-    Test-ProviderClaude
-} elseif ($Provider -eq "gemini") {
-    Test-ProviderGemini
+$Pool = [runspacefactory]::CreateRunspacePool(1, $Concurrency)
+$Pool.Open()
+
+$Queue = [System.Collections.Generic.Queue[int]]::new()
+for ($i = 1; $i -le $Count; $i++) { $Queue.Enqueue($i) }
+
+$ActiveRuns = @{}
+
+# 获取初始光标以便在上方留出空白，在下方覆盖刷新
+$StartY = 0
+$IsConsoleInteractive = $true
+try {
+    $StartY = [Console]::CursorTop
+    $NeededLines = $Concurrency + 5
+    if ($StartY + $NeededLines -ge [Console]::BufferHeight) {
+        # 强制上边界适配
+        $StartY = [Math]::Max(0, [Console]::BufferHeight - $NeededLines - 1)
+    }
+    [Console]::CursorVisible = $false
+} catch {
+    $IsConsoleInteractive = $false
+}
+try {
+    # 主事件渲染循环：不断投递分发、并渲染终端 UI (类 Docker Pull)
+    while ($Queue.Count -gt 0 -or $ActiveRuns.Count -gt 0) {
+        
+        # 释放资源并抓取空闲 Slot 回填
+        $freeSlots = @(0..($Concurrency - 1)) | Where-Object { -not $ActiveRuns.ContainsKey($_) }
+        foreach ($slot in $freeSlots) {
+            if ($Queue.Count -gt 0) {
+                $taskId = $Queue.Dequeue()
+                
+                $ArgsConfig = @{
+                    TaskOffset = $taskId
+                    SlotId     = $slot
+                    Config     = $ConfigObj
+                    State      = $SharedState
+                    Stats      = $SharedStats
+                    History    = $SharedHistory
+                }
+                
+                $SharedState[$slot] = "[Task $($taskId.ToString('000'))] ⚪ 排队挂载中..."
+                $ps = [powershell]::Create().AddScript($WorkerScript).AddArgument($ArgsConfig)
+                $ps.RunspacePool = $Pool
+                $handle = $ps.BeginInvoke()
+                $ActiveRuns[$slot] = @{ PS = $ps; Handle = $handle }
+            }
+        }
+        
+        # 卸载已被完毕消化的 Slots
+        foreach ($slot in @($ActiveRuns.Keys)) {
+            $run = $ActiveRuns[$slot]
+            if ($run.Handle.IsCompleted) {
+                try {
+                    $run.PS.EndInvoke($run.Handle)
+                } catch {
+                    $SharedState[$slot] = "🔴 运行时崩溃: $($_.Exception.Message)"
+                }
+                $run.PS.Dispose()
+                $ActiveRuns.Remove($slot)
+            }
+        }
+        
+        # 终端进度渲染计算
+        # 尝试静默捕获由于由于调整窗口导致的操作越界错
+        try {
+            [Console]::SetCursorPosition(0, $StartY)
+        } catch { }
+        
+        $totalDone = $SharedStats["TotalDone"]
+        $success = $SharedStats["Success"]
+        $fail = $SharedStats["Fail"]
+        
+        $percent = 0
+        if ($Count -gt 0) { $percent = [math]::Round(($totalDone / $Count) * 100) }
+        
+        $barWidth = 40
+        $filled = [math]::Round(($percent / 100) * $barWidth)
+        $empty = $barWidth - $filled
+        $bar = ("#" * $filled) + ("-" * $empty)
+        
+        Write-Host "全局进度: [$bar] $percent% ($totalDone / $Count)        " -ForegroundColor Yellow
+        Write-Host "--------------------------------------------------------" -ForegroundColor DarkGray
+        
+        for ($i = 0; $i -lt $Concurrency; $i++) {
+            $stateText = $SharedState[$i]
+            # 抹除右侧上帧残影，将文本严格靠左补齐对齐
+            if ($stateText.Length -lt 70) { 
+                $stateText = $stateText.PadRight(70) 
+            } elseif ($stateText.Length -gt 70) { 
+                $stateText = $stateText.Substring(0, 67) + "..." 
+            }
+            Write-Host "并发执行槽位 [Slot $(($i + 1).ToString('00'))]: $stateText"
+        }
+        
+        Write-Host "--------------------------------------------------------" -ForegroundColor DarkGray
+        Write-Host "  ✅ 成功接收: $success    |    ❌ 异常中断: $fail               "
+        
+        # 帧率 (10 FPS 每秒自刷新 10 次)
+        Start-Sleep -Milliseconds 100
+    }
+} finally {
+    try { [Console]::CursorVisible = $true } catch {}
+    $Pool.Close()
+    $Pool.Dispose()
 }
 
-Write-Host "`n============== 性能测试最终报表 ==============" -ForegroundColor Cyan
-Write-Host "总请求数: $script:totalReqs"
-Write-Host "成功数: $script:successCount" -ForegroundColor Green
-if ($script:failCount -gt 0) { Write-Host "失败数: $script:failCount" -ForegroundColor Red } else { Write-Host "失败数: 0" -ForegroundColor Green }
-Write-Host "==========================================" -ForegroundColor Cyan
+Write-Host "`n============== 压测发包完毕 ==============" -ForegroundColor Cyan

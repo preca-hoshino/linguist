@@ -3,7 +3,7 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { db, generateShortId } from '@/db';
-import { buildUpdateSet, createLogger, GatewayError, logColors } from '@/utils';
+import { buildUpdateSet, createLogger, GatewayError, logColors, rateLimiter } from '@/utils';
 import { handleAdminError } from './error';
 
 const logger = createLogger('Admin:ProviderModels', logColors.bold + logColors.blue);
@@ -190,7 +190,12 @@ router.get('/', async (req: Request, res: Response) => {
     const data = rows.map((row) => {
       // eslint-disable-next-line @typescript-eslint/naming-convention
       const { full_count: _full_count, ...rest } = row;
-      return rest;
+      const id = rest.id as string;
+      const throughput = {
+        rpm: rateLimiter.getRpmUsage('pm', id),
+        tpm: rateLimiter.getTpmUsage('pm', id),
+      };
+      return { ...rest, throughput };
     });
 
     const hasMore = offsetNum + data.length < total;
@@ -223,7 +228,14 @@ router.get('/:id', async (req: Request, res: Response) => {
       throw new GatewayError(404, 'not_found', `Provider model ${id} not found`);
     }
 
-    res.json({ object: 'provider_model', ...result.rows[0] });
+    const row = result.rows[0];
+    const idStr = (row as { id: string }).id;
+    const throughput = {
+      rpm: rateLimiter.getRpmUsage('pm', idStr),
+      tpm: rateLimiter.getTpmUsage('pm', idStr),
+    };
+
+    res.json({ object: 'provider_model', ...row, throughput });
   } catch (error) {
     handleAdminError(error, res);
   }
