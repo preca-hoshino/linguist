@@ -115,46 +115,93 @@ $WorkerScript = {
         $sysPrompt = Get-RandomArrayItem $Config.SystemPrompts
         $chatPrompt = Get-RandomArrayItem $Config.ChatPrompts
 
-        # 组装上下文消息
-        $messages = @()
-        $messages += @{ role = "system"; content = $sysPrompt }
+        $enableChat = ($Config.ModelType -eq "chat" -or $Config.ModelType -eq "both")
+        $enableEmbed = ($Config.ModelType -eq "embedding" -or $Config.ModelType -eq "both")
 
-        if ($Config.EnableChatHistory) {
-            $snap = $History.ToArray()
-            if ($snap.Count -gt 0) {
-                $maxLimit = [Math]::Min($Config.MaxHistoryTurns, $snap.Count)
-                $historyCount = Get-Random -Minimum 1 -Maximum ($maxLimit + 1)
-                $picked = $snap | Get-Random -Count $historyCount
-                if ($null -ne $picked) {
-                    foreach ($h in @($picked)) {
-                        if ($h) {
+        if ($Config.Provider -in @("claude", "anthropic")) {
+            $chatUrl = "$($Config.BaseUrl)/v1/messages"
+            $authHeaders = @{ "x-api-key" = $Config.ApiKey; "anthropic-version" = "2023-06-01" }
+            $enableEmbed = $false
+        } elseif ($Config.Provider -eq "gemini") {
+            $streamStr = if ($Config.ChatStream) { "streamGenerateContent?alt=sse" } else { "generateContent" }
+            $chatUrl = "$($Config.BaseUrl)/v1beta/models/$($Config.ModelName):$streamStr"
+            $emUrl = "$($Config.BaseUrl)/v1beta/models/$($Config.ModelName):embedContent"
+            $authHeaders = @{ "x-goog-api-key" = $Config.ApiKey }
+        } else {
+            $chatUrl = "$($Config.BaseUrl)/chat/completions"
+            $emUrl = "$($Config.BaseUrl)/embeddings"
+            $authHeaders = @{ "Authorization" = "Bearer $($Config.ApiKey)" }
+        }
+
+        # ======== 执行 CHAT ========
+        if ($enableChat) {
+            $body = @{}
+            
+            # 组装对应厂商的原生 Payload
+            if ($Config.Provider -in @("claude", "anthropic")) {
+                $body["model"] = $Config.ModelName
+                $body["stream"] = $Config.ChatStream
+                $body["max_tokens"] = 4096
+                $body["system"] = $sysPrompt
+                $claudeMsgs = @()
+                if ($Config.EnableChatHistory) {
+                    $snap = $History.ToArray()
+                    if ($snap.Count -gt 0) {
+                        $maxLimit = [Math]::Min($Config.MaxHistoryTurns, $snap.Count)
+                        $historyCount = Get-Random -Minimum 1 -Maximum ($maxLimit + 1)
+                        $picked = $snap | Select-Object -First $historyCount
+                        foreach ($h in $picked) {
+                            $claudeMsgs += @{ role = "user"; content = $h.User }
+                            $claudeMsgs += @{ role = "assistant"; content = $h.Assistant }
+                        }
+                    }
+                }
+                $claudeMsgs += @{ role = "user"; content = $chatPrompt }
+                $body["messages"] = $claudeMsgs
+                
+                $doThink = $false
+                if ($Config.RandomizeThink) { $doThink = ((Get-Random -Minimum 0 -Maximum 2) -eq 1) }
+                else { $doThink = ($Config.ThinkingMode -eq "auto" -or $Config.ThinkingMode -eq "enabled") }
+                if ($doThink) { $body["thinking"] = @{ type = "enabled"; budget_tokens = 2048 } }
+                
+            } elseif ($Config.Provider -eq "gemini") {
+                $geminiContents = @()
+                if ($Config.EnableChatHistory) {
+                    $snap = $History.ToArray()
+                    if ($snap.Count -gt 0) {
+                        $maxLimit = [Math]::Min($Config.MaxHistoryTurns, $snap.Count)
+                        $historyCount = Get-Random -Minimum 1 -Maximum ($maxLimit + 1)
+                        $picked = $snap | Select-Object -First $historyCount
+                        foreach ($h in $picked) {
+                            $geminiContents += @{ role = "user"; parts = @(@{ text = $h.User }) }
+                            $geminiContents += @{ role = "model"; parts = @(@{ text = $h.Assistant }) }
+                        }
+                    }
+                }
+                $geminiContents += @{ role = "user"; parts = @(@{ text = $chatPrompt }) }
+                $body["contents"] = $geminiContents
+                $body["systemInstruction"] = @{ parts = @(@{ text = $sysPrompt }) }
+            } else {
+                # OpenAI 原生
+                $body["model"] = $Config.ModelName
+                $body["stream"] = $Config.ChatStream
+                $messages = @()
+                $messages += @{ role = "system"; content = $sysPrompt }
+                if ($Config.EnableChatHistory) {
+                    $snap = $History.ToArray()
+                    if ($snap.Count -gt 0) {
+                        $maxLimit = [Math]::Min($Config.MaxHistoryTurns, $snap.Count)
+                        $historyCount = Get-Random -Minimum 1 -Maximum ($maxLimit + 1)
+                        $picked = $snap | Select-Object -First $historyCount
+                        foreach ($h in $picked) {
                             $messages += @{ role = "user"; content = $h.User }
                             $messages += @{ role = "assistant"; content = $h.Assistant }
                         }
                     }
                 }
-            }
-        }
-        $messages += @{ role = "user"; content = $chatPrompt }
-
-        $enableChat = ($Config.ModelType -eq "chat" -or $Config.ModelType -eq "both")
-        $enableEmbed = ($Config.ModelType -eq "embedding" -or $Config.ModelType -eq "both")
-
-        # Claude API 不支持单独 /embeddings 路径接口（或本架构已屏蔽）
-        if ($Config.Provider -eq "claude" -or $Config.Provider -eq "anthropic") {
-            $enableEmbed = $false
-        }
-
-        # ======== 执行 CHAT ========
-        if ($enableChat) {
-            $body = @{
-                model    = $Config.ModelName
-                stream   = $Config.ChatStream
-                messages = $messages
-            }
-
-            # 各大模型专属思考策略 (Reasoning Effort / Thinking Budget)
-            if ($Config.Provider -eq "openai") {
+                $messages += @{ role = "user"; content = $chatPrompt }
+                $body["messages"] = $messages
+                
                 if ($Config.RandomizeThink) {
                     $efforts = @($null, "minimal", "low", "medium", "high")
                     $eff = Get-RandomArrayItem $efforts
@@ -162,16 +209,6 @@ $WorkerScript = {
                 } elseif ($Config.ThinkingMode -ne "disabled") {
                     $body["reasoning_effort"] = $Config.ReasoningEffort
                 }
-            } elseif ($Config.Provider -eq "claude" -or $Config.Provider -eq "anthropic") {
-                $doThink = $false
-                if ($Config.RandomizeThink) { $doThink = ((Get-Random -Minimum 0 -Maximum 2) -eq 1) }
-                else { $doThink = ($Config.ThinkingMode -eq "auto" -or $Config.ThinkingMode -eq "enabled") }
-                if ($doThink) { $body["thinking"] = @{ type = "enabled"; budget_tokens = 2048 } }
-            } elseif ($Config.Provider -eq "gemini") {
-                $doThink = $false
-                if ($Config.RandomizeThink) { $doThink = ((Get-Random -Minimum 0 -Maximum 2) -eq 1) }
-                else { $doThink = ($Config.ThinkingMode -eq "auto" -or $Config.ThinkingMode -eq "enabled") }
-                if ($doThink) { $body["thinking"] = @{ type = "enabled" } }
             }
 
             Set-State "🟡 等待 Chat 首流..."
@@ -180,10 +217,10 @@ $WorkerScript = {
 
             if ($Config.ChatStream -eq $true) {
                 # [流式处理引擎] 实时截获网络数据包
-                $request = [System.Net.HttpWebRequest]::Create("$($Config.BaseUrl)/chat/completions")
+                $request = [System.Net.HttpWebRequest]::Create($chatUrl)
                 $request.Method = "POST"
-                $request.Headers.Add("Authorization", "Bearer $($Config.ApiKey)")
-                $request.ContentType = "application/json; charset=utf-8"
+                foreach ($key in $authHeaders.Keys) { $request.Headers.Add($key, $authHeaders[$key]) }
+                $request.ContentType = "application/json"
                 $request.KeepAlive = $false
                 $request.Timeout = 120000
                 
@@ -205,15 +242,35 @@ $WorkerScript = {
                         if ($dataStr -eq "[DONE]") { break }
                         try {
                             $json = $dataStr | ConvertFrom-Json
-                            $token = $json.choices[0].delta.content
-                            $thinkToken = $json.choices[0].delta.reasoning_content
-
-                            if ($null -ne $json.usage) {
-                                if ($null -ne $json.usage.prompt_tokens) { $promptTokens = $json.usage.prompt_tokens }
-                                if ($null -ne $json.usage.completion_tokens) { $completionTokens = $json.usage.completion_tokens }
+                            $token = ""
+                            $thinkToken = ""
+                            
+                            if ($Config.Provider -in @("claude", "anthropic")) {
+                                if ($json.type -eq "content_block_delta" -and $json.delta.type -eq "text_delta") {
+                                    $token = $json.delta.text
+                                } elseif ($json.type -eq "message_start") {
+                                    if ($null -ne $json.message.usage.input_tokens) { $promptTokens = $json.message.usage.input_tokens }
+                                } elseif ($json.type -eq "message_delta") {
+                                    if ($null -ne $json.usage.output_tokens) { $completionTokens = $json.usage.output_tokens }
+                                }
+                            } elseif ($Config.Provider -eq "gemini") {
+                                if ($null -ne $json.candidates[0].content.parts[0].text) {
+                                    $token = $json.candidates[0].content.parts[0].text
+                                }
+                                if ($null -ne $json.usageMetadata) {
+                                    if ($null -ne $json.usageMetadata.promptTokenCount) { $promptTokens = $json.usageMetadata.promptTokenCount }
+                                    if ($null -ne $json.usageMetadata.candidatesTokenCount) { $completionTokens = $json.usageMetadata.candidatesTokenCount }
+                                }
+                            } else {
+                                $token = $json.choices[0].delta.content
+                                $thinkToken = $json.choices[0].delta.reasoning_content
+                                if ($null -ne $json.usage) {
+                                    if ($null -ne $json.usage.prompt_tokens) { $promptTokens = $json.usage.prompt_tokens }
+                                    if ($null -ne $json.usage.completion_tokens) { $completionTokens = $json.usage.completion_tokens }
+                                }
                             }
 
-                            if ($ttft -eq 0 -and (-not [string]::IsNullOrEmpty($token) -or -not [string]::IsNullOrEmpty($thinkToken))) {
+                            if ($ttft -eq 0 -and (-not [string]::IsNullOrEmpty($token) -or ($Config.Provider -eq "openai" -and -not [string]::IsNullOrEmpty($thinkToken)))) {
                                 $ttft = ((Get-Date) - $chatStart).TotalMilliseconds
                             }
 
@@ -221,7 +278,6 @@ $WorkerScript = {
                                 $replyAccumulator += $token
                             }
 
-                            # 同步热更新耗时状态
                             $currTime = ((Get-Date) - $chatStart).TotalMilliseconds
                             if ($ttft -ne 0) {
                                 Set-State "🔵 正在回复 (距首字 $(Format-Time ($currTime - $ttft)))..."
@@ -240,16 +296,35 @@ $WorkerScript = {
 
             } else {
                 # [阻塞式处理引擎]
-                $Headers = @{ "Authorization" = "Bearer $($Config.ApiKey)" }
-                $resp = Invoke-RestMethod -Uri "$($Config.BaseUrl)/chat/completions" -Method Post -Headers $Headers -ContentType "application/json; charset=utf-8" -Body $reqBytes -ErrorAction Stop
+                $resp = Invoke-RestMethod -Uri $chatUrl -Method Post -Headers $authHeaders -ContentType "application/json" -Body $reqBytes -ErrorAction Stop
                 
                 $promptTokens = 0; $completionTokens = 0
-                if ($null -ne $resp.usage) {
-                    if ($null -ne $resp.usage.prompt_tokens) { $promptTokens = $resp.usage.prompt_tokens }
-                    if ($null -ne $resp.usage.completion_tokens) { $completionTokens = $resp.usage.completion_tokens }
+                $replyAccumulator = ""
+                
+                if ($Config.Provider -in @("claude", "anthropic")) {
+                    $replyAccumulator = $resp.content[0].text
+                    if ($null -ne $resp.usage) {
+                        $promptTokens = $resp.usage.input_tokens
+                        $completionTokens = $resp.usage.output_tokens
+                    }
+                } elseif ($Config.Provider -eq "gemini") {
+                    if ($null -ne $resp.candidates) {
+                        $replyAccumulator = $resp.candidates[0].content.parts[0].text
+                    }
+                    if ($null -ne $resp.usageMetadata) {
+                        $promptTokens = $resp.usageMetadata.promptTokenCount
+                        $completionTokens = $resp.usageMetadata.candidatesTokenCount
+                    }
+                } else {
+                    if ($null -ne $resp.choices) {
+                        $replyAccumulator = $resp.choices[0].message.content
+                    }
+                    if ($null -ne $resp.usage) {
+                        if ($null -ne $resp.usage.prompt_tokens) { $promptTokens = $resp.usage.prompt_tokens }
+                        if ($null -ne $resp.usage.completion_tokens) { $completionTokens = $resp.usage.completion_tokens }
+                    }
                 }
 
-                $replyAccumulator = $resp.choices[0].message.content
                 if (-not [string]::IsNullOrEmpty($replyAccumulator)) {
                     $History.Add([PSCustomObject]@{ User = $chatPrompt; Assistant = $replyAccumulator })
                 }
@@ -264,16 +339,29 @@ $WorkerScript = {
         if ($enableEmbed) {
             Set-State "🟡 等待 Embed 响应..."
             $em_prompt = Get-RandomArrayItem $Config.ChatPrompts
-            $em_reqBytes = [System.Text.Encoding]::UTF8.GetBytes((@{ model = $Config.ModelName; input = $em_prompt } | ConvertTo-Json -Depth 5 -Compress))
+            
+            if ($Config.Provider -in @("claude", "anthropic")) {
+                 # No-op natively
+                 $body = @{} 
+            } elseif ($Config.Provider -eq "gemini") {
+                 $body = @{ content = @{ parts = @(@{text=$em_prompt}) } }
+            } else {
+                 $body = @{ model = $Config.ModelName; input = $em_prompt }
+            }
+            
+            $em_reqBytes = [System.Text.Encoding]::UTF8.GetBytes(($body | ConvertTo-Json -Depth 5 -Compress))
             $emStart = Get-Date
 
-            $Headers = @{ "Authorization" = "Bearer $($Config.ApiKey)" }
-            $resp = Invoke-RestMethod -Uri "$($Config.BaseUrl)/embeddings" -Method Post -Headers $Headers -ContentType "application/json; charset=utf-8" -Body $em_reqBytes -ErrorAction Stop
+            $resp = Invoke-RestMethod -Uri $emUrl -Method Post -Headers $authHeaders -ContentType "application/json" -Body $em_reqBytes -ErrorAction Stop
             
             $promptTokens = 0; $completionTokens = 0
-            if ($null -ne $resp.usage) {
-                if ($null -ne $resp.usage.prompt_tokens) { $promptTokens = $resp.usage.prompt_tokens }
-                if ($null -ne $resp.usage.completion_tokens) { $completionTokens = $resp.usage.completion_tokens }
+            if ($Config.Provider -eq "gemini") {
+                # gemini embed parsing ignored for brevity
+            } else {
+                if ($null -ne $resp.usage) {
+                    if ($null -ne $resp.usage.prompt_tokens) { $promptTokens = $resp.usage.prompt_tokens }
+                    if ($null -ne $resp.usage.completion_tokens) { $completionTokens = $resp.usage.completion_tokens }
+                }
             }
 
             $Stats.AddOrUpdate("Success", 1, { param($k, $v) $v + 1 }) | Out-Null
@@ -329,35 +417,65 @@ $ConfigObj = @{
 Clear-Host
 Write-Host "================ 连通性支持预检 ================" -ForegroundColor Cyan
 
-$SharedHeaders = @{ "Authorization" = "Bearer $($ApiKey)" }
+$SharedHeaders = @{}
+$ModelPath = "/models"
+$ChatPath = "/chat/completions"
+$EmbedPath = "/embeddings"
 
-# 1. /models 检查
-try {
-    $resp = Invoke-RestMethod -Uri "$($BaseUrl)/models" -Method Get -Headers $SharedHeaders -TimeoutSec 5 -ErrorAction Stop
-    $count = if ($resp.data) { $resp.data.Count } else { 0 }
-    Write-Host "  /models 接口`t`t ✅ 正常 ($count models)" -ForegroundColor Green
-} catch {
-    Write-Host "  /models 接口`t`t ❌ 异常 ($($_.Exception.Message))" -ForegroundColor Red
+if ($Provider -in @('claude', 'anthropic')) { 
+    $SharedHeaders["x-api-key"] = $ApiKey 
+    $SharedHeaders["anthropic-version"] = "2023-06-01"
+    $ModelPath = "/v1/models"
+    $ChatPath = "/v1/messages"
+} elseif ($Provider -eq 'gemini') {
+    $SharedHeaders["x-goog-api-key"] = $ApiKey
+    $ModelPath = "/v1beta/models"
+    $ChatPath = "/v1beta/models/$($ModelName):generateContent"
+    $EmbedPath = "/v1beta/models/$($ModelName):embedContent"
+} else {
+    $SharedHeaders["Authorization"] = "Bearer $ApiKey"
 }
 
-# 2. /chat/completions 检查
+# 1. 厂商模型列表接口预检
 try {
-    $body = @{ model = $ModelName; messages = @(@{ role = "user"; content = "Hi" }); max_tokens = 1 }
-    $req = $body | ConvertTo-Json -Depth 5 -Compress
-    $resp = Invoke-RestMethod -Uri "$($BaseUrl)/chat/completions" -Method Post -Headers $SharedHeaders -ContentType "application/json" -Body $req -TimeoutSec 15 -ErrorAction Stop
-    Write-Host "  /chat/completions 接口`t ✅ 正常" -ForegroundColor Green
+    $resp = Invoke-RestMethod -Uri "$($BaseUrl)$ModelPath" -Method Get -Headers $SharedHeaders -TimeoutSec 5 -ErrorAction Stop
+    $count = if ($resp.data) { $resp.data.Count } elseif ($resp.models) { $resp.models.Count } else { 0 }
+    Write-Host "  $ModelPath 接口`t`t ✅ 正常 ($count models)" -ForegroundColor Green
 } catch {
-    Write-Host "  /chat/completions 接口`t ❌ 异常 ($($_.Exception.Message))" -ForegroundColor Red
+    Write-Host "  $ModelPath 接口`t`t ❌ 异常 ($($_.Exception.Message))" -ForegroundColor Red
 }
 
-# 3. /embeddings 检查
+# 2. 厂商生成接口预检
 try {
-    $body = @{ model = $ModelName; input = "Hi" }
+    if ($Provider -in @("claude", "anthropic")) {
+        $body = @{ model = $ModelName; messages = @(@{ role = "user"; content = "Hi" }); max_tokens = 1 }
+    } elseif ($Provider -eq "gemini") {
+        $body = @{ contents = @(@{ role = "user"; parts = @(@{ text = "Hi" }) }) }
+    } else {
+        $body = @{ model = $ModelName; messages = @(@{ role = "user"; content = "Hi" }); max_tokens = 1 }
+    }
     $req = $body | ConvertTo-Json -Depth 5 -Compress
-    $resp = Invoke-RestMethod -Uri "$($BaseUrl)/embeddings" -Method Post -Headers $SharedHeaders -ContentType "application/json" -Body $req -TimeoutSec 15 -ErrorAction Stop
-    Write-Host "  /embeddings 接口`t`t ✅ 正常" -ForegroundColor Green
+    
+    $resp = Invoke-RestMethod -Uri "$($BaseUrl)$ChatPath" -Method Post -Headers $SharedHeaders -ContentType "application/json" -Body $req -TimeoutSec 15 -ErrorAction Stop
+    Write-Host "  $ChatPath 接口`t ✅ 正常" -ForegroundColor Green
 } catch {
-    Write-Host "  /embeddings 接口`t`t ❌ 异常 ($($_.Exception.Message))" -ForegroundColor Red
+    Write-Host "  $ChatPath 接口`t ❌ 异常 ($($_.Exception.Message))" -ForegroundColor Red
+}
+
+# 3. 厂商 Embed 接口预检 (Anthropic原生不支持嵌入，跳过)
+if ($Provider -notin @("claude", "anthropic")) {
+    try {
+        if ($Provider -eq "gemini") {
+            $body = @{ content = @{ parts = @(@{ text = "Hi" }) } }
+        } else {
+            $body = @{ model = $ModelName; input = "Hi" }
+        }
+        $req = $body | ConvertTo-Json -Depth 5 -Compress
+        $resp = Invoke-RestMethod -Uri "$($BaseUrl)$EmbedPath" -Method Post -Headers $SharedHeaders -ContentType "application/json" -Body $req -TimeoutSec 15 -ErrorAction Stop
+        Write-Host "  $EmbedPath 接口`t`t ✅ 正常" -ForegroundColor Green
+    } catch {
+        Write-Host "  $EmbedPath 接口`t`t ❌ 异常 ($($_.Exception.Message))" -ForegroundColor Red
+    }
 }
 
 Write-Host "================ 测试概览 (并发支持) ================" -ForegroundColor Cyan
