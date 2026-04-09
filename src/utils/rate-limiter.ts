@@ -1,8 +1,8 @@
 // src/utils/rate-limiter.ts — 纯内存 RPM/TPM 限流引擎
 //
-// 基于固定时间窗口（每分钟一个桶）的高速计数器。
-// 每 60 秒自动清空所有桶，无需精确 TTL 管理。
-// 单节点部署场景下替代 Redis，零外部依赖。
+// 基于滑动时间窗口（60 秒）的高速计数器，提供平滑流控效果。
+// 后台定时清理过期计数器（免除 Redis 依赖）。
+// 单节点部署场景下的最佳实践。
 
 import { createLogger, logColors } from './logger';
 
@@ -22,45 +22,110 @@ function buildKey(scope: RateLimitScope, metric: 'rpm' | 'tpm', id: string): str
 }
 
 /**
+ * 滑动窗口计数器 (60 秒)
+ * - 划分为 60 个 1 秒的桶
+ * - 通过 Float64Array 存储数据，满足大数值 TPM (最大 9 万亿 Token/秒，无需担忧溢出)
+ */
+class SlidingWindowCounter {
+  private readonly buckets = new Float64Array(60);
+  private lastSecond: number;
+
+  public constructor() {
+    this.lastSecond = Math.floor(Date.now() / 1000);
+  }
+
+  public add(amount: number): number {
+    this.advance();
+    const curr = Math.floor(Date.now() / 1000) % 60;
+    this.buckets[curr] = (this.buckets[curr] ?? 0) + amount;
+    return this.getSum();
+  }
+
+  public get(): number {
+    this.advance();
+    return this.getSum();
+  }
+
+  private advance(): void {
+    const nowSec = Math.floor(Date.now() / 1000);
+    const diff = nowSec - this.lastSecond;
+    if (diff > 0) {
+      if (diff >= 60) {
+        this.buckets.fill(0);
+      } else {
+        for (let i = 1; i <= diff; i++) {
+          this.buckets[(this.lastSecond + i) % 60] = 0;
+        }
+      }
+      this.lastSecond = nowSec;
+    }
+  }
+
+  private getSum(): number {
+    let sum = 0;
+    for (let i = 0; i < 60; i++) {
+      sum += this.buckets[i] ?? 0;
+    }
+    return sum;
+  }
+
+  public isStale(nowSec: number): boolean {
+    return nowSec - this.lastSecond >= 60;
+  }
+}
+
+/**
  * 纯内存限流器
  *
- * 采用固定时间窗口算法，每分钟重置所有计数器。
+ * 采用滑动窗口算法，精确统计过往 60 秒的请求与 Token 消耗。
  * 提供两类操作：
  * - 查询：isLimitReached — 仅检测是否已满，不消耗额度（路由过滤阶段使用）
  * - 扣减：increment* — 实际消耗计数（中间件放行后使用）
  */
 /** @public */
 export class MemoryRateLimiterImpl {
-  /** RPM 计数器 (key → 当前分钟已消耗请求数) */
-  private readonly rpmCounters = new Map<string, number>();
+  /** RPM 计数器 */
+  private readonly rpmCounters = new Map<string, SlidingWindowCounter>();
 
-  /** TPM 计数器 (key → 当前分钟已消耗 Token 数) */
-  private readonly tpmCounters = new Map<string, number>();
+  /** TPM 计数器 */
+  private readonly tpmCounters = new Map<string, SlidingWindowCounter>();
 
-  /** 窗口清空定时器 */
+  /** 定时清理无活动计数器的定时器 */
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   /**
    * 启动限流器的后台清理任务
-   * 每 60 秒清空所有计数器（固定窗口重置）
+   * 每 5 分钟清理长达 60 秒未活动的过期计数器，防止内存泄漏。
    */
   public start(): void {
     if (this.cleanupTimer !== null) {
       return;
     }
     this.cleanupTimer = setInterval(() => {
-      const rpmSize = this.rpmCounters.size;
-      const tpmSize = this.tpmCounters.size;
-      this.rpmCounters.clear();
-      this.tpmCounters.clear();
-      if (rpmSize > 0 || tpmSize > 0) {
-        logger.debug({ rpmKeys: rpmSize, tpmKeys: tpmSize }, 'Rate limit counters reset (1-minute window)');
+      const nowSec = Math.floor(Date.now() / 1000);
+      let removed = 0;
+
+      for (const [key, counter] of this.rpmCounters.entries()) {
+        if (counter.isStale(nowSec)) {
+          this.rpmCounters.delete(key);
+          removed++;
+        }
       }
-    }, 60_000);
+      for (const [key, counter] of this.tpmCounters.entries()) {
+        if (counter.isStale(nowSec)) {
+          this.tpmCounters.delete(key);
+          removed++;
+        }
+      }
+
+      if (removed > 0) {
+        logger.debug({ gcRemoved: removed }, 'Rate limit counters GC completed');
+      }
+    }, 5 * 60_000);
 
     // 防止定时器阻止进程退出
     this.cleanupTimer.unref();
-    logger.info('Memory rate limiter started (60s fixed window)');
+    logger.info('Memory rate limiter started (60s sliding window)');
   }
 
   /**
@@ -90,7 +155,8 @@ export class MemoryRateLimiterImpl {
       return false;
     }
     const key = buildKey(scope, 'rpm', id);
-    const current = this.rpmCounters.get(key) ?? 0;
+    const counter = this.rpmCounters.get(key);
+    const current = counter ? counter.get() : 0;
     return current >= limit;
   }
 
@@ -106,7 +172,8 @@ export class MemoryRateLimiterImpl {
       return false;
     }
     const key = buildKey(scope, 'tpm', id);
-    const current = this.tpmCounters.get(key) ?? 0;
+    const counter = this.tpmCounters.get(key);
+    const current = counter ? counter.get() : 0;
     return current >= limit;
   }
 
@@ -118,9 +185,12 @@ export class MemoryRateLimiterImpl {
    */
   public incrementRpm(scope: RateLimitScope, id: string): number {
     const key = buildKey(scope, 'rpm', id);
-    const next = (this.rpmCounters.get(key) ?? 0) + 1;
-    this.rpmCounters.set(key, next);
-    return next;
+    let counter = this.rpmCounters.get(key);
+    if (!counter) {
+      counter = new SlidingWindowCounter();
+      this.rpmCounters.set(key, counter);
+    }
+    return counter.add(1);
   }
 
   /**
@@ -130,27 +200,32 @@ export class MemoryRateLimiterImpl {
    */
   public incrementTpm(scope: RateLimitScope, id: string, amount: number): number {
     const key = buildKey(scope, 'tpm', id);
-    const next = (this.tpmCounters.get(key) ?? 0) + amount;
-    this.tpmCounters.set(key, next);
-    return next;
+    let counter = this.tpmCounters.get(key);
+    if (!counter) {
+      counter = new SlidingWindowCounter();
+      this.tpmCounters.set(key, counter);
+    }
+    return counter.add(amount);
   }
 
   // ==================== 诊断（管理 API / 调试） ====================
 
   /**
-   * 获取当前窗口的 RPM 使用量
+   * 获取当前窗口（近 60 秒）的 RPM 使用量
    */
   public getRpmUsage(scope: RateLimitScope, id: string): number {
     const key = buildKey(scope, 'rpm', id);
-    return this.rpmCounters.get(key) ?? 0;
+    const counter = this.rpmCounters.get(key);
+    return counter ? counter.get() : 0;
   }
 
   /**
-   * 获取当前窗口的 TPM 使用量
+   * 获取当前窗口（近 60 秒）的 TPM 使用量
    */
   public getTpmUsage(scope: RateLimitScope, id: string): number {
     const key = buildKey(scope, 'tpm', id);
-    return this.tpmCounters.get(key) ?? 0;
+    const counter = this.tpmCounters.get(key);
+    return counter ? counter.get() : 0;
   }
 }
 
