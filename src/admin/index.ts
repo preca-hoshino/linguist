@@ -1,7 +1,7 @@
 // src/admin/index.ts — 管理 API 路由聚合
 
 import { Router } from 'express';
-import { apiKeysRouter } from './api-keys';
+import { appsRouter } from './apps';
 import { adminAuth } from './auth';
 import { copilotOAuthRouter } from './copilot-oauth';
 import { loginRouter } from './login';
@@ -27,7 +27,7 @@ adminRouter.use('/providers', providersRouter);
 adminRouter.use('/provider-models', providerModelsRouter);
 adminRouter.use('/virtual-models', virtualModelsRouter);
 adminRouter.use('/request-logs', requestLogsRouter);
-adminRouter.use('/api-keys', apiKeysRouter);
+adminRouter.use('/apps', appsRouter);
 adminRouter.use('/stats', statsRouter);
 adminRouter.use('/users', usersRouter);
 adminRouter.use('/me', meRouter);
