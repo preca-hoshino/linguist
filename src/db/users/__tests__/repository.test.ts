@@ -61,17 +61,16 @@ describe('Users Repository', () => {
     it('should handle pagination and counting', async () => {
       const mockResult = {
         rows: [
-          { id: '1', username: 'u1', full_count: '2' },
-          { id: '2', username: 'u2', full_count: '2' },
+          { id: '1', username: 'u1' },
+          { id: '2', username: 'u2' },
         ],
       };
       (db.query as jest.Mock).mockResolvedValue(mockResult);
 
-      const result = await listUsers({ limit: 10, offset: 0 });
+      const result = await listUsers({ limit: 10 });
 
-      expect(result.total).toBe(2);
+      expect(result.has_more).toBe(false);
       expect(result.data).toHaveLength(2);
-      expect((result.data[0] as Record<string, unknown>).full_count).toBeUndefined();
     });
 
     it('should apply search logic', async () => {
@@ -81,8 +80,7 @@ describe('Users Repository', () => {
 
       expect(db.query).toHaveBeenCalledWith(expect.stringContaining('username ILIKE $1 OR email ILIKE $1'), [
         '%testword%',
-        10,
-        0,
+        11,
       ]);
     });
   });
