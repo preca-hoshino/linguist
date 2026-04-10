@@ -5,7 +5,6 @@ export interface AppRow {
   [key: string]: unknown;
   id: string;
   name: string;
-  icon: string;
   auth_mode: string; // 数据库预留，当前固定 'api_key'，不对外暴露
   is_active: boolean;
   created_at: string;
@@ -17,14 +16,12 @@ export interface AppRow {
 /** API 创建输入（不含 auth_mode） */
 export interface AppCreateInput {
   name: string;
-  icon?: string | undefined;
   allowed_model_ids?: string[] | undefined;
 }
 
 /** API 更新输入（不含 auth_mode） */
 export interface AppUpdateInput {
   name?: string | undefined;
-  icon?: string | undefined;
   is_active?: boolean | undefined;
   allowed_model_ids?: string[] | undefined;
 }

@@ -32,10 +32,10 @@ const APP_SELECT = `
  */
 export async function createApp(input: AppCreateInput): Promise<AppRow> {
   const id = await generateShortId('apps');
-  const { name, icon = '', allowed_model_ids: allowedModelIds = [] } = input;
+  const { name, allowed_model_ids: allowedModelIds = [] } = input;
 
   return await withTransaction(async (tx) => {
-    await tx.query(`INSERT INTO apps (id, name, icon) VALUES ($1, $2, $3)`, [id, name, icon]);
+    await tx.query(`INSERT INTO apps (id, name) VALUES ($1, $2)`, [id, name]);
 
     // 批量插入白名单
     if (allowedModelIds.length > 0) {
@@ -71,10 +71,12 @@ export async function listApps(options?: {
   limit?: number;
   starting_after?: string;
   search?: string;
+  is_active?: boolean;
 }): Promise<{ data: AppRow[]; has_more: boolean }> {
   const limit = Math.min(Math.max(options?.limit ?? 10, 1), 100);
   const startingAfter = options?.starting_after;
   const search = options?.search;
+  const isActive = options?.is_active;
 
   const conditions: string[] = [];
   const values: unknown[] = [];
@@ -91,6 +93,13 @@ export async function listApps(options?: {
   if (typeof search === 'string' && search.trim() !== '') {
     conditions.push(`a.name ILIKE $${String(paramIdx)}`);
     values.push(`%${search.trim()}%`);
+    paramIdx++;
+  }
+
+  // 状态过滤
+  if (typeof isActive === 'boolean') {
+    conditions.push(`a.is_active = $${String(paramIdx)}`);
+    values.push(isActive);
     paramIdx++;
   }
 
@@ -134,7 +143,6 @@ export async function updateApp(id: string, updates: AppUpdateInput): Promise<Ap
     // 更新基本字段
     const update = buildUpdateSet({
       name: fieldUpdates.name,
-      icon: fieldUpdates.icon,
       is_active: fieldUpdates.is_active,
     });
 

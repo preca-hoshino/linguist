@@ -20,17 +20,23 @@ const router: Router = Router();
 // GET /api/apps?limit=10&starting_after=abc123&search=xxx
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { limit, starting_after, search } = req.query;
+    const { limit, starting_after, search, is_active } = req.query;
     const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : undefined;
     const startingAfter = typeof starting_after === 'string' ? starting_after : undefined;
     const searchStr = typeof search === 'string' ? search : undefined;
+    const isActiveParam =
+      typeof is_active === 'string' && is_active !== '' ? is_active.toLowerCase() === 'true' : undefined;
 
-    logger.debug({ search: searchStr, limit: limitNum, starting_after: startingAfter }, 'Listing apps');
+    logger.debug(
+      { search: searchStr, limit: limitNum, starting_after: startingAfter, is_active: isActiveParam },
+      'Listing apps',
+    );
 
     const result = await listApps({
       ...(limitNum !== undefined ? { limit: limitNum } : {}),
       ...(startingAfter !== undefined ? { starting_after: startingAfter } : {}),
       ...(searchStr !== undefined ? { search: searchStr } : {}),
+      ...(isActiveParam !== undefined ? { is_active: isActiveParam } : {}),
     });
 
     const data = result.data.map((a) => ({ object: 'app' as const, ...a }));
@@ -69,15 +75,15 @@ router.get('/:id', async (req: Request<{ id: string }>, res: Response) => {
 // POST /api/apps
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const body = req.body as { name?: string; icon?: string; allowed_model_ids?: string[] };
-    const { name, icon, allowed_model_ids } = body;
+    const body = req.body as { name?: string; allowed_model_ids?: string[] };
+    const { name, allowed_model_ids } = body;
 
     if (typeof name !== 'string' || name === '') {
       throw new GatewayError(400, 'invalid_request', 'Field "name" is required and must be a non-empty string');
     }
 
     logger.debug({ name }, 'Creating app');
-    const app = await createApp({ name, icon, allowed_model_ids });
+    const app = await createApp({ name, allowed_model_ids });
     logger.info({ id: app.id, name }, 'App created via admin API');
     res.status(201).json({ object: 'app', ...app });
   } catch (error) {
@@ -90,7 +96,7 @@ router.post('/', async (req: Request, res: Response) => {
 router.post('/:id', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const { id } = req.params;
-    const body = req.body as { name?: string; icon?: string; is_active?: boolean; allowed_model_ids?: string[] };
+    const body = req.body as { name?: string; is_active?: boolean; allowed_model_ids?: string[] };
 
     logger.debug({ id }, 'Updating app');
     const app = await updateApp(id, body);
