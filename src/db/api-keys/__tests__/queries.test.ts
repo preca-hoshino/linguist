@@ -1,6 +1,6 @@
 import { db } from '@/db/client';
 import { generateShortId } from '@/db/id-generator';
-import { invalidateApiKeyCache, lookupKeyHash } from '../cache';
+import { invalidateApiKeyCache, lookupKey } from '../cache';
 import {
   createApiKey,
   deleteApiKey,
@@ -23,7 +23,7 @@ jest.mock('@/db/id-generator', () => ({
 
 jest.mock('../cache', () => ({
   invalidateApiKeyCache: jest.fn(),
-  lookupKeyHash: jest.fn(),
+  lookupKey: jest.fn(),
 }));
 
 describe('API Keys Queries', () => {
@@ -32,33 +32,43 @@ describe('API Keys Queries', () => {
   });
 
   describe('createApiKey', () => {
-    it('should create an API key and return it', async () => {
+    it('should create an API key under an app and return it', async () => {
       (generateShortId as jest.Mock).mockResolvedValue('ak_123');
       const mockResult = {
-        rows: [{ id: 'ak_123', name: 'Test Key', key_prefix: 'lk-abcdef', expires_at: null }],
+        rows: [
+          {
+            id: 'ak_123',
+            app_id: 'app_1',
+            name: 'Test Key',
+            key_value: 'lk-abc',
+            key_prefix: 'lk-abcdef',
+            expires_at: null,
+          },
+        ],
       };
       (db.query as jest.Mock).mockResolvedValue(mockResult);
 
-      const result = await createApiKey('Test Key');
+      const result = await createApiKey('app_1', 'Test Key');
 
       expect(generateShortId).toHaveBeenCalledWith('api_keys');
       expect(db.query).toHaveBeenCalledWith(expect.any(String), [
         'ak_123',
+        'app_1',
         'Test Key',
-        expect.any(String), // hash
+        expect.any(String), // key_value
         expect.any(String), // prefix
         null,
       ]);
       expect(invalidateApiKeyCache).toHaveBeenCalled();
       expect(result.id).toBe('ak_123');
-      expect(result.key).toMatch(/^lk-[a-f0-9]{48}$/);
+      expect(result.app_id).toBe('app_1');
     });
 
     it('should throw if no row is returned', async () => {
       (generateShortId as jest.Mock).mockResolvedValue('ak_123');
       (db.query as jest.Mock).mockResolvedValue({ rows: [] });
 
-      await expect(createApiKey('Test Key')).rejects.toThrow('Failed to create API key: no row returned');
+      await expect(createApiKey('app_1', 'Test Key')).rejects.toThrow('Failed to create API key: no row returned');
     });
   });
 
@@ -91,6 +101,15 @@ describe('API Keys Queries', () => {
         10,
         0,
       ]);
+    });
+
+    it('should filter by appId', async () => {
+      const mockResult = { rows: [] };
+      (db.query as jest.Mock).mockResolvedValue(mockResult);
+
+      await listApiKeys({ appId: 'app_1' });
+
+      expect(db.query).toHaveBeenCalledWith(expect.stringContaining('WHERE app_id = $1'), ['app_1', 10, 0]);
     });
 
     it('should return empty list when no keys exist', async () => {
@@ -153,20 +172,19 @@ describe('API Keys Queries', () => {
   });
 
   describe('rotateApiKey', () => {
-    it('should rotate key and return new plain key', async () => {
-      const keyData = { id: 'ak_1', name: 'Key 1' };
+    it('should rotate key and return new key_value', async () => {
+      const keyData = { id: 'ak_1', name: 'Key 1', key_value: 'lk-new' };
       (db.query as jest.Mock).mockResolvedValue({ rowCount: 1, rows: [keyData] });
 
       const result = await rotateApiKey('ak_1');
 
       expect(db.query).toHaveBeenCalledWith(expect.any(String), [
         'ak_1',
-        expect.any(String), // new hash
+        expect.any(String), // new key_value
         expect.any(String), // new prefix
       ]);
       expect(invalidateApiKeyCache).toHaveBeenCalled();
       expect(result?.id).toBe('ak_1');
-      expect(result?.key).toMatch(/^lk-[a-f0-9]{48}$/);
     });
 
     it('should return null if key not found', async () => {
@@ -199,19 +217,19 @@ describe('API Keys Queries', () => {
   });
 
   describe('validateApiKey', () => {
-    it('should return user info if valid', async () => {
+    it('should return user info with appId if valid', async () => {
       const date = new Date();
       date.setFullYear(date.getFullYear() + 1); // Future
-      (lookupKeyHash as jest.Mock).mockResolvedValue({ id: 'ak_1', name: 'Valid Key', expiresAt: date });
+      (lookupKey as jest.Mock).mockResolvedValue({ id: 'ak_1', name: 'Valid Key', appId: 'app_1', expiresAt: date });
 
       const result = await validateApiKey('lk-some-valid-key');
 
-      expect(lookupKeyHash).toHaveBeenCalled();
-      expect(result).toEqual({ id: 'ak_1', name: 'Valid Key' });
+      expect(lookupKey).toHaveBeenCalledWith('lk-some-valid-key');
+      expect(result).toEqual({ id: 'ak_1', name: 'Valid Key', appId: 'app_1' });
     });
 
     it('should return null if not cached/found', async () => {
-      (lookupKeyHash as jest.Mock).mockResolvedValue(null);
+      (lookupKey as jest.Mock).mockResolvedValue(undefined);
 
       const result = await validateApiKey('lk-invalid-key');
 
@@ -220,7 +238,7 @@ describe('API Keys Queries', () => {
 
     it('should return null if expired', async () => {
       const date = new Date('2020-01-01T00:00:00Z'); // Past
-      (lookupKeyHash as jest.Mock).mockResolvedValue({ id: 'ak_1', name: 'Expired Key', expiresAt: date });
+      (lookupKey as jest.Mock).mockResolvedValue({ id: 'ak_1', name: 'Expired Key', appId: 'app_1', expiresAt: date });
 
       const result = await validateApiKey('lk-expired-key');
 
@@ -228,11 +246,16 @@ describe('API Keys Queries', () => {
     });
 
     it('should return user info if valid and no expiration', async () => {
-      (lookupKeyHash as jest.Mock).mockResolvedValue({ id: 'ak_1', name: 'No Expire Key', expiresAt: null });
+      (lookupKey as jest.Mock).mockResolvedValue({
+        id: 'ak_1',
+        name: 'No Expire Key',
+        appId: 'app_1',
+        expiresAt: null,
+      });
 
       const result = await validateApiKey('lk-no-expire-key');
 
-      expect(result).toEqual({ id: 'ak_1', name: 'No Expire Key' });
+      expect(result).toEqual({ id: 'ak_1', name: 'No Expire Key', appId: 'app_1' });
     });
   });
 });
