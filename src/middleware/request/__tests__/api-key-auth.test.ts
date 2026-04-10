@@ -1,10 +1,15 @@
 import { validateApiKey } from '@/db/api-keys';
+import { lookupApp } from '@/db/apps';
 import type { GatewayContext } from '@/types';
 import { GatewayError } from '@/utils';
 import { apiKeyAuth } from '../api-key-auth';
 
 jest.mock('@/db/api-keys', () => ({
   validateApiKey: jest.fn(),
+}));
+
+jest.mock('@/db/apps', () => ({
+  lookupApp: jest.fn(),
 }));
 
 jest.mock('@/utils', () => ({
@@ -58,12 +63,25 @@ describe('apiKeyAuth middleware', () => {
     expect(validateApiKey).toHaveBeenCalledWith('sk-test12345678');
   });
 
-  it('should set apiKeyName and pass if key is valid', async () => {
-    (validateApiKey as jest.Mock).mockResolvedValue({ name: 'My App Key' });
+  it('should set apiKeyName, appId and appName if key is valid', async () => {
+    (validateApiKey as jest.Mock).mockResolvedValue({ id: 'ak_1', name: 'My App Key', appId: 'app_1' });
+    (lookupApp as jest.Mock).mockResolvedValue({ id: 'app_1', name: 'My App', isActive: true, allowedModelIds: [] });
 
     await apiKeyAuth(mockCtx as GatewayContext);
 
     expect(validateApiKey).toHaveBeenCalledWith('sk-test12345678');
     expect(mockCtx.apiKeyName).toBe('My App Key');
+    expect(mockCtx.appId).toBe('app_1');
+    expect(mockCtx.appName).toBe('My App');
+  });
+
+  it('should set appId but not appName if app not found in cache', async () => {
+    (validateApiKey as jest.Mock).mockResolvedValue({ id: 'ak_1', name: 'My App Key', appId: 'app_99' });
+    (lookupApp as jest.Mock).mockResolvedValue(undefined);
+
+    await apiKeyAuth(mockCtx as GatewayContext);
+
+    expect(mockCtx.appId).toBe('app_99');
+    expect(mockCtx.appName).toBeUndefined();
   });
 });
