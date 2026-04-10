@@ -42,50 +42,48 @@ export async function findById(id: string): Promise<UserRow | null> {
   return result.rows[0] ?? null;
 }
 
-/**
- * 列出所有用户（安全字段）
- */
 export async function listUsers(options?: {
   limit?: number;
-  offset?: number;
+  starting_after?: string;
   search?: string;
-}): Promise<{ data: UserRow[]; total: number }> {
-  const limitNum = options?.limit ?? 10;
-  const offsetNum = options?.offset ?? 0;
+}): Promise<{ data: UserRow[]; has_more: boolean }> {
+  const limit = Math.min(Math.max(options?.limit ?? 10, 1), 100);
+  const startingAfter = options?.starting_after;
   const search = options?.search;
 
   const conditions: string[] = [];
   const values: unknown[] = [];
+  let paramIdx = 1;
+
+  if (typeof startingAfter === 'string' && startingAfter.trim() !== '') {
+    conditions.push(`created_at < (SELECT created_at FROM users WHERE id = $${String(paramIdx)})`);
+    values.push(startingAfter);
+    paramIdx++;
+  }
 
   if (typeof search === 'string' && search.trim() !== '') {
-    conditions.push(`(username ILIKE $${String(values.length + 1)} OR email ILIKE $${String(values.length + 1)})`);
+    conditions.push(`(username ILIKE $${String(paramIdx)} OR email ILIKE $${String(paramIdx)})`);
     values.push(`%${search.trim()}%`);
+    paramIdx++;
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const fetchLimit = limit + 1;
+  values.push(fetchLimit);
 
   const sql = `
-    SELECT ${SAFE_COLUMNS}, COUNT(*) OVER() AS full_count
+    SELECT ${SAFE_COLUMNS}
     FROM users
     ${whereClause}
     ORDER BY created_at DESC
-    LIMIT $${String(values.length + 1)} OFFSET $${String(values.length + 2)}
+    LIMIT $${String(paramIdx)}
   `;
 
-  values.push(limitNum, offsetNum);
+  const result = await db.query<UserRow>(sql, values);
+  const hasMore = result.rows.length > limit;
+  const data = hasMore ? result.rows.slice(0, limit) : result.rows;
 
-  const result = await db.query<UserRow & { full_count: string }>(sql, values);
-  const rows = result.rows;
-  const firstRow = rows[0];
-  const total = firstRow ? Number.parseInt(firstRow.full_count, 10) : 0;
-
-  const data = rows.map((row) => {
-    // eslint-disable-next-line @typescript-eslint/naming-convention
-    const { full_count: _full_count, ...rest } = row;
-    return rest as UserRow;
-  });
-
-  return { data, total };
+  return { data, has_more: hasMore };
 }
 
 /**

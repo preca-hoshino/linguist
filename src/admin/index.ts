@@ -22,6 +22,10 @@ adminRouter.use(loginRouter);
 // 所有其他管理路由都需要认证
 adminRouter.use(adminAuth);
 
+// 挂载 Stripe 哲学的幂等性捕捉层 (用于处理所有 POST 并捕获 Idempotency-Key)
+import { idempotencyMiddleware } from './idempotency';
+adminRouter.use(idempotencyMiddleware);
+
 // 挂载子路由
 adminRouter.use('/providers', providersRouter);
 adminRouter.use('/provider-models', providerModelsRouter);
