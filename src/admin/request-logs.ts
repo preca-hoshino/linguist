@@ -45,8 +45,9 @@ router.get('/', async (req: Request, res: Response) => {
       api_key_prefix,
       user_format,
       is_stream,
+      app_id,
       limit,
-      offset,
+      starting_after,
     } = req.query;
     logger.debug(
       {
@@ -58,8 +59,9 @@ router.get('/', async (req: Request, res: Response) => {
         api_key_prefix,
         user_format,
         is_stream,
+        app_id,
         limit,
-        offset,
+        starting_after,
       },
       'Querying request logs',
     );
@@ -74,7 +76,7 @@ router.get('/', async (req: Request, res: Response) => {
     }
 
     const limitNum = typeof limit === 'string' && limit !== '' ? Number.parseInt(limit, 10) : undefined;
-    const offsetNum = typeof offset === 'string' && offset !== '' ? Number.parseInt(offset, 10) : undefined;
+    const startingAfter = typeof starting_after === 'string' && starting_after !== '' ? starting_after : undefined;
 
     const result = await queryRequestLogs({
       status: typeof status === 'string' && status !== '' ? (status as RequestLogStatus) : undefined,
@@ -85,14 +87,13 @@ router.get('/', async (req: Request, res: Response) => {
       api_key_prefix: typeof api_key_prefix === 'string' && api_key_prefix !== '' ? api_key_prefix : undefined,
       user_format: typeof user_format === 'string' && user_format !== '' ? user_format : undefined,
       is_stream: typeof is_stream === 'string' && is_stream !== '' ? is_stream === 'true' : undefined,
+      app_id: typeof app_id === 'string' && app_id !== '' ? app_id : undefined,
       limit: limitNum,
-      offset: offsetNum,
+      starting_after: startingAfter,
     });
 
-    const hasMore = (offsetNum ?? 0) + result.data.length < result.total;
-
-    logger.debug({ total: result.total, returned: result.data.length, has_more: hasMore }, 'Request logs queried');
-    res.json({ object: 'list', data: result.data, total: result.total, has_more: hasMore });
+    logger.debug({ returned: result.data.length, has_more: result.has_more }, 'Request logs queried');
+    res.json({ object: 'list', data: result.data, has_more: result.has_more });
   } catch (error) {
     handleAdminError(error, res);
   }
