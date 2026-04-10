@@ -1,6 +1,7 @@
 // src/middleware/request/api-key-auth.ts — 用户侧 API Key 鉴权中间件
 
 import { validateApiKey } from '@/db/api-keys';
+import { lookupApp } from '@/db/apps';
 import type { GatewayContext } from '@/types';
 import { createLogger, GatewayError, logColors } from '@/utils';
 
@@ -11,6 +12,7 @@ const logger = createLogger('Middleware:ApiKeyAuth', logColors.bold + logColors.
  *
  * 从 GatewayContext.apiKey 读取用户提供的 API Key，
  * 验证其在数据库中是否存在且活跃（通过内存缓存加速）。
+ * 同时提取所属 App 信息写入上下文。
  *
  * 鉴权失败时抛出 GatewayError（401）。
  *
@@ -44,5 +46,16 @@ export async function apiKeyAuth(ctx: GatewayContext): Promise<void> {
   }
 
   ctx.apiKeyName = keyInfo.name;
-  logger.debug({ requestId: ctx.id, keyPrefix: rawKey.slice(0, 11), keyName: keyInfo.name }, 'API key auth passed');
+
+  // 写入 App 信息
+  ctx.appId = keyInfo.appId;
+  const appEntry = await lookupApp(keyInfo.appId);
+  if (appEntry) {
+    ctx.appName = appEntry.name;
+  }
+
+  logger.debug(
+    { requestId: ctx.id, keyPrefix: rawKey.slice(0, 11), keyName: keyInfo.name, appId: ctx.appId },
+    'API key auth passed',
+  );
 }
