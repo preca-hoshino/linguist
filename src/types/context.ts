@@ -30,6 +30,12 @@ export interface GatewayContext {
   /** API Key 分配的名称（若存在） */
   apiKeyName?: string | undefined;
 
+  /** 所属应用 ID */
+  appId?: string | undefined;
+
+  /** 所属应用名称 */
+  appName?: string | undefined;
+
   // --- HTTP 入站元数据 ---
 
   /** HTTP 请求元信息（入站侧 method / path / UA） */

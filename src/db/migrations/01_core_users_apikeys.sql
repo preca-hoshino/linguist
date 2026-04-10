@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS api_keys (
 CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active);
 CREATE INDEX IF NOT EXISTS idx_users_email  ON users(email);
 
-CREATE INDEX IF NOT EXISTS idx_ak_hash    ON api_keys(key_hash);
+
 CREATE INDEX IF NOT EXISTS idx_ak_active  ON api_keys(is_active);
 CREATE INDEX IF NOT EXISTS idx_ak_prefix  ON api_keys(key_prefix);
 

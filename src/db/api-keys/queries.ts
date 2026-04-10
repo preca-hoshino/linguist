@@ -1,17 +1,18 @@
 // src/db/api-keys/queries.ts — API Key CRUD 查询
+// 明文存储，无 hash 计算
 
 import crypto from 'node:crypto';
 import { db } from '@/db/client';
 import { generateShortId } from '@/db/id-generator';
 import { buildUpdateSet, createLogger } from '@/utils';
-import { invalidateApiKeyCache, lookupKeyHash } from './cache';
-import type { ApiKeyCreateResult, ApiKeySummary } from './types';
+import { invalidateApiKeyCache, lookupKey } from './cache';
+import type { ApiKeySummary } from './types';
 
 const logger = createLogger('ApiKeys');
 
 // ==================== 列字段常量 ====================
 
-const SUMMARY_COLUMNS = 'id, name, key_prefix, is_active, expires_at, created_at, updated_at';
+const SUMMARY_COLUMNS = 'id, app_id, name, key_value, key_prefix, is_active, expires_at, created_at, updated_at';
 
 // ==================== 内部工具函数 ====================
 
@@ -19,11 +20,6 @@ const SUMMARY_COLUMNS = 'id, name, key_prefix, is_active, expires_at, created_at
 function generateApiKey(): string {
   const random = crypto.randomBytes(24).toString('hex');
   return `lk-${random}`;
-}
-
-/** SHA-256 哈希 */
-function hashKey(key: string): string {
-  return crypto.createHash('sha256').update(key).digest('hex');
 }
 
 /** 提取前缀用于展示 (如 "lk-a3b4c5d6") */
@@ -34,22 +30,22 @@ function extractPrefix(key: string): string {
 // ==================== 服务函数 ====================
 
 /**
- * 创建 API Key
+ * 创建 API Key（隶属于指定 App）
+ * @param appId 所属应用 ID
  * @param name 描述性名称
  * @param expiresAt 可选过期时间
- * @returns 包含明文 key 的创建结果（仅此一次）
+ * @returns 包含完整 key_value 的结果（明文永久可查）
  */
-export async function createApiKey(name: string, expiresAt?: string): Promise<ApiKeyCreateResult> {
+export async function createApiKey(appId: string, name: string, expiresAt?: string): Promise<ApiKeySummary> {
   const key = generateApiKey();
-  const hash = hashKey(key);
   const prefix = extractPrefix(key);
   const id = await generateShortId('api_keys');
 
   const result = await db.query<ApiKeySummary>(
-    `INSERT INTO api_keys (id, name, key_hash, key_prefix, expires_at)
-     VALUES ($1, $2, $3, $4, $5)
+    `INSERT INTO api_keys (id, app_id, name, key_value, key_prefix, expires_at)
+     VALUES ($1, $2, $3, $4, $5, $6)
      RETURNING ${SUMMARY_COLUMNS}`,
-    [id, name, hash, prefix, expiresAt ?? null],
+    [id, appId, name, key, prefix, expiresAt ?? null],
   );
 
   const row = result.rows[0];
@@ -58,13 +54,14 @@ export async function createApiKey(name: string, expiresAt?: string): Promise<Ap
   }
   logger.info({ id: row.id, name, prefix }, 'API key created');
   invalidateApiKeyCache();
-  return { ...row, key };
+  return row;
 }
 
 /**
- * 列出所有 API Key（不含哈希）
+ * 列出 API Key（支持按 appId 筛选）
  */
 export async function listApiKeys(options?: {
+  appId?: string;
   limit?: number;
   offset?: number;
   search?: string;
@@ -72,9 +69,15 @@ export async function listApiKeys(options?: {
   const limitNum = options?.limit ?? 10;
   const offsetNum = options?.offset ?? 0;
   const search = options?.search;
+  const appId = options?.appId;
 
   const conditions: string[] = [];
   const values: unknown[] = [];
+
+  if (typeof appId === 'string' && appId.trim() !== '') {
+    conditions.push(`app_id = $${String(values.length + 1)}`);
+    values.push(appId);
+  }
 
   if (typeof search === 'string' && search.trim() !== '') {
     conditions.push(`(name ILIKE $${String(values.length + 1)} OR key_prefix ILIKE $${String(values.length + 1)})`);
@@ -154,18 +157,17 @@ export async function updateApiKey(
 
 /**
  * 轮换 API Key（重新生成密钥，保留元数据）
- * @returns 包含新明文 key 的结果
+ * @returns 含新 key_value 的结果（明文永久可查）
  */
-export async function rotateApiKey(id: string): Promise<ApiKeyCreateResult | null> {
+export async function rotateApiKey(id: string): Promise<ApiKeySummary | null> {
   const key = generateApiKey();
-  const hash = hashKey(key);
   const prefix = extractPrefix(key);
 
   const result = await db.query<ApiKeySummary>(
-    `UPDATE api_keys SET key_hash = $2, key_prefix = $3
+    `UPDATE api_keys SET key_value = $2, key_prefix = $3
      WHERE id = $1
      RETURNING ${SUMMARY_COLUMNS}`,
-    [id, hash, prefix],
+    [id, key, prefix],
   );
 
   if (result.rowCount === 0) {
@@ -178,7 +180,7 @@ export async function rotateApiKey(id: string): Promise<ApiKeyCreateResult | nul
     return null;
   }
   logger.info({ id, prefix }, 'API key rotated');
-  return { ...row, key };
+  return row;
 }
 
 /**
@@ -201,11 +203,10 @@ export async function deleteApiKey(id: string): Promise<boolean> {
  * 验证 API Key 是否有效
  * 先查内存缓存，缓存未命中则加载
  * @param rawKey 明文 API Key
- * @returns 有效返回 true，无效返回 false
+ * @returns 有效返回 { id, name, appId }，无效返回 null
  */
-export async function validateApiKey(rawKey: string): Promise<{ id: string; name: string } | null> {
-  const hash = hashKey(rawKey);
-  const cached = await lookupKeyHash(hash);
+export async function validateApiKey(rawKey: string): Promise<{ id: string; name: string; appId: string } | null> {
+  const cached = await lookupKey(rawKey);
 
   if (!cached) {
     return null;
@@ -216,5 +217,5 @@ export async function validateApiKey(rawKey: string): Promise<{ id: string; name
     return null;
   }
 
-  return { id: cached.id, name: cached.name };
+  return { id: cached.id, name: cached.name, appId: cached.appId };
 }

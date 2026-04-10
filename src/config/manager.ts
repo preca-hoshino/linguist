@@ -1,5 +1,6 @@
 import type { Client } from 'pg';
 import { createListenClient, db, invalidateApiKeyCache } from '@/db';
+import { invalidateAppCache } from '@/db/apps';
 import type {
   ProviderAdvancedConfig,
   ProviderConfig,
@@ -331,6 +332,14 @@ export class ConfigManager {
         if (msg.payload?.startsWith('api_keys:')) {
           invalidateApiKeyCache();
           logger.info('API key cache invalidated due to database change');
+          return;
+        }
+
+        // Apps 表变更时刷新 App 缓存 + Key 缓存（Key 加载依赖 App 活跃状态）
+        if (msg.payload?.startsWith('apps:') || msg.payload?.startsWith('app_allowed_models:')) {
+          invalidateAppCache();
+          invalidateApiKeyCache();
+          logger.info('App and API key caches invalidated due to database change');
           return;
         }
 
