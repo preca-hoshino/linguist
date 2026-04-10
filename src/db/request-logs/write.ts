@@ -328,6 +328,8 @@ function buildCtxSnapshot(ctx: GatewayContext): Record<string, unknown> {
     ip: ctx.ip,
     apiKeyPrefix: ctx.apiKeyPrefix,
     apiKeyName: ctx.apiKeyName,
+    appId: ctx.appId,
+    appName: ctx.appName,
     userFormat: ctx.userFormat,
     http: ctx.http,
     requestModel: ctx.requestModel,
