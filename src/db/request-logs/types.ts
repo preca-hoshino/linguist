@@ -49,6 +49,7 @@ export interface RequestLogQuery {
   api_key_prefix?: string | string[] | undefined;
   user_format?: string | string[] | undefined;
   is_stream?: string | string[] | boolean | undefined;
+  app_id?: string | string[] | undefined;
   starting_after?: string | undefined;
   limit?: number | undefined;
 }
