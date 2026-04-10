@@ -2,6 +2,7 @@ name: PR Branch Compliance Check
 
 on:
   pull_request:
+    types: [opened, synchronize, reopened, edited]
     # 针对目标为 master 和 develop 的 PR 进行拦截与校验
     branches:
       - master
@@ -42,3 +43,22 @@ jobs:
             fi
             echo "✅ 来源分支规范校验通过。"
           fi
+
+      - name: 📝 Check PR Title Rules
+        run: |
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          echo "🏷️ PR 标题: $PR_TITLE"
+          
+          if echo "$PR_TITLE" | grep -qE "^Merge (branch|pull request) "; then
+            echo "✅ 系统默认合并标题，跳过校验。"
+            exit 0
+          fi
+          
+          PATTERN="^\[(Add|Fix|Ref|Del|Doc|Chore|Style|Test|Merge)\]\([^)]+\): .+"
+          if ! echo "$PR_TITLE" | grep -qE "$PATTERN"; then
+            echo "::error::❌ PR 标题不符合规范！"
+            echo "::error::规定格式: [Type](scope): 简短描述信息"
+            echo "::error::示例: [Add](api): Add user route"
+            exit 1
+          fi
+          echo "✅ PR 标题规范校验通过。"
