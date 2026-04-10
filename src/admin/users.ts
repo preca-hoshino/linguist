@@ -15,14 +15,15 @@ export const publicUsersRouter: Router = Router();
 /** GET /api/users — 列出所有用户 */
 usersRouter.get('/', async (req: Request, res: Response) => {
   try {
-    const { search, limit, offset } = req.query;
-    const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : 10;
-    const offsetNum = typeof offset === 'string' && offset !== '' ? Number.parseInt(offset, 10) : 0;
+    const { search, limit, starting_after } = req.query;
+    const limitNum =
+      typeof limit === 'string' && limit !== '' ? Math.min(Math.max(Number.parseInt(limit, 10), 1), 100) : 10;
+    const startingAfter = typeof starting_after === 'string' ? starting_after : undefined;
     const searchStr = typeof search === 'string' ? search : undefined;
 
-    const { data: users, total } = await listUsers({
+    const { data: users, has_more } = await listUsers({
       limit: limitNum,
-      offset: offsetNum,
+      ...(startingAfter === undefined ? {} : { starting_after: startingAfter }),
       ...(searchStr === undefined ? {} : { search: searchStr }),
     });
 
@@ -38,9 +39,7 @@ usersRouter.get('/', async (req: Request, res: Response) => {
       updated_at: u.updated_at,
     }));
 
-    const hasMore = offsetNum + data.length < total;
-
-    res.json({ object: 'list', data, total, has_more: hasMore });
+    res.json({ object: 'list', data, has_more });
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -90,8 +89,8 @@ usersRouter.post('/', async (req: Request, res: Response) => {
   }
 });
 
-/** PATCH /api/users/:id — 通用用户更新（支持部分字段） */
-usersRouter.patch('/:id', async (req: Request, res: Response) => {
+/** POST /api/users/:id — 通用用户更新（支持部分字段） */
+usersRouter.post('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const { username, email, password, avatar_data, is_active } = req.body as {
