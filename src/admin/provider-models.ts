@@ -3,7 +3,7 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { db, generateShortId } from '@/db';
-import { buildUpdateSet, createLogger, GatewayError, logColors, rateLimiter } from '@/utils';
+import { buildInClause, buildUpdateSet, createLogger, GatewayError, logColors, rateLimiter } from '@/utils';
 import { handleAdminError } from './error';
 
 const logger = createLogger('Admin:ProviderModels', logColors.bold + logColors.blue);
@@ -139,57 +139,80 @@ const router: Router = Router();
 // ==================== 列出所有提供商模型 ====================
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { provider_id, search, limit, offset } = req.query;
-    const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : 10;
-    const offsetNum = typeof offset === 'string' && offset !== '' ? Number.parseInt(offset, 10) : 0;
+    const { provider_id, model_type, is_active, search, limit, starting_after } = req.query;
+    const limitNum =
+      typeof limit === 'string' && limit !== '' ? Math.min(Math.max(Number.parseInt(limit, 10), 1), 100) : 10;
+    const startingAfter = typeof starting_after === 'string' ? starting_after : undefined;
 
     logger.debug(
-      { providerId: provider_id ?? 'all', search, limit: limitNum, offset: offsetNum },
+      { providerId: provider_id ?? 'all', search, limit: limitNum, starting_after: startingAfter, is_active },
       'Listing provider models',
     );
 
     const conditions: string[] = [];
     const values: unknown[] = [];
+    let paramIdx = 1;
 
-    if (typeof provider_id === 'string' && provider_id !== '') {
-      conditions.push(`pm.provider_id = $${String(values.length + 1)}`);
-      values.push(provider_id);
+    // 布尔筛选：is_active
+    if (typeof is_active === 'string' && (is_active === 'true' || is_active === 'false')) {
+      conditions.push(`pm.is_active = $${String(paramIdx)}`);
+      values.push(is_active === 'true');
+      paramIdx++;
+    }
+
+    const pidIn = buildInClause('pm.provider_id', provider_id as string | string[] | undefined, paramIdx);
+    if (pidIn) {
+      conditions.push(pidIn.clause);
+      values.push(...pidIn.values);
+      paramIdx = pidIn.nextIdx;
+    }
+
+    const typeIn = buildInClause('pm.model_type', model_type as string | string[] | undefined, paramIdx);
+    if (typeIn) {
+      conditions.push(typeIn.clause);
+      values.push(...typeIn.values);
+      paramIdx = typeIn.nextIdx;
+    }
+
+    if (typeof startingAfter === 'string' && startingAfter.trim() !== '') {
+      conditions.push(`pm.created_at < (SELECT created_at FROM provider_models WHERE id = $${String(paramIdx)})`);
+      values.push(startingAfter);
+      paramIdx++;
     }
 
     if (typeof search === 'string' && search.trim() !== '') {
       conditions.push(
-        `(pm.name ILIKE $${String(values.length + 1)} OR pm.model_type ILIKE $${String(
-          values.length + 1,
-        )} OR p.name ILIKE $${String(values.length + 1)})`,
+        `(pm.name ILIKE $${String(paramIdx)} OR pm.model_type ILIKE $${String(
+          paramIdx,
+        )} OR p.name ILIKE $${String(paramIdx)})`,
       );
       values.push(`%${search.trim()}%`);
+      paramIdx++;
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const fetchLimit = limitNum + 1;
+    values.push(fetchLimit);
 
     const sql = `
       SELECT pm.id, pm.provider_id, pm.name, pm.model_type, pm.capabilities, pm.parameters,
              pm.model_config, pm.max_tokens, pm.is_active, pm.pricing_tiers, pm.rpm_limit, pm.tpm_limit,
              pm.created_at, pm.updated_at,
-             p.name AS provider_name, p.kind AS provider_kind,
-             COUNT(*) OVER() AS full_count
+             p.name AS provider_name, p.kind AS provider_kind
       FROM provider_models pm
       JOIN providers p ON pm.provider_id = p.id
       ${whereClause}
       ORDER BY pm.created_at DESC
-      LIMIT $${String(values.length + 1)} OFFSET $${String(values.length + 2)}
+      LIMIT $${String(paramIdx)}
     `;
 
-    values.push(limitNum, offsetNum);
-
     const result = await db.query(sql, values);
-    const rows = result.rows;
-    const firstRow = rows[0] as { full_count: string } | undefined;
-    const total = firstRow ? Number.parseInt(firstRow.full_count, 10) : 0;
 
-    const data = rows.map((row) => {
-      // eslint-disable-next-line @typescript-eslint/naming-convention
-      const { full_count: _full_count, ...rest } = row;
+    const hasMore = result.rows.length > limitNum;
+    const dataRows = hasMore ? result.rows.slice(0, limitNum) : result.rows;
+
+    const data = dataRows.map((row) => {
+      const rest = row;
       const id = rest.id as string;
       const throughput = {
         rpm: rateLimiter.getRpmUsage('pm', id),
@@ -198,10 +221,8 @@ router.get('/', async (req: Request, res: Response) => {
       return { ...rest, throughput };
     });
 
-    const hasMore = offsetNum + data.length < total;
-
-    logger.debug({ count: data.length, total, has_more: hasMore }, 'Provider models listed');
-    res.json({ object: 'list', data, total, has_more: hasMore });
+    logger.debug({ count: data.length, has_more: hasMore }, 'Provider models listed');
+    res.json({ object: 'list', data, has_more: hasMore });
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -319,7 +340,7 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // ==================== 更新提供商模型 ====================
-router.patch('/:id', async (req: Request, res: Response) => {
+router.post('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const body = req.body as ProviderModelBody;
