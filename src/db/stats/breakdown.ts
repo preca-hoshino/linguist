@@ -142,6 +142,50 @@ async function breakdownByApiKey(params: StatsQueryParams): Promise<StatsBreakdo
 }
 
 /**
+ * app 分组：从 request_logs_details 的 gateway_context 中提取 appId 和 appName
+ */
+async function breakdownByApp(params: StatsQueryParams): Promise<StatsBreakdown> {
+  const timeFilter = buildTimeFilter(params, 1);
+  const dimFilter = buildDimensionFilterAliased(params.dimension, params.id, timeFilter.nextIdx, 'r');
+  const rlTimeClause = timeFilter.clause.replaceAll(/\bcreated_at\b/g, 'r.created_at');
+  const allValues = [...timeFilter.values, ...dimFilter.values];
+
+  const latExpr = latencyExpr('d');
+  const ttftEx = ttftExpr('d');
+  const itlEx = itlExpr('d', 'r');
+
+  const sql = `
+    SELECT
+      COALESCE(d.gateway_context->>'appName', d.gateway_context->>'appId', 'unknown') AS name,
+      NULL::text AS provider_name,
+      COUNT(*)::int AS request_count,
+      COALESCE(SUM(r.total_tokens), 0)::bigint AS total_tokens,
+      COUNT(*) FILTER (WHERE r.status = 'error')::int AS error_count,
+      AVG(${latExpr})::float AS avg_latency_ms,
+      PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY ${latExpr})::float AS p50_latency_ms,
+      PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY ${latExpr})::float AS p90_latency_ms,
+      PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY ${latExpr})::float AS p99_latency_ms,
+      AVG(${ttftEx})::float AS ttft_avg_ms,
+      AVG(${itlEx})::float AS itl_avg_ms,
+      AVG(r.completion_tokens)::float AS avg_completion_tokens,
+      COALESCE(SUM(r.calculated_cost), 0.0)::float AS total_cost
+    FROM request_logs r
+    LEFT JOIN request_logs_details d ON d.id = r.id
+    WHERE ${rlTimeClause}
+    ${dimFilter.clause}
+    GROUP BY d.gateway_context->>'appName', d.gateway_context->>'appId'
+    ORDER BY request_count DESC
+    LIMIT 50
+  `;
+
+  const result = await db.query<Record<string, unknown>>(sql, allValues);
+  return {
+    group_by: 'app',
+    items: result.rows.map((row) => mapBreakdownRow(row as unknown as BreakdownRow, null)),
+  };
+}
+
+/**
  * provider 分组：JOIN providers 表获取真实名称
  * timing 字段已迁移至 request_logs_details，故需 LEFT JOIN
  */
@@ -259,6 +303,9 @@ export async function getStatsBreakdown(
     }
     case 'api_key': {
       return await breakdownByApiKey(params);
+    }
+    case 'app': {
+      return await breakdownByApp(params);
     }
     case 'provider': {
       return await breakdownByProvider(params);

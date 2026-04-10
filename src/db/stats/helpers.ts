@@ -199,6 +199,7 @@ export function buildDimensionFilter(
     provider: 'provider_id',
     provider_model: 'routed_model',
     virtual_model: 'request_model',
+    app: 'app_id',
     api_key: 'api_key_prefix',
   };
 
@@ -227,6 +228,7 @@ export function buildDimensionFilterAliased(
     provider: 'provider_id',
     provider_model: 'routed_model',
     virtual_model: 'request_model',
+    app: 'app_id',
     api_key: 'api_key_prefix',
   };
 

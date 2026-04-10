@@ -2,7 +2,7 @@
 import type { ErrorType } from '@/db/request-logs/types';
 
 /** 聚合维度 */
-export type StatsDimension = 'global' | 'provider' | 'provider_model' | 'virtual_model' | 'api_key';
+export type StatsDimension = 'global' | 'provider' | 'provider_model' | 'virtual_model' | 'app' | 'api_key';
 
 /** 时间范围字符串 */
 export type StatsRange = '15m' | '1h' | '6h' | '24h' | '7d' | '14d' | '30d';
@@ -171,6 +171,7 @@ export type StatsBreakdownGroupBy =
   | 'provider'
   | 'provider_model'
   | 'virtual_model'
+  | 'app'
   | 'api_key'
   | 'error_type'
   | 'user_format';

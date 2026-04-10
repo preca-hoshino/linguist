@@ -20,12 +20,13 @@ const logger = createLogger('Admin:Stats', logColors.bold + logColors.blue);
 const router: Router = Router();
 
 const VALID_RANGES: StatsRange[] = ['15m', '1h', '6h', '24h', '7d', '14d', '30d'];
-const VALID_DIMENSIONS: StatsDimension[] = ['global', 'provider', 'provider_model', 'virtual_model', 'api_key'];
+const VALID_DIMENSIONS: StatsDimension[] = ['global', 'provider', 'provider_model', 'virtual_model', 'app', 'api_key'];
 const VALID_INTERVALS: StatsInterval[] = ['1m', '5m', '10m', '15m', '1h', '6h', '1d'];
 const VALID_GROUP_BY: StatsBreakdownGroupBy[] = [
   'provider',
   'provider_model',
   'virtual_model',
+  'app',
   'api_key',
   'error_type',
   'user_format',
@@ -94,6 +95,12 @@ async function parseStatsParams(req: Request): Promise<{
       throw new GatewayError(404, 'not_found', `Virtual model '${id}' not found`);
     }
     id = res.rows[0]?.name;
+  }
+
+  // app: id 是 apps.id，但在此不需转名称（或者可转），当前可保留 id 查询
+  if (dimension === 'app' && id !== undefined) {
+    // 若前端传递了 appId，可以直接查询 request_logs_details
+    // 假如需要名称转换也可以加在这个逻辑里
   }
 
   return {
