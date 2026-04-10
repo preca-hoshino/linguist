@@ -24,12 +24,12 @@ npm run check
 
 ### 提交信息规范
 
-提交信息应遵循你专属的 **`[Type]` 规范**，并且描述部分建议使用**简短的祈使句 (imperative mood)** （例如 `[Fix] Fix MCP config normalization` 或 `[Add] 补充缺失的 vendor 模块`）。
+提交信息应遵循你专属的 **`[Type](scope):` 规范**，并且描述部分建议使用**简短的祈使句 (imperative mood)** （例如 `[Fix](auth): Fix MCP config normalization` 或 `[Add](api): 补充缺失的 vendor 模块`）。
 
 提交信息应严格遵循以下格式：
 
 ```text
-[Type] 描述信息
+[Type](scope): 描述信息
 ```
 
 **Type 类型列表：**
@@ -108,15 +108,15 @@ git checkout -b feat/user-profile
 ```bash
 # 仅仅完成基础代码时：
 git add src/views/
-git commit -m "[Add] Add user profile UI frame"
+git commit -m "[Add](ui): Add user profile UI frame"
 
 # 处理了某个渲染由于遗留环境导致的 Bug 时：
 git add src/utils/
-git commit -m "[Fix] Fix user avatar rendering issue on legacy wrapper"
+git commit -m "[Fix](avatar): Fix user avatar rendering issue on legacy wrapper"
 
 # 整理导入顺带格式化时：
 git add src/views/
-git commit -m "[Style] Format imports and clean up whitespaces"
+git commit -m "[Style](views): Format imports and clean up whitespaces"
 ```
 
 **步骤 3：推送到远程并创建 PR**
@@ -128,7 +128,7 @@ git push -u origin feat/user-profile
 > 1. 推送结束后点击终端中提示的 GitHub 链接直接在网页端创建 PR；
 > 2. 或者使用 GitHub CLI 快速创建：
 > ```bash
-> gh pr create --base develop --title "[Add] User Profile Module" --body "详见前述 PR 规范说明（影响、取舍、验证步骤）"
+> gh pr create --base develop --title "[Add](profile): User Profile Module" --body "详见前述 PR 规范说明（影响、取舍、验证步骤）"
 > ```
 
 **步骤 4：CI 自动化验证与合并**
@@ -150,7 +150,7 @@ git checkout -b release/v0.0.1-Ægir
 
 # 修改 package.json 等文件的版本号，然后提交
 git add package.json
-git commit -m "[Chore] Bump version to v0.0.1-Ægir"
+git commit -m "[Chore](release): Bump version to v0.0.1-Ægir"
 git push -u origin release/v0.0.1-Ægir
 ```
 
@@ -158,7 +158,7 @@ git push -u origin release/v0.0.1-Ægir
 通过 PR 让发版合并过程具备可审计性。
 ```bash
 # 使用 GitHub CLI 直接发起一次发版 PR
-gh pr create --base master --head release/v0.0.1-Ægir --title "[Merge] Release v0.0.1-Ægir" --body "### 包含内容: ..."
+gh pr create --base master --head release/v0.0.1-Ægir --title "[Merge](release): Release v0.0.1-Ægir" --body "### 包含内容: ..."
 ```
 
 **步骤 3：合并至 `master`**

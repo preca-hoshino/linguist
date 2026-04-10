@@ -23,13 +23,13 @@ if echo "$MSG" | grep -qE "^Merge (branch|pull request) "; then
 fi
 
 # 基于 CONTRIBUTING.md 的规范正则校验
-PATTERN='^\[(Add|Fix|Ref|Del|Doc|Chore|Style|Test|Merge)\] .+'
+PATTERN='^\[(Add|Fix|Ref|Del|Doc|Chore|Style|Test|Merge)\]\([^)]+\): .+'
 
 if ! echo "$MSG" | grep -qE "$PATTERN"; then
   echo ""
   echo "❌ 提交失败：Commit Message 不符合规范！"
   echo "--------------------------------------------------------"
-  echo "规定格式: [Type] 简短描述信息 (推荐祈使句)"
+  echo "规定格式: [Type](scope): 简短描述信息 (推荐祈使句)"
   echo "可用 Type:"
   echo "  [Add]   - 新增功能"
   echo "  [Fix]   - 修复 Bug"
