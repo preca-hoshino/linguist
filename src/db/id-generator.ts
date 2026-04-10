@@ -7,7 +7,7 @@ import { db } from './client';
 /**
  * 允许使用短 ID 的表白名单（防止 SQL 注入）
  */
-const ALLOWED_TABLES = new Set(['providers', 'provider_models', 'api_keys', 'virtual_models', 'users']);
+const ALLOWED_TABLES = new Set(['providers', 'provider_models', 'api_keys', 'virtual_models', 'users', 'apps']);
 
 /**
  * 生成唯一短 ID（8 位 hex）
