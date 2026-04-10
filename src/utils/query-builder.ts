@@ -69,3 +69,45 @@ export function buildBatchInsert(
 
   return { valuesClause: placeholders.join(', '), values, nextIdx: idx };
 }
+
+/**
+ * 构建多选（多 Tag）IN 子句
+ *
+ * @param column - 列名拼装格式，如 'a.status'
+ * @param tags - 筛选的标签数组，例如 ['completed', 'processing'] 或以逗号分割的单字符串
+ * @param startIdx - 参数占位符起始索引
+ * @returns { clause: string; values: string[]; nextIdx: number } | null
+ *
+ * @example
+ * const result = buildInClause('status', ['A', 'B'], 1);
+ * // result.clause = 'status IN ($1, $2)'
+ * // result.values = ['A', 'B']
+ */
+export function buildInClause(
+  column: string,
+  tags: string | string[] | undefined | null,
+  startIdx = 1,
+): { clause: string; values: string[]; nextIdx: number } | null {
+  if (tags === undefined || tags === null) {
+    return null;
+  }
+
+  // 兼容单字符串(逗号分隔)或数组
+  const tagsArray = Array.isArray(tags)
+    ? tags
+    : tags
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+  if (tagsArray.length === 0) {
+    return null;
+  }
+
+  const placeholders = tagsArray.map((_, i) => `$${startIdx + i}`);
+  return {
+    clause: `${column} IN (${placeholders.join(', ')})`,
+    values: tagsArray,
+    nextIdx: startIdx + tagsArray.length,
+  };
+}
