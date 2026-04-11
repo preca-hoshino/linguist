@@ -11,7 +11,11 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { db } from '@/db';
-import { COPILOT_CLIENT_ID, GITHUB_ACCESS_TOKEN_URL, GITHUB_DEVICE_CODE_URL } from '@/providers/copilot/constants';
+import {
+  COPILOT_CLIENT_ID,
+  GITHUB_ACCESS_TOKEN_URL,
+  GITHUB_DEVICE_CODE_URL,
+} from '@/model/http/providers/copilot/constants';
 import { createLogger, GatewayError, logColors } from '@/utils';
 import { handleAdminError } from './error';
 

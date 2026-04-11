@@ -35,7 +35,7 @@ export interface RequestLogEntry {
   cost_breakdown: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
-  /** GatewayContext 完整快照（唯一审计数据源） */
+  /** ModelHttpContext 完整快照（唯一审计数据源） */
   gateway_context: Record<string, unknown> | null;
 }
 

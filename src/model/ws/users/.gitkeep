@@ -1,0 +1,2 @@
+# WebSocket 协议转译层（Phase 3 实现）
+# - 将用户 WebSocket 帧转换为内部 InternalWSFrame

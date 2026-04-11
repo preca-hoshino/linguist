@@ -3,9 +3,9 @@
 import type { Request } from 'express';
 import { Router } from 'express';
 import { createCachedLoggerFactory, createLogger, logColors } from '@/utils';
-import { anthropicRouter, extractApiKey as claudeExtractApiKey } from './anthropic';
-import { extractApiKey as geminiExtractApiKey, geminiRouter } from './gemini';
-import { extractApiKey as openaiCompatExtractApiKey, openaiCompatRouter } from './openaicompat';
+import { anthropicRouter, extractApiKey as claudeExtractApiKey } from './http/anthropic';
+import { extractApiKey as geminiExtractApiKey, geminiRouter } from './http/gemini';
+import { extractApiKey as openaiCompatExtractApiKey, openaiCompatRouter } from './http/openaicompat';
 
 const logger = createLogger('API', logColors.bold + logColors.white);
 

@@ -3,7 +3,7 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { db, generateShortId } from '@/db';
-import { getRegisteredProviderKinds } from '@/providers';
+import { getRegisteredProviderKinds } from '@/model/http/providers';
 import type { ProviderAdvancedConfig } from '@/types';
 import { DEFAULT_PROVIDER_CONFIG } from '@/types';
 import { buildUpdateSet, createLogger, GatewayError, logColors } from '@/utils';

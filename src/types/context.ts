@@ -10,7 +10,7 @@ import type { HttpHeaders, ProviderErrorDetail } from './provider';
  * 贯穿请求全生命周期的唯一载体，携带元数据、请求/响应载荷及执行状态。
  * 所有模块（适配器、中间件、路由、核心编排）均通过此对象进行数据传递。
  */
-export interface GatewayContext {
+export interface ModelHttpContext {
   // --- 基础元数据 ---
 
   /** 网关生成的唯一请求 ID */
@@ -181,7 +181,7 @@ export interface GatewayContext {
  * 路由解析完成后的上下文类型（route 字段已填充）
  * 使用 assertRouted() 类型守卫后可直接访问 ctx.route 的所有字段而无需 undefined 检查
  */
-export type RoutedGatewayContext = GatewayContext & {
+export type RoutedModelHttpContext = ModelHttpContext & {
   route: {
     model: string;
     modelType: 'chat' | 'embedding';

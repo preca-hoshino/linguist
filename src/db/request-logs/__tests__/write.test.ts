@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/explicit-function-return-type */
 import { markProcessing, markCompleted, markError } from '../write';
-import type { GatewayContext } from '@/types';
+import type { ModelHttpContext } from '@/types';
 import { db } from '@/db/client';
 import { lookupPricingTiers, calculatePostBillingCost } from '@/db/billing';
 import { GatewayError } from '@/utils';
@@ -27,7 +27,7 @@ jest.mock('@/utils/logger', () => ({
 }));
 
 describe('request-logs/write', () => {
-  let mockCtx: GatewayContext;
+  let mockCtx: ModelHttpContext;
 
   beforeEach(() => {
     jest.resetAllMocks();
@@ -55,7 +55,7 @@ describe('request-logs/write', () => {
       timing: { start: 1000 },
       error: undefined,
       providerError: undefined,
-    } as unknown as GatewayContext;
+    } as unknown as ModelHttpContext;
   });
 
   describe('markProcessing', () => {
@@ -161,19 +161,19 @@ describe('request-logs/write', () => {
     it('should handle ctx.stream as false or undefined', async () => {
       (db.query as jest.Mock).mockClear();
       (db.query as jest.Mock).mockResolvedValue({});
-      await markCompleted({ ...mockCtx, stream: false } as unknown as GatewayContext);
+      await markCompleted({ ...mockCtx, stream: false } as unknown as ModelHttpContext);
       expect((db.query as jest.Mock).mock.calls[0][1][9]).toBe(false);
 
       (db.query as jest.Mock).mockClear();
       (db.query as jest.Mock).mockResolvedValue({});
-      await markCompleted({ ...mockCtx, stream: undefined } as unknown as GatewayContext);
+      await markCompleted({ ...mockCtx, stream: undefined } as unknown as ModelHttpContext);
       expect((db.query as jest.Mock).mock.calls[0][1][9]).toBeNull();
     });
   });
 
   describe('markError', () => {
     it('should ignore if route is missing', async () => {
-      await markError({ ...mockCtx, route: undefined } as unknown as GatewayContext, new Error('Test'));
+      await markError({ ...mockCtx, route: undefined } as unknown as ModelHttpContext, new Error('Test'));
       expect(db.query).not.toHaveBeenCalled();
     });
 
@@ -200,7 +200,7 @@ describe('request-logs/write', () => {
         stream: undefined,
         apiKeyPrefix: undefined,
         error: undefined,
-      } as unknown as GatewayContext;
+      } as unknown as ModelHttpContext;
       (db.query as jest.Mock)
         .mockResolvedValueOnce({ rowCount: 0 })
         .mockResolvedValueOnce({})
