@@ -47,11 +47,11 @@ export async function findById(id: string): Promise<UserRow | null> {
  */
 export async function listUsers(options?: {
   limit?: number;
-  offset?: number;
+  starting_after?: string;
   search?: string;
-}): Promise<{ data: UserRow[]; total: number }> {
-  const limitNum = options?.limit ?? 10;
-  const offsetNum = options?.offset ?? 0;
+}): Promise<{ data: UserRow[]; has_more: boolean; total: number }> {
+  const limitNum = typeof options?.limit === 'number' ? Math.min(Math.max(options.limit, 1), 100) : 10;
+  const startingAfterStr = options?.starting_after;
   const search = options?.search;
 
   const conditions: string[] = [];
@@ -62,30 +62,34 @@ export async function listUsers(options?: {
     values.push(`%${search.trim()}%`);
   }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const baseWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const countSql = `SELECT COUNT(*) AS total FROM users ${baseWhereClause}`;
+  const countResult = await db.query(countSql, values);
+  const total = Number.parseInt((countResult.rows[0] as { total: string } | undefined)?.total ?? '0', 10);
+
+  if (typeof startingAfterStr === 'string' && startingAfterStr.trim() !== '') {
+    conditions.push(`created_at < (SELECT created_at FROM users WHERE id = $${String(values.length + 1)})`);
+    values.push(startingAfterStr);
+  }
+
+  const dataWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   const sql = `
-    SELECT ${SAFE_COLUMNS}, COUNT(*) OVER() AS full_count
+    SELECT ${SAFE_COLUMNS}
     FROM users
-    ${whereClause}
+    ${dataWhereClause}
     ORDER BY created_at DESC
-    LIMIT $${String(values.length + 1)} OFFSET $${String(values.length + 2)}
+    LIMIT $${String(values.length + 1)}
   `;
 
-  values.push(limitNum, offsetNum);
+  values.push(limitNum + 1);
 
-  const result = await db.query<UserRow & { full_count: string }>(sql, values);
-  const rows = result.rows;
-  const firstRow = rows[0];
-  const total = firstRow ? Number.parseInt(firstRow.full_count, 10) : 0;
+  const result = await db.query<UserRow>(sql, values);
+  const dataRows = result.rows.length > limitNum ? result.rows.slice(0, limitNum) : result.rows;
+  const hasMore = result.rows.length > limitNum;
 
-  const data = rows.map((row) => {
-    // eslint-disable-next-line @typescript-eslint/naming-convention
-    const { full_count: _full_count, ...rest } = row;
-    return rest as UserRow;
-  });
-
-  return { data, total };
+  return { data: dataRows, has_more: hasMore, total };
 }
 
 /**
