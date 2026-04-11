@@ -42,14 +42,14 @@ interface ProviderModelBody {
  * 价格单位：每百万 Token（CNY）
  */
 interface PricingTierInput {
-  startTokens?: number;
-  maxTokens?: number | null;
+  start_tokens?: number;
+  max_tokens?: number | null;
   /** 每百万 Token 输入价格（CNY） */
-  inputPrice?: number;
+  input_price?: number;
   /** 每百万 Token 输出价格（CNY） */
-  outputPrice?: number;
+  output_price?: number;
   /** 每百万 Token 缓存命中价格（CNY） */
-  cachePrice?: number;
+  cache_price?: number;
 }
 
 /**
@@ -58,59 +58,59 @@ interface PricingTierInput {
  */
 function validatePricingTiers(tiers: PricingTierInput[], maxTokens: number): void {
   for (const [i, tier] of tiers.entries()) {
-    if (typeof tier.startTokens !== 'number' || tier.startTokens < 0) {
+    if (typeof tier.start_tokens !== 'number' || tier.start_tokens < 0) {
       throw new GatewayError(
         400,
         'invalid_request',
-        `pricing_tiers[${String(i)}].startTokens must be a non-negative number`,
+        `pricing_tiers[${String(i)}].start_tokens must be a non-negative number`,
       );
     }
-    if (tier.startTokens > maxTokens) {
+    if (tier.start_tokens > maxTokens) {
       throw new GatewayError(
         400,
         'invalid_request',
-        `pricing_tiers[${String(i)}].startTokens cannot exceed provider model max_tokens (${String(maxTokens)})`,
+        `pricing_tiers[${String(i)}].start_tokens cannot exceed provider model max_tokens (${String(maxTokens)})`,
       );
     }
     if (
-      tier.maxTokens !== null &&
-      (typeof tier.maxTokens !== 'number' || tier.maxTokens < tier.startTokens || tier.maxTokens > maxTokens)
+      tier.max_tokens !== null &&
+      (typeof tier.max_tokens !== 'number' || tier.max_tokens < tier.start_tokens || tier.max_tokens > maxTokens)
     ) {
       throw new GatewayError(
         400,
         'invalid_request',
-        `pricing_tiers[${String(i)}].maxTokens must be between startTokens and max_tokens (${String(maxTokens)})`,
+        `pricing_tiers[${String(i)}].max_tokens must be between start_tokens and max_tokens (${String(maxTokens)})`,
       );
     }
-    if (typeof tier.inputPrice !== 'number' || tier.inputPrice < 0) {
+    if (typeof tier.input_price !== 'number' || tier.input_price < 0) {
       throw new GatewayError(
         400,
         'invalid_request',
-        `pricing_tiers[${String(i)}].inputPrice must be a non-negative number`,
+        `pricing_tiers[${String(i)}].input_price must be a non-negative number`,
       );
     }
-    if (typeof tier.outputPrice !== 'number' || tier.outputPrice < 0) {
+    if (typeof tier.output_price !== 'number' || tier.output_price < 0) {
       throw new GatewayError(
         400,
         'invalid_request',
-        `pricing_tiers[${String(i)}].outputPrice must be a non-negative number`,
+        `pricing_tiers[${String(i)}].output_price must be a non-negative number`,
       );
     }
-    if (typeof tier.cachePrice !== 'number' || tier.cachePrice < 0) {
+    if (typeof tier.cache_price !== 'number' || tier.cache_price < 0) {
       throw new GatewayError(
         400,
         'invalid_request',
-        `pricing_tiers[${String(i)}].cachePrice must be a non-negative number`,
+        `pricing_tiers[${String(i)}].cache_price must be a non-negative number`,
       );
     }
   }
-  // 检查 startTokens 递增
-  const sorted = [...tiers].toSorted((a, b) => (a.startTokens ?? 0) - (b.startTokens ?? 0));
+  // 检查 start_tokens 递增
+  const sorted = [...tiers].toSorted((a, b) => (a.start_tokens ?? 0) - (b.start_tokens ?? 0));
   for (let i = 1; i < sorted.length; i++) {
     const prev = sorted[i - 1];
     const curr = sorted[i];
-    if (prev !== undefined && curr !== undefined && (prev.startTokens ?? 0) === (curr.startTokens ?? 0)) {
-      throw new GatewayError(400, 'invalid_request', `Duplicate startTokens value: ${String(curr.startTokens)}`);
+    if (prev !== undefined && curr !== undefined && (prev.start_tokens ?? 0) === (curr.start_tokens ?? 0)) {
+      throw new GatewayError(400, 'invalid_request', `Duplicate start_tokens value: ${String(curr.start_tokens)}`);
     }
   }
 }
@@ -139,12 +139,12 @@ const router: Router = Router();
 // ==================== 列出所有提供商模型 ====================
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { provider_id, search, limit, offset } = req.query;
+    const { provider_id, search, limit, starting_after } = req.query;
     const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : 10;
-    const offsetNum = typeof offset === 'string' && offset !== '' ? Number.parseInt(offset, 10) : 0;
+    const startingAfterStr = typeof starting_after === 'string' ? starting_after.trim() : undefined;
 
     logger.debug(
-      { providerId: provider_id ?? 'all', search, limit: limitNum, offset: offsetNum },
+      { providerId: provider_id ?? 'all', search, limit: limitNum, starting_after: startingAfterStr },
       'Listing provider models',
     );
 
@@ -165,43 +165,58 @@ router.get('/', async (req: Request, res: Response) => {
       values.push(`%${search.trim()}%`);
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const baseWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // 单独拉取符合条件的 total 数量
+    const countSql = `
+      SELECT COUNT(*) AS total
+      FROM provider_models pm
+      JOIN providers p ON pm.provider_id = p.id
+      ${baseWhereClause}
+    `;
+    const countResult = await db.query(countSql, values);
+    const total = Number.parseInt((countResult.rows[0] as { total: string } | undefined)?.total ?? '0', 10);
+
+    // 加入游标过滤
+    if (startingAfterStr !== undefined && startingAfterStr !== '') {
+      conditions.push(
+        `pm.created_at < (SELECT created_at FROM provider_models WHERE id = $${String(values.length + 1)})`,
+      );
+      values.push(startingAfterStr);
+    }
+
+    const dataWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const sql = `
       SELECT pm.id, pm.provider_id, pm.name, pm.model_type, pm.capabilities, pm.parameters,
              pm.model_config, pm.max_tokens, pm.is_active, pm.pricing_tiers, pm.rpm_limit, pm.tpm_limit,
              pm.created_at, pm.updated_at,
-             p.name AS provider_name, p.kind AS provider_kind,
-             COUNT(*) OVER() AS full_count
+             p.name AS provider_name, p.kind AS provider_kind
       FROM provider_models pm
       JOIN providers p ON pm.provider_id = p.id
-      ${whereClause}
+      ${dataWhereClause}
       ORDER BY pm.created_at DESC
-      LIMIT $${String(values.length + 1)} OFFSET $${String(values.length + 2)}
+      LIMIT $${String(values.length + 1)}
     `;
 
-    values.push(limitNum, offsetNum);
+    // 抓取 limit+1 个来判断 has_more
+    values.push(limitNum + 1);
 
     const result = await db.query(sql, values);
-    const rows = result.rows;
-    const firstRow = rows[0] as { full_count: string } | undefined;
-    const total = firstRow ? Number.parseInt(firstRow.full_count, 10) : 0;
+    const dataRows = result.rows.length > limitNum ? result.rows.slice(0, limitNum) : result.rows;
+    const hasMore = result.rows.length > limitNum;
 
-    const data = rows.map((row) => {
-      // eslint-disable-next-line @typescript-eslint/naming-convention
-      const { full_count: _full_count, ...rest } = row;
-      const id = rest.id as string;
+    const data = dataRows.map((row) => {
+      const id = row.id as string;
       const throughput = {
         rpm: rateLimiter.getRpmUsage('pm', id),
         tpm: rateLimiter.getTpmUsage('pm', id),
       };
-      return { ...rest, throughput };
+      return { ...row, throughput };
     });
 
-    const hasMore = offsetNum + data.length < total;
-
     logger.debug({ count: data.length, total, has_more: hasMore }, 'Provider models listed');
-    res.json({ object: 'list', data, total, has_more: hasMore });
+    res.json({ object: 'list', url: '/api/providers/models', data, total, has_more: hasMore });
   } catch (error) {
     handleAdminError(error, res);
   }
