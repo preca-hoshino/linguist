@@ -1,0 +1,17 @@
+# Enforce Unix line endings (LF) for all files.
+# This prevents Windows Git (core.autocrlf) from checking out CRLF,
+# which causes the Biome formatter (configured for LF) to auto-reformat all files.
+* text=auto eol=lf
+
+# Exclude specific binary files just in case
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.mp4 binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary

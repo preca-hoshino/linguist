@@ -8,42 +8,77 @@ import { closePool, getPool } from './client';
 const logger = createLogger('Migration', logColors.bold + logColors.magenta);
 
 /**
- * 执行 migrations/ 目录下的所有 SQL 迁移文件
- * 所有文件均幂等，可安全重跑
+ * 按序执行 schema 建表语句和 migrations 历史补丁
  */
 async function executeMigrationFiles(executor: QueryExecutor, log: Logger): Promise<void> {
-  const migrationsDir = path.join(__dirname, 'migrations');
+  const schemaDir = path.join(__dirname, 'sql', 'schema');
+  const migrationsDir = path.join(__dirname, 'sql', 'migrations');
 
-  if (!fs.existsSync(migrationsDir)) {
-    throw new Error(`Migrations directory not found: ${migrationsDir}`);
-  }
+  // 1. 优先执行 Schema（全量表结构与基础设施定义）
+  if (fs.existsSync(schemaDir)) {
+    const schemaFiles = fs
+      .readdirSync(schemaDir)
+      .filter((f) => f.endsWith('.sql'))
+      .toSorted();
 
-  const files = fs
-    .readdirSync(migrationsDir)
-    .filter((f) => f.endsWith('.sql'))
-    .toSorted();
+    if (schemaFiles.length > 0) {
+      log.info(`Running ${String(schemaFiles.length)} schema file(s)...`);
+      for (const file of schemaFiles) {
+        const filePath = path.join(schemaDir, file);
+        const sql = fs.readFileSync(filePath, 'utf8');
 
-  if (files.length === 0) {
-    log.warn('No migration files found.');
-    return;
-  }
-
-  log.info(`Running ${String(files.length)} migration(s)...`);
-
-  for (const file of files) {
-    const filePath = path.join(migrationsDir, file);
-    const sql = fs.readFileSync(filePath, 'utf8');
-
-    try {
-      await executor.query(sql);
-      log.info(`  ✓ ${file}`);
-    } catch (error) {
-      log.error(error instanceof Error ? error : new Error(String(error)), `✗ ${file} failed`);
-      throw error;
+        try {
+          await executor.query(sql);
+          log.info(`  ✓ [Schema] ${file}`);
+        } catch (error) {
+          log.error(error instanceof Error ? error : new Error(String(error)), `✗ [Schema] ${file} failed`);
+          throw error;
+        }
+      }
     }
   }
 
-  log.info('All migrations completed.');
+  // 2. 执行一次性单向迁移补丁（基于 migration_history 保证单次执行）
+  if (fs.existsSync(migrationsDir)) {
+    const migrationFiles = fs
+      .readdirSync(migrationsDir)
+      .filter((f) => f.endsWith('.sql'))
+      .toSorted();
+
+    if (migrationFiles.length > 0) {
+      log.info(`Checking ${String(migrationFiles.length)} migration file(s)...`);
+
+      // 获取当前已在数据库执行过的历史补丁
+      const res = await executor.query<{ filename: string }>('SELECT filename FROM migration_history');
+      const executedFiles = new Set(res.rows.map((r) => r.filename));
+
+      let newMigrationsCount = 0;
+      for (const file of migrationFiles) {
+        if (executedFiles.has(file)) {
+          continue; // 已执行则安全跳过
+        }
+
+        newMigrationsCount++;
+        const filePath = path.join(migrationsDir, file);
+        const sql = fs.readFileSync(filePath, 'utf8');
+
+        try {
+          await executor.query(sql);
+          await executor.query('INSERT INTO migration_history (filename) VALUES ($1)', [file]);
+          log.info(`  ✓ [Migration] ${file}`);
+        } catch (error) {
+          log.error(error instanceof Error ? error : new Error(String(error)), `✗ [Migration] ${file} failed`);
+          throw error;
+        }
+      }
+
+      if (newMigrationsCount === 0) {
+        log.info('  ✓ No new migrations to run.');
+      }
+    }
+  }
+
+  log.info('All database synchronizations completed.');
 }
 
 /**

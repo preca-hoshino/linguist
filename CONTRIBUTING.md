@@ -133,7 +133,7 @@ git push -u origin feat/user-profile
 
 **步骤 4：CI 自动化验证与合并**
 - 提交 PR 后，GitHub Actions （若已配置）会自动对该分支进行检查。
-- 团队或自行审核通过后，**请直接在使用 `gh pr merge` 或者 GitHub 网页端点击 `Squash and merge` / `Merge pull request` 将其合并进 `develop`**（使用网页或CLI操作可以追溯完整的 PR 记录和讨论，请避免本地直接 merge）。
+- 团队或你自己复核通过后，**请直接使用 `gh pr merge --squash` 或者在 GitHub 网页端只点击 `Squash and merge` 将其合并进 `develop`**（使用网页或CLI操作可以追溯完整的 PR 记录和讨论，且 Squash 能够将分支内几十个细碎的原子提交完美压缩成主干上的一个整洁节点，请避免本地直接 merge或使用普通 Merge node）。
 
 ---
 

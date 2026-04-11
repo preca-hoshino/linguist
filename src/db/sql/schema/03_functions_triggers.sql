@@ -1,5 +1,6 @@
--- Linguist LLM Gateway — 04: 数据库基础设施事件总线
--- 全局函数注册、时间戳更新器、以及基于 Postgre Listen/Notify 的网关通信
+-- Linguist LLM Gateway — Schema: 03 Functions & Triggers
+-- 定义系统所需的所有全局函数、时间戳更新器、以及基于 Postgre Listen/Notify 的网关通信触发器
+-- 本文件需严格保持幂等性
 
 BEGIN;
 
@@ -11,9 +12,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 挂载基表时间触发器
 DROP TRIGGER IF EXISTS trigger_users_updated_at ON users;
 CREATE TRIGGER trigger_users_updated_at BEFORE UPDATE ON users FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS trigger_apps_updated_at ON apps;
+CREATE TRIGGER trigger_apps_updated_at BEFORE UPDATE ON apps FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 DROP TRIGGER IF EXISTS trigger_api_keys_updated_at ON api_keys;
 CREATE TRIGGER trigger_api_keys_updated_at BEFORE UPDATE ON api_keys FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -39,7 +42,12 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
--- 挂载网关缓存监控触发器
+DROP TRIGGER IF EXISTS trigger_apps_change ON apps;
+CREATE TRIGGER trigger_apps_change AFTER INSERT OR UPDATE OR DELETE ON apps FOR EACH STATEMENT EXECUTE FUNCTION notify_config_change();
+
+DROP TRIGGER IF EXISTS trigger_app_allowed_models_change ON app_allowed_models;
+CREATE TRIGGER trigger_app_allowed_models_change AFTER INSERT OR UPDATE OR DELETE ON app_allowed_models FOR EACH STATEMENT EXECUTE FUNCTION notify_config_change();
+
 DROP TRIGGER IF EXISTS trigger_api_keys_change ON api_keys;
 CREATE TRIGGER trigger_api_keys_change AFTER INSERT OR UPDATE OR DELETE ON api_keys FOR EACH STATEMENT EXECUTE FUNCTION notify_config_change();
 
