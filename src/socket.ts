@@ -1,5 +1,9 @@
 // src/socket.ts — WebSocket Upgrade 占位处理器（V2 网关，待实现）
 
+import { createLogger, logColors } from '@/utils';
+
+const logger = createLogger('WebSocket', logColors.cyan);
+
 // TODO: Phase 3 实现
 // - HTTP → WebSocket 协议升级处理
 // - 从 URL query param 或首帧中提取 API Key 完成鉴权
@@ -16,5 +20,6 @@
  * ```
  */
 export function setupWebSocket(_server: unknown): void {
+  logger.info('WebSocket V2 gateway setup deferred to Phase 3');
   // Phase 3 实现
 }

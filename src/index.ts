@@ -2,6 +2,8 @@ import crypto from 'node:crypto';
 import 'dotenv/config';
 import { configManager } from './config';
 import { closePool, countUsers, createUser, runMigrations } from './db';
+import { initMcpGateway } from './mcp';
+import { setupWebSocket } from './socket';
 import { app } from './server';
 import { createLogger, logColors, rateLimiter } from './utils';
 
@@ -63,6 +65,10 @@ async function start(): Promise<void> {
       logger.info(`Health check: http://localhost:${PORT}/api/health`);
       logger.info(`Chat completions: POST http://localhost:${PORT}/v1/chat/completions`);
     });
+
+    // 绑定 WebSocket 与 MCP 初始化 (占位)
+    setupWebSocket(server);
+    initMcpGateway();
 
     // 配置请求超时（10 分钟），以支持高级模型的长时间思考
     server.requestTimeout = 600_000;
