@@ -6,8 +6,9 @@ import type { Middleware } from './types';
 
 const logger = createLogger('Middleware', logColors.bold + logColors.gray);
 
-export { apiKeyAuth, normalizeChatToolCallIds, rateLimit } from './common';
-export { normalizeResponseChatToolCallIds, tokenAccounting } from './response';
+export { apiKeyAuth } from './common';
+export { normalizeChatToolCallIds, rateLimit } from './model/http/request';
+export { normalizeResponseChatToolCallIds, tokenAccounting } from './model/http/response';
 export type { Middleware } from './types';
 
 /**
