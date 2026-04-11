@@ -1,4 +1,9 @@
 import crypto from 'node:crypto';
+import dns from 'node:dns';
+
+// Fix Node 18+ 'fetch failed' (ECONNRESET/IPv6 drops) by preferring IPv4
+dns.setDefaultResultOrder('ipv4first');
+
 import 'dotenv/config';
 import { configManager } from './config';
 import { closePool, countUsers, createUser, runMigrations } from './db';
