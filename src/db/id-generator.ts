@@ -10,9 +10,21 @@ import { db } from './client';
 const ALLOWED_TABLES = new Set(['providers', 'provider_models', 'api_keys', 'virtual_models', 'users', 'apps']);
 
 /**
- * 生成唯一短 ID（8 位 hex）
+ * 表对应的 Stripe 风格 ID 前缀映射
+ */
+const TABLE_PREFIXES: Record<string, string> = {
+  users: 'usr',
+  providers: 'pvd',
+  provider_models: 'pm',
+  virtual_models: 'vm',
+  apps: 'app',
+  api_keys: 'key',
+};
+
+/**
+ * 生成带有业务前缀的唯一短 ID
  *
- * 随机生成 4 字节并转为 hex，查询目标表确认不重复，
+ * 生成 8 字节并转为 hex（16 字符），配合前缀长约 20 字符。
  * 冲突时自动重试（实际冲突概率极低）。
  *
  * @param table 目标表名（必须在白名单中）
@@ -23,9 +35,12 @@ export async function generateShortId(table: string): Promise<string> {
     throw new Error(`Table "${table}" is not allowed for short ID generation`);
   }
 
+  const prefix = TABLE_PREFIXES[table] ?? 'unk';
+
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   while (true) {
-    const id = crypto.randomBytes(4).toString('hex');
+    const hash = crypto.randomBytes(8).toString('hex');
+    const id = `${prefix}_${hash}`;
     const result = await db.query(`SELECT 1 FROM ${table} WHERE id = $1`, [id]);
     if (result.rowCount === 0) {
       return id;
