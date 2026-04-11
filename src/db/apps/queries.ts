@@ -72,7 +72,7 @@ export async function listApps(options?: {
   starting_after?: string;
   search?: string;
   is_active?: boolean;
-}): Promise<{ data: AppRow[]; has_more: boolean }> {
+}): Promise<{ data: AppRow[]; has_more: boolean; total: number }> {
   const limit = Math.min(Math.max(options?.limit ?? 10, 1), 100);
   const startingAfter = options?.starting_after;
   const search = options?.search;
@@ -81,13 +81,6 @@ export async function listApps(options?: {
   const conditions: string[] = [];
   const values: unknown[] = [];
   let paramIdx = 1;
-
-  // 游标分页：starting_after → 查找该 ID 的 created_at，返回比它更早的记录
-  if (typeof startingAfter === 'string' && startingAfter.trim() !== '') {
-    conditions.push(`a.created_at < (SELECT created_at FROM apps WHERE id = $${String(paramIdx)})`);
-    values.push(startingAfter);
-    paramIdx++;
-  }
 
   // 搜索过滤
   if (typeof search === 'string' && search.trim() !== '') {
@@ -100,6 +93,20 @@ export async function listApps(options?: {
   if (typeof isActive === 'boolean') {
     conditions.push(`a.is_active = $${String(paramIdx)}`);
     values.push(isActive);
+    paramIdx++;
+  }
+
+  const baseWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  // 单独计算 total
+  const countSql = `SELECT COUNT(*) AS total FROM apps a ${baseWhereClause}`;
+  const countResult = await db.query(countSql, values);
+  const total = Number.parseInt((countResult.rows[0] as { total: string } | undefined)?.total ?? '0', 10);
+
+  // 追加游标条件
+  if (typeof startingAfter === 'string' && startingAfter.trim() !== '') {
+    conditions.push(`a.created_at < (SELECT created_at FROM apps WHERE id = $${String(paramIdx)})`);
+    values.push(startingAfter);
     paramIdx++;
   }
 
@@ -121,7 +128,7 @@ export async function listApps(options?: {
   const hasMore = result.rows.length > limit;
   const data = hasMore ? result.rows.slice(0, limit) : result.rows;
 
-  return { data, has_more: hasMore };
+  return { data, has_more: hasMore, total };
 }
 
 /**
