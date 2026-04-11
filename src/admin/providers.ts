@@ -157,12 +157,22 @@ router.patch('/:id', async (req: Request, res: Response) => {
     const { name, kind, base_url, credential_type, credential, config } = body;
     logger.debug({ id }, 'Updating provider');
 
+    // 凭证防破坏处理：防止前端传回占位符覆盖真实的 credential
+    let finalCredential = credential;
+    if (
+      finalCredential &&
+      typeof finalCredential.accessToken === 'string' &&
+      finalCredential.accessToken === '(saved)'
+    ) {
+      finalCredential = undefined;
+    }
+
     const update = buildUpdateSet({
       name,
       kind,
       base_url,
       credential_type,
-      credential: credential === undefined ? undefined : JSON.stringify(credential),
+      credential: finalCredential === undefined ? undefined : JSON.stringify(finalCredential),
       config: config === undefined ? undefined : JSON.stringify({ ...DEFAULT_PROVIDER_CONFIG, ...config }),
     });
 
