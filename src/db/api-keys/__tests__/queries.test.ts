@@ -76,13 +76,13 @@ describe('API Keys Queries', () => {
     it('should list API keys with pagination', async () => {
       const mockResult = {
         rows: [
-          { id: '1', name: 'Key 1', full_count: '2' },
-          { id: '2', name: 'Key 2', full_count: '2' },
+          { id: '1', name: 'Key 1', total: '2' },
+          { id: '2', name: 'Key 2', total: '2' },
         ],
       };
       (db.query as jest.Mock).mockResolvedValue(mockResult);
 
-      const result = await listApiKeys({ limit: 10, offset: 0 });
+      const result = await listApiKeys({ limit: 10 });
 
       expect(db.query).toHaveBeenCalled();
       expect(result.total).toBe(2);
@@ -98,8 +98,7 @@ describe('API Keys Queries', () => {
 
       expect(db.query).toHaveBeenCalledWith(expect.stringContaining('WHERE (name ILIKE $1 OR key_prefix ILIKE $1)'), [
         '%test%',
-        10,
-        0,
+        11,
       ]);
     });
 
@@ -109,7 +108,7 @@ describe('API Keys Queries', () => {
 
       await listApiKeys({ appId: 'app_1' });
 
-      expect(db.query).toHaveBeenCalledWith(expect.stringContaining('WHERE app_id = $1'), ['app_1', 10, 0]);
+      expect(db.query).toHaveBeenCalledWith(expect.stringContaining('WHERE app_id = $1'), ['app_1', 11]);
     });
 
     it('should return empty list when no keys exist', async () => {
