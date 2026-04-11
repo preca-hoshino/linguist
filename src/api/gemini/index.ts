@@ -2,9 +2,9 @@
 
 import type { Request, Response } from 'express';
 import { Router } from 'express';
-import { processChatCompletion, processEmbedding } from '@/app';
+import { processChatCompletion, processEmbedding } from '@/model/http/app';
 import { configManager } from '@/config';
-import { handleError } from '@/users';
+import { handleError } from '@/model/http/users';
 import { createLogger, logColors } from '@/utils';
 import { validateApiKeyFromRequest } from '../auth-helper';
 

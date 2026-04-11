@@ -3,7 +3,7 @@ import express from 'express';
 import { adminRouter } from './admin';
 import { loginRouter } from './admin/login';
 import { apiRouter } from './api';
-import { handleError } from './users';
+import { handleError } from './model/http/users';
 import { createLogger, GatewayError, logColors } from './utils';
 
 /** HTTP 服务日志器 */

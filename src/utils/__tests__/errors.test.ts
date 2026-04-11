@@ -1,4 +1,4 @@
-import { handleError } from '../../users';
+import { handleError } from '../../model/http/users';
 import { GatewayError } from '../errors';
 
 describe('GatewayError', () => {
