@@ -63,7 +63,7 @@ export type EmbeddingTaskType =
 /**
  * 嵌入请求实体 (Embedding Request)
  *
- * 注意：不包含 model 字段。模型信息由 GatewayContext 管理。
+ * 注意：不包含 model 字段。模型信息由 ModelHttpContext 管理。
  * 支持多模态内容数组输入（文本、图像、视频），所有输入项合并生成一个向量。
  *
  * 各用户端点输入映射（入站）：
@@ -165,7 +165,7 @@ export interface EmbeddingUsage {
 /**
  * 嵌入响应实体 (Embedding Response)
  *
- * 不含 id / model / created 字段，由 GatewayContext 统一管理。
+ * 不含 id / model / created 字段，由 ModelHttpContext 统一管理。
  * 每次响应只包含单条向量结果，不返回批量列表。
  */
 export interface InternalEmbeddingResponse {

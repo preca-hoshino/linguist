@@ -20,7 +20,7 @@ interface GeminiEmbedContentResponse {
  * Gemini 响应特点：
  * - embedContent 返回 { embedding: { values: [...] } }
  * - 不包含 usage 信息
- * - 不包含 id / model / created（由 GatewayContext 管理）
+ * - 不包含 id / model / created（由 ModelHttpContext 管理）
  */
 export class GeminiEmbeddingResponseAdapter implements ProviderEmbeddingResponseAdapter {
   public fromProviderResponse(providerRes: unknown): InternalEmbeddingResponse {

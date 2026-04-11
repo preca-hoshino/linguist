@@ -14,7 +14,7 @@ import {
 } from '@/middleware';
 import { dispatchChatProvider, dispatchEmbeddingProvider } from '@/model/http/providers/engine';
 import { assertRouted, route } from '@/model/http/router';
-import type { GatewayContext, HttpHeaders, InternalChatRequest, InternalEmbeddingRequest } from '@/types';
+import type { ModelHttpContext, HttpHeaders, InternalChatRequest, InternalEmbeddingRequest } from '@/types';
 import { buildErrorResponseBody, getUserChatAdapter, getUserEmbeddingAdapter, handleError } from '@/model/http/users';
 import { GatewayError } from '@/utils';
 import { v4 as uuidv4 } from '@/utils/uuid';
@@ -87,7 +87,7 @@ async function processRequest(
   const logger = getFormatLogger(userFormat);
 
   // 1. 创建最小 ctx —— catch 块始终可访问 ctx.id / ctx.http.path 用于日志和 markError
-  const ctx: GatewayContext = {
+  const ctx: ModelHttpContext = {
     id: uuidv4(),
     ip: req.ip ?? req.socket.remoteAddress ?? 'unknown',
     http: {

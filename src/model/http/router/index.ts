@@ -1,7 +1,7 @@
 // src/router/index.ts — 路由与虚拟模型映射
 
 import { configManager } from '@/config';
-import type { GatewayContext, InternalChatRequest, InternalEmbeddingRequest, RoutedGatewayContext } from '@/types';
+import type { ModelHttpContext, InternalChatRequest, InternalEmbeddingRequest, RoutedModelHttpContext } from '@/types';
 import { createLogger, GatewayError, logColors } from '@/utils';
 
 const logger = createLogger('Router', logColors.bold + logColors.cyan);
@@ -68,10 +68,10 @@ function inferEmbeddingCapabilities(req: InternalEmbeddingRequest): string[] {
 }
 
 /**
- * 从 GatewayContext 推断请求所需的能力标识
+ * 从 ModelHttpContext 推断请求所需的能力标识
  * 根据 ctx.request 的实际类型分派到对应的推断函数
  */
-function inferRequiredCapabilities(ctx: GatewayContext): string[] {
+function inferRequiredCapabilities(ctx: ModelHttpContext): string[] {
   if (!ctx.request) {
     return [];
   }
@@ -102,7 +102,7 @@ function inferRequiredCapabilities(ctx: GatewayContext): string[] {
  * 本方法仅做虚拟模型校验 + 能力推断 + 首个后端填充 ctx.route，
  * 实际的路由策略选择（加权随机/failover）由 caller 调用 resolveAllBackends 时完成。
  */
-export function route(ctx: GatewayContext, expectedModelType?: 'chat' | 'embedding'): void {
+export function route(ctx: ModelHttpContext, expectedModelType?: 'chat' | 'embedding'): void {
   logger.debug({ requestModel: ctx.requestModel, requestId: ctx.id }, '[route] resolving...');
 
   // 提前校验虚拟模型类型（利用 virtual_models.model_type），
@@ -179,7 +179,7 @@ export function route(ctx: GatewayContext, expectedModelType?: 'chat' | 'embeddi
  * 类型守卫：断言路由已解析完成
  * 调用后 TypeScript 将所有路由字段类型收窄为非 undefined
  */
-export function assertRouted(ctx: GatewayContext): asserts ctx is RoutedGatewayContext {
+export function assertRouted(ctx: ModelHttpContext): asserts ctx is RoutedModelHttpContext {
   if (ctx.route === undefined) {
     throw new GatewayError(500, 'route_error', 'Route resolved but missing routing fields');
   }

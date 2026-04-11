@@ -4,7 +4,7 @@
 // 更新虚拟模型和提供商模型两个维度的 TPM 计数器。
 
 import { configManager } from '@/config';
-import type { GatewayContext } from '@/types';
+import type { ModelHttpContext } from '@/types';
 import { createLogger, logColors, rateLimiter } from '@/utils';
 
 const logger = createLogger('Middleware:TokenAccounting', logColors.bold + logColors.gray);
@@ -15,7 +15,7 @@ const logger = createLogger('Middleware:TokenAccounting', logColors.bold + logCo
  * 支持 Chat（ChatUsage.total_tokens）和 Embedding（EmbeddingUsage.total_tokens）两种响应格式。
  * 无 usage 字段时返回 0（不计入 TPM）。
  */
-function extractTotalTokens(ctx: GatewayContext): number {
+function extractTotalTokens(ctx: ModelHttpContext): number {
   if (!ctx.response) {
     return 0;
   }
@@ -37,7 +37,7 @@ function extractTotalTokens(ctx: GatewayContext): number {
  * 从实际响应中提取 Token 消耗量，更新虚拟模型和提供商模型两个维度的 TPM 计数器。
  * RPM 已在请求中间件中扣减，此处仅负责 TPM。
  */
-export function tokenAccounting(ctx: GatewayContext): void {
+export function tokenAccounting(ctx: ModelHttpContext): void {
   const totalTokens = extractTotalTokens(ctx);
 
   if (totalTokens <= 0) {

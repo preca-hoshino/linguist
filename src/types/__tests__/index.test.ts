@@ -1,5 +1,5 @@
 import type {
-  GatewayContext,
+  ModelHttpContext,
   InternalChatRequest,
   InternalChatResponse,
   InternalEmbeddingRequest,
@@ -10,9 +10,9 @@ import type {
 } from '../index';
 
 describe('Internal Types', () => {
-  describe('GatewayContext', () => {
+  describe('ModelHttpContext', () => {
     it('should accept a minimal valid context', () => {
-      const ctx: GatewayContext = {
+      const ctx: ModelHttpContext = {
         id: 'test-id-123',
         ip: '127.0.0.1',
         http: { method: 'POST', path: '/v1/chat/completions' },
@@ -32,7 +32,7 @@ describe('Internal Types', () => {
     });
 
     it('should accept a fully populated context', () => {
-      const ctx: GatewayContext = {
+      const ctx: ModelHttpContext = {
         id: 'req-001',
         ip: '192.168.1.1',
         apiKey: 'sk-test-key',

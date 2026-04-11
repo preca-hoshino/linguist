@@ -55,7 +55,7 @@ describe('Core Engine: dispatch', () => {
       audit: {},
       timing: {},
       response: {},
-    } as unknown as import('@/types').RoutedGatewayContext;
+    } as unknown as import('@/types').RoutedModelHttpContext;
 
     await dispatchChatProvider(
       mockContext,
@@ -82,7 +82,7 @@ describe('Core Engine: dispatch', () => {
       audit: {},
       timing: {},
       response: {},
-    } as unknown as import('@/types').RoutedGatewayContext;
+    } as unknown as import('@/types').RoutedModelHttpContext;
 
     await dispatchChatProvider(
       mockContext,
@@ -104,7 +104,7 @@ describe('Core Engine: dispatch', () => {
       audit: {},
       timing: {},
       response: {},
-    } as unknown as import('@/types').RoutedGatewayContext;
+    } as unknown as import('@/types').RoutedModelHttpContext;
 
     await expect(
       dispatchChatProvider(
@@ -123,7 +123,7 @@ describe('Core Engine: dispatch', () => {
       timing: {},
       response: {},
       route: { capabilities: [] },
-    } as unknown as import('@/types').RoutedGatewayContext;
+    } as unknown as import('@/types').RoutedModelHttpContext;
     const gwErr2: GatewayError = new GatewayError(400, 'err', 'msg', { isDetail: true } as any);
     mockExecutor.mockRejectedValue(gwErr2);
 
@@ -139,7 +139,7 @@ describe('Core Engine: dispatch', () => {
       timing: {},
       response: {},
       route: { capabilities: [] },
-    } as unknown as import('@/types').RoutedGatewayContext;
+    } as unknown as import('@/types').RoutedModelHttpContext;
     const err = new Error('time');
     err.name = 'TimeoutError';
     mockExecutor.mockRejectedValue(err);
@@ -155,7 +155,7 @@ describe('Core Engine: dispatch', () => {
       timing: {},
       response: {},
       route: { capabilities: [] },
-    } as unknown as import('@/types').RoutedGatewayContext;
+    } as unknown as import('@/types').RoutedModelHttpContext;
     mockExecutor.mockRejectedValue(new Error('DeepSeek API returned 400: actual error payload'));
 
     try {
@@ -204,7 +204,7 @@ describe('Core Engine: dispatchEmbedding', () => {
       route: { providerKind: 'deepseek', model: 'my-model', providerConfig: {}, capabilities: [] },
       audit: {},
       timing: {},
-    } as unknown as import('@/types').RoutedGatewayContext;
+    } as unknown as import('@/types').RoutedModelHttpContext;
 
     await dispatchEmbeddingProvider(mockCtx, { input: [] } as any);
     expect(mockClient.call).toHaveBeenCalled();
@@ -240,7 +240,7 @@ describe('Core Engine: dispatchStream', () => {
       route: { capabilities: [] },
       audit: {},
       timing: {},
-    } as unknown as import('@/types').RoutedGatewayContext;
+    } as unknown as import('@/types').RoutedModelHttpContext;
 
     const { stream } = await dispatchChatProviderStream(mockCtx, {} as any);
     const chunks = [];
@@ -258,7 +258,7 @@ describe('Core Engine: dispatchStream', () => {
       route: { capabilities: [] },
       audit: {},
       timing: {},
-    } as unknown as import('@/types').RoutedGatewayContext;
+    } as unknown as import('@/types').RoutedModelHttpContext;
     await expect(dispatchChatProviderStream(mockCtx, {} as any)).rejects.toThrow(/No available chat backends/);
   });
 
@@ -277,7 +277,7 @@ describe('Core Engine: dispatchStream', () => {
       route: { capabilities: [] },
       audit: {},
       timing: {},
-    } as unknown as import('@/types').RoutedGatewayContext;
+    } as unknown as import('@/types').RoutedModelHttpContext;
     await expect(dispatchChatProviderStream(mockCtx, {} as any)).rejects.toThrow(GatewayError);
     expect(mockCtx.providerError).toEqual({ detail: true });
   });
@@ -327,7 +327,7 @@ describe('Core Engine: dispatchStream', () => {
       route: { capabilities: [] },
       audit: {},
       timing: { providerStart: 100 },
-    } as unknown as import('@/types').RoutedGatewayContext; // mock defined providerStart
+    } as unknown as import('@/types').RoutedModelHttpContext; // mock defined providerStart
     const { stream } = await dispatchChatProviderStream(mockCtx, {} as any);
     const chunks = [];
     for await (const ch of stream) {

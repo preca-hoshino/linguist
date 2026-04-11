@@ -2,7 +2,7 @@ import type { Response } from 'express';
 import { applyMiddlewares } from '@/middleware';
 import { dispatchChatProviderStream } from '@/model/http/providers/engine';
 import { assertRouted } from '@/model/http/router';
-import type { GatewayContext, InternalChatStreamChunk } from '@/types';
+import type { ModelHttpContext, InternalChatStreamChunk } from '@/types';
 import { getUserChatAdapter } from '@/model/http/users';
 import { normalizeStreamChunkToolCallIds } from '@/utils';
 import { mergeStreamChunks, processStreamSend } from '../stream';
@@ -19,7 +19,7 @@ jest.mock('@/utils', () => ({
 
 describe('Stream Data Flow', () => {
   let mockRes: jest.Mocked<Response>;
-  let mockCtx: GatewayContext;
+  let mockCtx: ModelHttpContext;
 
   beforeEach(() => {
     jest.resetAllMocks();
@@ -38,7 +38,7 @@ describe('Stream Data Flow', () => {
       timing: { start: 1000 },
       audit: {},
       request: { stream: true },
-    } as unknown as GatewayContext;
+    } as unknown as ModelHttpContext;
   });
 
   describe('processStreamSend', () => {

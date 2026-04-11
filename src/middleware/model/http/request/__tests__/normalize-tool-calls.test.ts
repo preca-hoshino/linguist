@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/consistent-type-assertions, @typescript-eslint/no-unsafe-member-access */
-import type { GatewayContext } from '@/types';
+import type { ModelHttpContext } from '@/types';
 import { normalizeChatToolCallIds } from '../normalize-tool-calls';
 
 jest.mock('@/utils', () => ({
@@ -13,7 +13,7 @@ describe('normalizeChatToolCallIds middleware', () => {
       request: {
         messages: [{ role: 'user', content: 'hi' }],
       },
-    } as unknown as GatewayContext;
+    } as unknown as ModelHttpContext;
 
     normalizeChatToolCallIds(ctx);
 
@@ -21,7 +21,7 @@ describe('normalizeChatToolCallIds middleware', () => {
   });
 
   it('should skip when ctx.request is undefined', () => {
-    const ctx = {} as GatewayContext;
+    const ctx = {} as ModelHttpContext;
     expect(async () => {
       await normalizeChatToolCallIds(ctx);
     }).not.toThrow();
@@ -30,7 +30,7 @@ describe('normalizeChatToolCallIds middleware', () => {
   it('should skip when request has no messages field (e.g. embedding request)', () => {
     const ctx = {
       request: { input: ['text'] },
-    } as unknown as GatewayContext;
+    } as unknown as ModelHttpContext;
     expect(async () => {
       await normalizeChatToolCallIds(ctx);
     }).not.toThrow();

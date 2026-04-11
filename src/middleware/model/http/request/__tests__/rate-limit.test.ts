@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access */
 import { configManager } from '@/config';
-import type { GatewayContext } from '@/types';
+import type { ModelHttpContext } from '@/types';
 import { GatewayError, rateLimiter } from '@/utils';
 import { rateLimit } from '../rate-limit';
 
@@ -40,7 +40,7 @@ describe('rateLimit middleware', () => {
     ],
   };
 
-  let mockCtx: Partial<GatewayContext>;
+  let mockCtx: Partial<ModelHttpContext>;
 
   beforeEach(() => {
     mockCtx = {
@@ -60,7 +60,7 @@ describe('rateLimit middleware', () => {
   it('should return early if vmConfig is not found', () => {
     (configManager.getVirtualModelConfig as jest.Mock).mockReturnValue(undefined);
     expect(() => {
-      rateLimit(mockCtx as GatewayContext);
+      rateLimit(mockCtx as ModelHttpContext);
     }).not.toThrow();
     expect(rateLimiter.incrementRpm).not.toHaveBeenCalled();
   });
@@ -68,10 +68,10 @@ describe('rateLimit middleware', () => {
   it('should throw 429 when RPM limit exceeded', () => {
     (rateLimiter.isRpmFull as jest.Mock).mockReturnValue(true);
     expect(() => {
-      rateLimit(mockCtx as GatewayContext);
+      rateLimit(mockCtx as ModelHttpContext);
     }).toThrow(GatewayError);
     try {
-      rateLimit(mockCtx as GatewayContext);
+      rateLimit(mockCtx as ModelHttpContext);
     } catch (err: unknown) {
       const e = err as GatewayError;
       expect(e.statusCode).toBe(429);
@@ -82,10 +82,10 @@ describe('rateLimit middleware', () => {
   it('should throw 429 when TPM limit exceeded', () => {
     (rateLimiter.isTpmFull as jest.Mock).mockReturnValue(true);
     expect(() => {
-      rateLimit(mockCtx as GatewayContext);
+      rateLimit(mockCtx as ModelHttpContext);
     }).toThrow(GatewayError);
     try {
-      rateLimit(mockCtx as GatewayContext);
+      rateLimit(mockCtx as ModelHttpContext);
     } catch (err: unknown) {
       const e = err as GatewayError;
       expect(e.statusCode).toBe(429);
@@ -93,21 +93,21 @@ describe('rateLimit middleware', () => {
   });
 
   it('should increment RPM for vm and pm when backend is found', () => {
-    rateLimit(mockCtx as GatewayContext);
+    rateLimit(mockCtx as ModelHttpContext);
     expect(rateLimiter.incrementRpm).toHaveBeenCalledWith('vm', 'vm-1');
     expect(rateLimiter.incrementRpm).toHaveBeenCalledWith('pm', 'pm-1');
   });
 
   it('should skip pm RPM increment when ctx.route is undefined', () => {
     (mockCtx as any).route = undefined;
-    rateLimit(mockCtx as GatewayContext);
+    rateLimit(mockCtx as ModelHttpContext);
     expect(rateLimiter.incrementRpm).toHaveBeenCalledWith('vm', 'vm-1');
     expect(rateLimiter.incrementRpm).toHaveBeenCalledTimes(1); // only vm
   });
 
   it('should skip pm RPM increment when backend is not found in vmConfig', () => {
     mockCtx.route = { model: 'unknown-model', providerId: 'prov-1' } as any;
-    rateLimit(mockCtx as GatewayContext);
+    rateLimit(mockCtx as ModelHttpContext);
     expect(rateLimiter.incrementRpm).toHaveBeenCalledWith('vm', 'vm-1');
     expect(rateLimiter.incrementRpm).toHaveBeenCalledTimes(1);
   });

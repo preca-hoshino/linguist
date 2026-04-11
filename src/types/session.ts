@@ -1,13 +1,13 @@
 // src/types/session.ts — WebSocket 会话上下文类型（V2 网关占位）
 
-// TODO: Phase 3 按 SessionContext 完整规格完善
+// TODO: Phase 3 按 ModelWsContext 完整规格完善
 
 /**
  * WebSocket 会话上下文
- * 贯穿 WebSocket 长连接生命周期的唯一载体，类似 HTTP 层的 GatewayContext。
- * 与 GatewayContext 不同，SessionContext 是有状态的，关联整个连接而非单次请求。
+ * 贯穿 WebSocket 长连接生命周期的唯一载体，类似 HTTP 层的 ModelHttpContext。
+ * 与 ModelHttpContext 不同，ModelWsContext 是有状态的，关联整个连接而非单次请求。
  */
-export interface SessionContext {
+export interface ModelWsContext {
   /** 会话唯一 ID */
   id: string;
 

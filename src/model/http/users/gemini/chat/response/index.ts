@@ -1,6 +1,6 @@
 // src/users/gemini/chat/response/index.ts — Gemini 响应适配器（精简编排层）
 
-import type { GatewayContext, InternalChatResponse } from '@/types';
+import type { ModelHttpContext, InternalChatResponse } from '@/types';
 import type { UserChatResponseAdapter } from '@/model/http/users/types';
 import { createLogger, logColors } from '@/utils';
 import { convertCandidate } from './candidate-converter';
@@ -9,7 +9,7 @@ import { convertUsage } from './usage-converter';
 const logger = createLogger('User:Gemini', logColors.bold + logColors.blue);
 
 /**
- * 从 GatewayContext 组装 Gemini 原生格式聊天响应
+ * 从 ModelHttpContext 组装 Gemini 原生格式聊天响应
  *
  * 核心转换逻辑：
  * - choices[].message.content → candidates[].content.parts[{ text }]
@@ -20,7 +20,7 @@ const logger = createLogger('User:Gemini', logColors.bold + logColors.blue);
  * - id/model/created 从 ctx 获取
  */
 export class GeminiChatResponseAdapter implements UserChatResponseAdapter {
-  public fromInternal(ctx: GatewayContext): Record<string, unknown> {
+  public fromInternal(ctx: ModelHttpContext): Record<string, unknown> {
     const res = ctx.response as InternalChatResponse;
 
     logger.debug(

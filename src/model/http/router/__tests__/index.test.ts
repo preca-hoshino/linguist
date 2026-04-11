@@ -2,7 +2,7 @@
 import { route, assertRouted } from '../index';
 import { configManager } from '@/config';
 import { GatewayError } from '@/utils';
-import type { GatewayContext, InternalChatRequest, InternalEmbeddingRequest } from '@/types';
+import type { ModelHttpContext, InternalChatRequest, InternalEmbeddingRequest } from '@/types';
 
 jest.mock('@/config', () => ({
   configManager: {
@@ -12,7 +12,7 @@ jest.mock('@/config', () => ({
 }));
 
 describe('Router', () => {
-  let mockCtx: GatewayContext;
+  let mockCtx: ModelHttpContext;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -21,7 +21,7 @@ describe('Router', () => {
       requestModel: 'test-model',
       timing: {},
       audit: {},
-    } as unknown as GatewayContext;
+    } as unknown as ModelHttpContext;
   });
 
   describe('assertRouted', () => {

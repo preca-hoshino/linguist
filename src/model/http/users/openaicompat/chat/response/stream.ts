@@ -1,6 +1,6 @@
 // src/users/openaicompat/chat/response/stream.ts — OpenAI 兼容流式响应适配器
 
-import type { ChatStreamDelta, GatewayContext, InternalChatStreamChunk } from '@/types';
+import type { ChatStreamDelta, ModelHttpContext, InternalChatStreamChunk } from '@/types';
 import type { UserChatStreamResponseAdapter } from '@/model/http/users/types';
 import { convertUsage } from './usage-converter';
 
@@ -14,7 +14,7 @@ import { convertUsage } from './usage-converter';
  *   data: [DONE]\n\n
  */
 export class OpenAICompatChatStreamResponseAdapter implements UserChatStreamResponseAdapter {
-  public formatChunk(ctx: GatewayContext, chunk: InternalChatStreamChunk): string {
+  public formatChunk(ctx: ModelHttpContext, chunk: InternalChatStreamChunk): string {
     const obj: Record<string, unknown> = {
       id: ctx.id,
       object: 'chat.completion.chunk',

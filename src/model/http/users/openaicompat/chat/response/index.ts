@@ -1,6 +1,6 @@
 // src/users/openaicompat/chat/response/index.ts — OpenAI 兼容响应适配器（精简编排层）
 
-import type { GatewayContext, InternalChatResponse } from '@/types';
+import type { ModelHttpContext, InternalChatResponse } from '@/types';
 import type { UserChatResponseAdapter } from '@/model/http/users/types';
 import { createLogger, logColors } from '@/utils';
 import { convertUsage } from './usage-converter';
@@ -8,11 +8,11 @@ import { convertUsage } from './usage-converter';
 const logger = createLogger('User:OpenAICompat', logColors.bold + logColors.cyan);
 
 /**
- * 从 GatewayContext 组装 OpenAI 格式聊天响应
+ * 从 ModelHttpContext 组装 OpenAI 格式聊天响应
  * id、model、created 均从 ctx 获取，而非从 InternalChatResponse
  */
 export class OpenAICompatChatResponseAdapter implements UserChatResponseAdapter {
-  public fromInternal(ctx: GatewayContext): Record<string, unknown> {
+  public fromInternal(ctx: ModelHttpContext): Record<string, unknown> {
     const res = ctx.response as InternalChatResponse;
     logger.debug(
       {

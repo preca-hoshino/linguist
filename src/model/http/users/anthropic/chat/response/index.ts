@@ -1,6 +1,6 @@
 // src/users/claude/chat/response/index.ts — Anthropic 非流式响应适配器
 
-import type { FinishReason, GatewayContext, InternalChatResponse } from '@/types';
+import type { FinishReason, ModelHttpContext, InternalChatResponse } from '@/types';
 import type { UserChatResponseAdapter } from '@/model/http/users/types';
 import { createLogger, logColors } from '@/utils';
 import { v4 as uuidv4 } from '@/utils/uuid';
@@ -47,7 +47,7 @@ function mapFinishReason(reason: FinishReason): string {
 // ==================== 响应适配器 ====================
 
 /**
- * 从 GatewayContext 组装 Anthropic Messages API 非流式响应
+ * 从 ModelHttpContext 组装 Anthropic Messages API 非流式响应
  *
  * Anthropic 响应结构:
  * {
@@ -61,7 +61,7 @@ function mapFinishReason(reason: FinishReason): string {
  * }
  */
 export class AnthropicChatResponseAdapter implements UserChatResponseAdapter {
-  public fromInternal(ctx: GatewayContext): Record<string, unknown> {
+  public fromInternal(ctx: ModelHttpContext): Record<string, unknown> {
     const res = ctx.response as InternalChatResponse;
     const choice = res.choices[0];
 
@@ -128,7 +128,7 @@ export class AnthropicChatResponseAdapter implements UserChatResponseAdapter {
   }
 
   /** 空响应兜底 */
-  private buildEmptyMessage(ctx: GatewayContext, res: InternalChatResponse): Record<string, unknown> {
+  private buildEmptyMessage(ctx: ModelHttpContext, res: InternalChatResponse): Record<string, unknown> {
     return {
       id: `msg_${ctx.id}`,
       type: 'message',

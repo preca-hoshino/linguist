@@ -173,7 +173,7 @@ export interface ChatUsage {
 /**
  * 核心请求实体 (Chat Request)
  *
- * 注意：不包含 model 字段。模型名称由 GatewayContext.requestModel / routedModel 管理。
+ * 注意：不包含 model 字段。模型名称由 ModelHttpContext.requestModel / routedModel 管理。
  */
 export interface InternalChatRequest {
   // --- 基础参数 ---
@@ -310,7 +310,7 @@ export interface ChatStreamChoice {
 /**
  * 单个流式事件 chunk（对应 SSE 的一行 `data: {...}`）
  *
- * 不含 id / model / created，由 GatewayContext 统一管理。
+ * 不含 id / model / created，由 ModelHttpContext 统一管理。
  * SSE 流以 `data: [DONE]` 结束，调用方检测到该标记后停止读取。
  */
 export interface InternalChatStreamChunk {
@@ -353,7 +353,7 @@ export interface ChatChoice {
 /**
  * 聊天响应实体（非流式）
  *
- * 不含 id / model / created，由 GatewayContext 统一管理。
+ * 不含 id / model / created，由 ModelHttpContext 统一管理。
  */
 export interface InternalChatResponse {
   /** 候选项列表（通常只有 index=0 一项） */

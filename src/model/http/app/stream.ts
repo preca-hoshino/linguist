@@ -9,7 +9,7 @@ import type {
   ChatChoice,
   ChatUsage,
   FinishReason,
-  GatewayContext,
+  ModelHttpContext,
   InternalChatRequest,
   InternalChatResponse,
   InternalChatStreamChunk,
@@ -31,7 +31,7 @@ import { expressHeadersToRecord } from './helpers';
  * 注意：res.writeHead 发送后响应头已提交，外层 catch 会检测
  * res.headersSent 并仅执行 res.end() 而非发送错误 JSON。
  */
-export async function processStreamSend(ctx: GatewayContext, res: Response, middlewares: Middleware[]): Promise<void> {
+export async function processStreamSend(ctx: ModelHttpContext, res: Response, middlewares: Middleware[]): Promise<void> {
   assertRouted(ctx);
   const { streamResponse: userStreamAdapter } = getUserChatAdapter(ctx.userFormat);
 

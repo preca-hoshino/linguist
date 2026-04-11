@@ -1,7 +1,7 @@
 // src/app/helpers.ts — 请求处理辅助函数
 
 import type { Response } from 'express';
-import type { GatewayContext, HttpHeaders } from '@/types';
+import type { ModelHttpContext, HttpHeaders } from '@/types';
 import type { Logger } from '@/utils';
 
 // ========== 生命周期收尾 Helpers ==========
@@ -10,7 +10,7 @@ import type { Logger } from '@/utils';
  * 成功收尾：记录 timing 并打印成功日志
  * 由调用方负责之后执行 markCompleted(ctx)
  */
-export function finalizeSuccess(ctx: GatewayContext, label: string, logger: Logger): void {
+export function finalizeSuccess(ctx: ModelHttpContext, label: string, logger: Logger): void {
   ctx.timing.end = Date.now();
   const totalDuration = ctx.timing.end - ctx.timing.start;
   const providerDuration =
@@ -38,7 +38,7 @@ export function finalizeSuccess(ctx: GatewayContext, label: string, logger: Logg
  * 失败收尾：写入 ctx.error、记录 timing 并打印失败日志
  * 由调用方负责之后执行 markError(ctx, err)
  */
-export function finalizeError(ctx: GatewayContext, err: unknown, label: string, logger: Logger): void {
+export function finalizeError(ctx: ModelHttpContext, err: unknown, label: string, logger: Logger): void {
   ctx.error = err instanceof Error ? err.message : String(err);
   ctx.timing.end = Date.now();
   const totalDuration = ctx.timing.end - ctx.timing.start;

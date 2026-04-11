@@ -1,6 +1,6 @@
 import { validateApiKey } from '@/db/api-keys';
 import { lookupApp } from '@/db/apps';
-import type { GatewayContext } from '@/types';
+import type { ModelHttpContext } from '@/types';
 import { GatewayError } from '@/utils';
 import { apiKeyAuth } from '../api-key-auth';
 
@@ -23,7 +23,7 @@ jest.mock('@/utils', () => ({
 }));
 
 describe('apiKeyAuth middleware', () => {
-  let mockCtx: Partial<GatewayContext>;
+  let mockCtx: Partial<ModelHttpContext>;
 
   beforeEach(() => {
     mockCtx = {
@@ -42,24 +42,24 @@ describe('apiKeyAuth middleware', () => {
 
   it('should skip validation if REQUIRE_API_KEY is false', async () => {
     process.env.REQUIRE_API_KEY = 'false';
-    await apiKeyAuth(mockCtx as GatewayContext);
+    await apiKeyAuth(mockCtx as ModelHttpContext);
     expect(validateApiKey).not.toHaveBeenCalled();
   });
 
   it('should throw 401 if apiKey is missing', async () => {
     mockCtx.apiKey = '';
-    await expect(apiKeyAuth(mockCtx as GatewayContext)).rejects.toThrow(GatewayError);
+    await expect(apiKeyAuth(mockCtx as ModelHttpContext)).rejects.toThrow(GatewayError);
   });
 
   it('should throw 401 with gemini hint if userFormat is gemini and apiKey is missing', async () => {
     mockCtx.apiKey = '';
     mockCtx.userFormat = 'gemini';
-    await expect(apiKeyAuth(mockCtx as GatewayContext)).rejects.toThrow(GatewayError);
+    await expect(apiKeyAuth(mockCtx as ModelHttpContext)).rejects.toThrow(GatewayError);
   });
 
   it('should throw 401 if api key is invalid or inactive', async () => {
     (validateApiKey as jest.Mock).mockResolvedValue(null);
-    await expect(apiKeyAuth(mockCtx as GatewayContext)).rejects.toThrow(GatewayError);
+    await expect(apiKeyAuth(mockCtx as ModelHttpContext)).rejects.toThrow(GatewayError);
     expect(validateApiKey).toHaveBeenCalledWith('sk-test12345678');
   });
 
@@ -67,7 +67,7 @@ describe('apiKeyAuth middleware', () => {
     (validateApiKey as jest.Mock).mockResolvedValue({ id: 'ak_1', name: 'My App Key', appId: 'app_1' });
     (lookupApp as jest.Mock).mockResolvedValue({ id: 'app_1', name: 'My App', isActive: true, allowedModelIds: [] });
 
-    await apiKeyAuth(mockCtx as GatewayContext);
+    await apiKeyAuth(mockCtx as ModelHttpContext);
 
     expect(validateApiKey).toHaveBeenCalledWith('sk-test12345678');
     expect(mockCtx.apiKeyName).toBe('My App Key');
@@ -79,7 +79,7 @@ describe('apiKeyAuth middleware', () => {
     (validateApiKey as jest.Mock).mockResolvedValue({ id: 'ak_1', name: 'My App Key', appId: 'app_99' });
     (lookupApp as jest.Mock).mockResolvedValue(undefined);
 
-    await apiKeyAuth(mockCtx as GatewayContext);
+    await apiKeyAuth(mockCtx as ModelHttpContext);
 
     expect(mockCtx.appId).toBe('app_99');
     expect(mockCtx.appName).toBeUndefined();

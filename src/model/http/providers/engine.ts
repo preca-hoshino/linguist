@@ -2,7 +2,7 @@
 
 import { configManager } from '@/config';
 import type {
-  GatewayContext,
+  ModelHttpContext,
   InternalChatRequest,
   InternalChatResponse,
   InternalChatStreamChunk,
@@ -11,7 +11,7 @@ import type {
   ProviderCallResult,
   ProviderConfig,
   ResolvedRoute,
-  RoutedGatewayContext,
+  RoutedModelHttpContext,
 } from '@/types';
 import { createCachedLoggerFactory, GatewayError, logColors, parseSSEStream } from '@/utils';
 import { fetchHeadersToRecord } from './http-utils';
@@ -51,7 +51,7 @@ type GetAdapterSet<TReq, TRes> = (providerKind: string, providerConfig: Provider
 type InternalResponse = InternalChatResponse | InternalEmbeddingResponse;
 
 export async function callProvider<TReq, TRes extends InternalResponse>(
-  ctx: RoutedGatewayContext,
+  ctx: RoutedModelHttpContext,
   request: TReq,
   getAdapterSet: GetAdapterSet<TReq, TRes>,
   label: string,
@@ -83,7 +83,7 @@ export async function callProvider<TReq, TRes extends InternalResponse>(
 }
 
 async function dispatchProvider<TReq, TRes extends InternalResponse>(
-  ctx: GatewayContext,
+  ctx: ModelHttpContext,
   request: TReq,
   getAdapterSet: GetAdapterSet<TReq, TRes>,
   label: string,
@@ -115,7 +115,7 @@ async function dispatchProvider<TReq, TRes extends InternalResponse>(
   }
 
   // 经过上方的 if 块（或入参本身已完整），此处 route 已保证填充完毕
-  const routedCtx = ctx as RoutedGatewayContext;
+  const routedCtx = ctx as RoutedModelHttpContext;
 
   const providerLogger = getProviderLogger(routedCtx.route.providerKind);
   try {
@@ -147,7 +147,7 @@ async function dispatchProvider<TReq, TRes extends InternalResponse>(
 // ========== 框架引擎: 公开入口 ==========
 
 export async function dispatchChatProvider(
-  ctx: GatewayContext,
+  ctx: ModelHttpContext,
   chatRequest: InternalChatRequest,
   executor: typeof callProvider = callProvider,
 ): Promise<void> {
@@ -161,7 +161,7 @@ export async function dispatchChatProvider(
 }
 
 export async function dispatchEmbeddingProvider(
-  ctx: GatewayContext,
+  ctx: ModelHttpContext,
   embeddingRequest: InternalEmbeddingRequest,
   executor: typeof callProvider = callProvider,
 ): Promise<void> {
@@ -181,7 +181,7 @@ export interface StreamDispatchResult {
 }
 
 async function tryStreamConnect(
-  ctx: RoutedGatewayContext,
+  ctx: RoutedModelHttpContext,
   chatRequest: InternalChatRequest,
   candidate: ResolvedRoute,
 ): Promise<StreamDispatchResult> {
@@ -218,7 +218,7 @@ async function tryStreamConnect(
 }
 
 export async function dispatchChatProviderStream(
-  ctx: RoutedGatewayContext,
+  ctx: RoutedModelHttpContext,
   chatRequest: InternalChatRequest,
 ): Promise<StreamDispatchResult> {
   if (!ctx.id) {
@@ -258,7 +258,7 @@ export async function dispatchChatProviderStream(
 }
 
 async function* createChunkGenerator(
-  ctx: RoutedGatewayContext,
+  ctx: RoutedModelHttpContext,
   response: globalThis.Response,
   streamResponseAdapter: ProviderChatStreamResponseAdapter,
 ): AsyncGenerator<InternalChatStreamChunk> {

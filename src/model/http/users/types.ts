@@ -1,6 +1,6 @@
 // src/users/types.ts — 用户适配器接口定义
 
-import type { GatewayContext, InternalChatRequest, InternalChatStreamChunk, InternalEmbeddingRequest } from '@/types';
+import type { ModelHttpContext, InternalChatRequest, InternalChatStreamChunk, InternalEmbeddingRequest } from '@/types';
 
 /** 错误响应载荷（HTTP 状态码 + JSON 响应体） */
 export interface ErrorResponsePayload {
@@ -20,10 +20,10 @@ export interface UserChatRequestAdapter {
 
 /**
  * 用户聊天响应适配器（非流式）
- * 从 GatewayContext 中取 response、id、requestModel 等组装用户格式响应
+ * 从 ModelHttpContext 中取 response、id、requestModel 等组装用户格式响应
  */
 export interface UserChatResponseAdapter {
-  fromInternal: (ctx: GatewayContext) => Record<string, unknown>;
+  fromInternal: (ctx: ModelHttpContext) => Record<string, unknown>;
 }
 
 /**
@@ -32,7 +32,7 @@ export interface UserChatResponseAdapter {
  */
 export interface UserChatStreamResponseAdapter {
   /** 将单个内部 chunk 转为用户格式的 SSE 行（含 "data: " 前缀 + "\n\n" 后缀） */
-  formatChunk: (ctx: GatewayContext, chunk: InternalChatStreamChunk) => string;
+  formatChunk: (ctx: ModelHttpContext, chunk: InternalChatStreamChunk) => string;
   /** 返回流结束标记（如 OpenAI 的 "data: [DONE]\n\n"），无标记时返回 null */
   formatEnd: () => string | null;
 }
@@ -58,10 +58,10 @@ export interface UserEmbeddingRequestAdapter {
 
 /**
  * 用户嵌入响应适配器
- * 从 GatewayContext 组装最终嵌入响应
+ * 从 ModelHttpContext 组装最终嵌入响应
  */
 export interface UserEmbeddingResponseAdapter {
-  fromInternal: (ctx: GatewayContext) => Record<string, unknown>;
+  fromInternal: (ctx: ModelHttpContext) => Record<string, unknown>;
 }
 
 /**

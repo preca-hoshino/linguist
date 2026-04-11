@@ -1,13 +1,13 @@
 // src/users/openaicompat/embedding/response/index.ts — OpenAI 兼容嵌入响应适配器
 
-import type { GatewayContext, InternalEmbeddingResponse } from '@/types';
+import type { ModelHttpContext, InternalEmbeddingResponse } from '@/types';
 import type { UserEmbeddingResponseAdapter } from '@/model/http/users/types';
 import { createLogger, logColors } from '@/utils';
 
 const logger = createLogger('User:OpenAICompat:Embedding', logColors.bold + logColors.cyan);
 
 /**
- * 从 GatewayContext 组装 OpenAI 格式嵌入响应
+ * 从 ModelHttpContext 组装 OpenAI 格式嵌入响应
  *
  * OpenAI /v1/embeddings 响应格式：
  * {
@@ -21,7 +21,7 @@ const logger = createLogger('User:OpenAICompat:Embedding', logColors.bold + logC
  * data 始终为单元素数组（每次请求只处理一条嵌入）。
  */
 export class OpenAICompatEmbeddingResponseAdapter implements UserEmbeddingResponseAdapter {
-  public fromInternal(ctx: GatewayContext): Record<string, unknown> {
+  public fromInternal(ctx: ModelHttpContext): Record<string, unknown> {
     const res = ctx.response as InternalEmbeddingResponse;
     logger.debug(
       {

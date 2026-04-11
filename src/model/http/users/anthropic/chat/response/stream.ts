@@ -1,6 +1,6 @@
 // src/users/claude/chat/response/stream.ts — Anthropic 流式响应适配器（per-request 状态机）
 
-import type { ChatUsage, GatewayContext, InternalChatStreamChunk } from '@/types';
+import type { ChatUsage, ModelHttpContext, InternalChatStreamChunk } from '@/types';
 import type { UserChatStreamResponseAdapter } from '@/model/http/users/types';
 import { v4 as uuidv4 } from '@/utils/uuid';
 import { convertUsage } from './usage-converter';
@@ -71,7 +71,7 @@ export class AnthropicChatStreamResponseAdapter implements UserChatStreamRespons
     this.states.delete(requestId);
   }
 
-  public formatChunk(ctx: GatewayContext, chunk: InternalChatStreamChunk): string {
+  public formatChunk(ctx: ModelHttpContext, chunk: InternalChatStreamChunk): string {
     const state = this.getState(ctx.id);
     const lines: string[] = [];
     const choice = chunk.choices[0];
@@ -158,7 +158,7 @@ export class AnthropicChatStreamResponseAdapter implements UserChatStreamRespons
 
   // ==================== 事件生成器 ====================
 
-  private emitMessageStart(ctx: GatewayContext): string {
+  private emitMessageStart(ctx: ModelHttpContext): string {
     const data = {
       type: 'message_start',
       message: {

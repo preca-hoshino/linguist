@@ -5,7 +5,7 @@
 // 本中间件仅负责虚拟模型层面的宏观防护，以及对通过的请求进行 RPM 计数扣减。
 
 import { configManager } from '@/config';
-import type { GatewayContext } from '@/types';
+import type { ModelHttpContext } from '@/types';
 import { createLogger, GatewayError, logColors, rateLimiter } from '@/utils';
 
 const logger = createLogger('Middleware:RateLimit', logColors.bold + logColors.gray);
@@ -22,7 +22,7 @@ const logger = createLogger('Middleware:RateLimit', logColors.bold + logColors.g
  * TPM 扣减在响应中间件（token-accounting.ts）中完成，
  * 因为真正消耗的 Token 数只有在提供商响应后才能确定。
  */
-export function rateLimit(ctx: GatewayContext): void {
+export function rateLimit(ctx: ModelHttpContext): void {
   const vmConfig = configManager.getVirtualModelConfig(ctx.requestModel);
   if (!vmConfig) {
     // 虚拟模型不存在：路由阶段已经会抛出 404，这里是防御性检查

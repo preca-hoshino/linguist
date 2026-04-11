@@ -1,5 +1,5 @@
 import { configManager } from '@/config';
-import type { GatewayContext } from '@/types';
+import type { ModelHttpContext } from '@/types';
 import { rateLimiter } from '@/utils';
 import { tokenAccounting } from '../token-accounting';
 
@@ -43,7 +43,7 @@ describe('tokenAccounting middleware', () => {
   });
 
   it('should return early when ctx.response is undefined', () => {
-    const ctx = { response: undefined, requestModel: 'my-model' } as unknown as GatewayContext;
+    const ctx = { response: undefined, requestModel: 'my-model' } as unknown as ModelHttpContext;
     tokenAccounting(ctx);
     expect(rateLimiter.incrementTpm).not.toHaveBeenCalled();
   });
@@ -52,7 +52,7 @@ describe('tokenAccounting middleware', () => {
     const ctx = {
       requestModel: 'my-model',
       response: { usage: { total_tokens: 0 } },
-    } as unknown as GatewayContext;
+    } as unknown as ModelHttpContext;
     tokenAccounting(ctx);
     expect(rateLimiter.incrementTpm).not.toHaveBeenCalled();
   });
@@ -61,7 +61,7 @@ describe('tokenAccounting middleware', () => {
     const ctx = {
       requestModel: 'my-model',
       response: { choices: [] },
-    } as unknown as GatewayContext;
+    } as unknown as ModelHttpContext;
     tokenAccounting(ctx);
     expect(rateLimiter.incrementTpm).not.toHaveBeenCalled();
   });
@@ -71,7 +71,7 @@ describe('tokenAccounting middleware', () => {
     const ctx = {
       requestModel: 'unknown-model',
       response: { usage: { total_tokens: 100 } },
-    } as unknown as GatewayContext;
+    } as unknown as ModelHttpContext;
     tokenAccounting(ctx);
     expect(rateLimiter.incrementTpm).not.toHaveBeenCalled();
   });
@@ -82,7 +82,7 @@ describe('tokenAccounting middleware', () => {
       requestModel: 'my-model',
       response: { usage: { total_tokens: 500 } },
       route: undefined,
-    } as unknown as GatewayContext;
+    } as unknown as ModelHttpContext;
     tokenAccounting(ctx);
     expect(rateLimiter.incrementTpm).toHaveBeenCalledWith('vm', 'vm-1', 500);
     expect(rateLimiter.incrementTpm).toHaveBeenCalledTimes(1);
@@ -94,7 +94,7 @@ describe('tokenAccounting middleware', () => {
       requestModel: 'my-model',
       response: { usage: { total_tokens: 300 } },
       route: { model: 'real-model', providerId: 'prov-1' },
-    } as unknown as GatewayContext;
+    } as unknown as ModelHttpContext;
     tokenAccounting(ctx);
     expect(rateLimiter.incrementTpm).toHaveBeenCalledWith('vm', 'vm-1', 300);
     expect(rateLimiter.incrementTpm).toHaveBeenCalledWith('pm', 'pm-1', 300);
@@ -106,7 +106,7 @@ describe('tokenAccounting middleware', () => {
       requestModel: 'my-model',
       response: { usage: { total_tokens: 200 } },
       route: { model: 'unknown-model', providerId: 'prov-1' },
-    } as unknown as GatewayContext;
+    } as unknown as ModelHttpContext;
     tokenAccounting(ctx);
     expect(rateLimiter.incrementTpm).toHaveBeenCalledWith('vm', 'vm-1', 200);
     expect(rateLimiter.incrementTpm).toHaveBeenCalledTimes(1);
@@ -118,7 +118,7 @@ describe('tokenAccounting middleware', () => {
       requestModel: 'my-model',
       response: { usage: { total_tokens: 150, prompt_tokens: 150 } },
       route: undefined,
-    } as unknown as GatewayContext;
+    } as unknown as ModelHttpContext;
     tokenAccounting(ctx);
     expect(rateLimiter.incrementTpm).toHaveBeenCalledWith('vm', 'vm-1', 150);
   });

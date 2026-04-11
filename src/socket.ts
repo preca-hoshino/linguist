@@ -7,7 +7,7 @@ const logger = createLogger('WebSocket', logColors.cyan);
 // TODO: Phase 3 实现
 // - HTTP → WebSocket 协议升级处理
 // - 从 URL query param 或首帧中提取 API Key 完成鉴权
-// - 创建 SessionContext，分发到 wsEngine.handleSession()
+// - 创建 ModelWsContext，分发到 wsEngine.handleSession()
 // - 心跳检测与连接回收
 
 /**

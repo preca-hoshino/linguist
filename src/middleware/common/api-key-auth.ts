@@ -2,7 +2,7 @@
 
 import { validateApiKey } from '@/db/api-keys';
 import { lookupApp } from '@/db/apps';
-import type { GatewayContext } from '@/types';
+import type { ModelHttpContext } from '@/types';
 import { createLogger, GatewayError, logColors } from '@/utils';
 
 const logger = createLogger('Middleware:ApiKeyAuth', logColors.bold + logColors.gray);
@@ -10,7 +10,7 @@ const logger = createLogger('Middleware:ApiKeyAuth', logColors.bold + logColors.
 /**
  * API Key 鉴权中间件
  *
- * 从 GatewayContext.apiKey 读取用户提供的 API Key，
+ * 从 ModelHttpContext.apiKey 读取用户提供的 API Key，
  * 验证其在数据库中是否存在且活跃（通过内存缓存加速）。
  * 同时提取所属 App 信息写入上下文。
  *
@@ -18,7 +18,7 @@ const logger = createLogger('Middleware:ApiKeyAuth', logColors.bold + logColors.
  *
  * 可通过环境变量 REQUIRE_API_KEY=false 关闭鉴权（开发环境）。
  */
-export async function apiKeyAuth(ctx: GatewayContext): Promise<void> {
+export async function apiKeyAuth(ctx: ModelHttpContext): Promise<void> {
   // 环境变量控制：允许关闭鉴权（开发/测试环境）
   const requireApiKey = process.env.REQUIRE_API_KEY !== 'false';
 

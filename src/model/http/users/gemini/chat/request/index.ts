@@ -25,7 +25,7 @@ const logger = createLogger('User:Gemini', logColors.bold + logColors.blue);
  * - thinkingConfig → thinking
  * - inlineData → MediaContentPart (base64)
  *
- * 注意：不包含 model 字段，model 由核心流程从 URL 路径提取写入 GatewayContext.requestModel
+ * 注意：不包含 model 字段，model 由核心流程从 URL 路径提取写入 ModelHttpContext.requestModel
  */
 export class GeminiChatRequestAdapter implements UserChatRequestAdapter {
   public toInternal(userReq: unknown): InternalChatRequest {
