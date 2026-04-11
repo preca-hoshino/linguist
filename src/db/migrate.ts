@@ -11,8 +11,8 @@ const logger = createLogger('Migration', logColors.bold + logColors.magenta);
  * 按序执行 schema 建表语句和 migrations 历史补丁
  */
 async function executeMigrationFiles(executor: QueryExecutor, log: Logger): Promise<void> {
-  const schemaDir = path.join(__dirname, 'schema');
-  const migrationsDir = path.join(__dirname, 'migrations');
+  const schemaDir = path.join(__dirname, 'sql', 'schema');
+  const migrationsDir = path.join(__dirname, 'sql', 'migrations');
 
   // 1. 优先执行 Schema（全量表结构与基础设施定义）
   if (fs.existsSync(schemaDir)) {
