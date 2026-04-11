@@ -15,8 +15,8 @@ mcpRouter.get('/v1/mcp/tools', (req, res) => {
 
 // POST /v1/mcp/tools/call — 调用指定工具（待实现）
 mcpRouter.post('/v1/mcp/tools/call', (req, res) => {
-  const toolName = (req.body as Record<string, unknown>)?.toolName;
-  logger.warn({ ip: req.ip, method: req.method, tool: toolName }, 'MCP /tools/call invoked (Not Implemented)');
+  const body = req.body as { toolName?: string } | undefined;
+  logger.warn({ ip: req.ip, method: req.method, tool: body?.toolName }, 'MCP /tools/call invoked (Not Implemented)');
   res.status(501).json({ error: 'not_implemented', message: 'MCP gateway is not yet implemented' });
 });
 
