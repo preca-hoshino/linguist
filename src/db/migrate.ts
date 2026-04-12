@@ -128,8 +128,8 @@ export async function runMigrations(): Promise<void> {
 if (require.main === module) {
   const isReset = process.argv.includes('--reset');
   const isClear = process.argv.includes('--clear');
-  
-  let task;
+
+  let task: Promise<void>;
   if (isReset) {
     task = resetDatabase(false);
   } else if (isClear) {
