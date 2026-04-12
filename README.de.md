@@ -118,7 +118,7 @@ Nach dem Start der Services:
 Nach dem Starten des Service (lokal oder Docker):
 - Integritätsprüfung: `GET http://localhost:3000/api/health`
 - Modelliste (OpenAI-Format): `GET http://localhost:3000/v1/models`
-- Chat-Endpunkt (OpenAI-Format): `POST http://localhost:3000/v1/chat/completions`
+- Chat-Endpunkt (OpenAI-Format): `POST http://localhost:3000/model/openai-compat/v1/chat/completions`
 - Embedding-Endpunkt (OpenAI-Format): `POST http://localhost:3000/v1/embeddings`
 - Chat-Endpunkt (Gemini-Format): `POST http://localhost:3000/v1beta/models/:model:generateContent`
 - Streaming-Chat (Gemini-Format): `POST http://localhost:3000/v1beta/models/:model:streamGenerateContent`
@@ -181,7 +181,7 @@ Content-Type: application/json
 Die Konfiguration wird sofort wirksam (kein Neustart erforderlich). Eine Chat-Anfrage senden:
 
 ```http
-POST http://localhost:3000/v1/chat/completions
+POST http://localhost:3000/model/openai-compat/v1/chat/completions
 Content-Type: application/json
 
 {
@@ -206,7 +206,7 @@ Content-Type: application/json
 
 | Format | Beschreibung    | Chat-Endpunkt                           | Embedding-Endpunkt                      |
 | ------ | --------------- | --------------------------------------- | --------------------------------------- |
-| OpenAI | Kompatibles Format | `/v1/chat/completions`                 | `/v1/embeddings`                       |
+| OpenAI | Kompatibles Format | `/model/openai-compat/v1/chat/completions`                 | `/v1/embeddings`                       |
 | Gemini | Natives Format  | `/v1beta/models/:model:generateContent` | `/v1beta/models/:model:embedContent`   |
 
 ---
@@ -219,7 +219,7 @@ Content-Type: application/json
 | ------- | ----------------------------------------- | ------------------------------- |
 | `GET`   | `/api/health`                             | Integritätsprüfung              |
 | `GET`   | `/v1/models`                              | Modellliste abrufen             |
-| `POST`  | `/v1/chat/completions`                    | OpenAI Chat-Vervollständigung   |
+| `POST`  | `/model/openai-compat/v1/chat/completions`                    | OpenAI Chat-Vervollständigung   |
 | `POST`  | `/v1/embeddings`                          | OpenAI Text-Embedding           |
 | `POST`  | `/v1beta/models/:model:generateContent`   | Gemini Chat-Vervollständigung   |
 | `POST`  | `/v1beta/models/:model:streamGenerateContent` | Gemini Streaming-Chat         |

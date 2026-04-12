@@ -68,7 +68,7 @@ async function start(): Promise<void> {
     const server = app.listen(PORT, () => {
       logger.info({ port: PORT }, 'Linguist LLM Gateway started');
       logger.info(`Health check: http://localhost:${PORT}/api/health`);
-      logger.info(`Chat completions: POST http://localhost:${PORT}/v1/chat/completions`);
+      logger.info(`Chat completions: POST http://localhost:${PORT}/model/openai-compat/v1/chat/completions`);
     });
 
     // 绑定 WebSocket 与 MCP 初始化 (占位)

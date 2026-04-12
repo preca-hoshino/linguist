@@ -15,7 +15,7 @@ describe('Internal Types', () => {
       const ctx: ModelHttpContext = {
         id: 'test-id-123',
         ip: '127.0.0.1',
-        http: { method: 'POST', path: '/v1/chat/completions' },
+        http: { method: 'POST', path: '/model/openai-compat/v1/chat/completions' },
         userFormat: 'openaicompat',
         requestModel: 'gpt-4',
         audit: {},
@@ -37,7 +37,7 @@ describe('Internal Types', () => {
         ip: '192.168.1.1',
         apiKey: 'sk-test-key',
         apiKeyPrefix: 'sk-test-key',
-        http: { method: 'POST', path: '/v1/chat/completions', userAgent: 'test-client' },
+        http: { method: 'POST', path: '/model/openai-compat/v1/chat/completions', userAgent: 'test-client' },
         userFormat: 'openaicompat',
         requestModel: 'gpt-4',
         route: {

@@ -26,27 +26,27 @@ api/
 
 ### OpenAI 兼容格式 (`openaicompat`)
 
-| 端点                   | 方法 | model 来源   | API Key 来源                  |
-| ---------------------- | ---- | ------------ | ----------------------------- |
-| `/v1/models`           | GET  | —            | `Authorization: Bearer <key>` |
-| `/v1/chat/completions` | POST | `body.model` | `Authorization: Bearer <key>` |
-| `/v1/embeddings`       | POST | `body.model` | `Authorization: Bearer <key>` |
+| 端点                                      | 方法 | model 来源   | API Key 来源                  |
+| ----------------------------------------- | ---- | ------------ | ----------------------------- |
+| `/model/openai-compat/v1/models`           | GET  | —            | `Authorization: Bearer <key>` |
+| `/model/openai-compat/v1/chat/completions` | POST | `body.model` | `Authorization: Bearer <key>` |
+| `/model/openai-compat/v1/embeddings`       | POST | `body.model` | `Authorization: Bearer <key>` |
 
 ### Anthropic 格式 (`anthropic`)
 
-| 端点           | 方法 | model 来源   | API Key 来源       |
-| -------------- | ---- | ------------ | ------------------ |
-| `/v1/models`   | GET  | —            | `x-api-key` header |
-| `/v1/messages` | POST | `body.model` | `x-api-key` header |
+| 端点                       | 方法 | model 来源   | API Key 来源       |
+| -------------------------- | ---- | ------------ | ------------------ |
+| `/model/anthropic/v1/models`   | GET  | —            | `x-api-key` header |
+| `/model/anthropic/v1/messages` | POST | `body.model` | `x-api-key` header |
 
 ### Gemini 原生格式 (`gemini`)
 
-| 端点                                          | 方法 | model 来源        | API Key 来源                                |
-| --------------------------------------------- | ---- | ----------------- | ------------------------------------------- |
-| `/v1beta/models`                              | GET  | —                 | `x-goog-api-key` header 或 `?key=` 查询参数 |
-| `/v1beta/models/:model:generateContent`       | POST | URL 路径 `:model` | `x-goog-api-key` header 或 `?key=` 查询参数 |
-| `/v1beta/models/:model:streamGenerateContent` | POST | URL 路径 `:model` | `x-goog-api-key` header 或 `?key=` 查询参数 |
-| `/v1beta/models/:model:embedContent`          | POST | URL 路径 `:model` | `x-goog-api-key` header 或 `?key=` 查询参数 |
+| 端点                                                          | 方法 | model 来源        | API Key 来源                                |
+| ------------------------------------------------------------- | ---- | ----------------- | ------------------------------------------- |
+| `/model/gemini/v1beta/models`                                 | GET  | —                 | `x-goog-api-key` header 或 `?key=` 查询参数 |
+| `/model/gemini/v1beta/models/:model:generateContent`          | POST | URL 路径 `:model` | `x-goog-api-key` header 或 `?key=` 查询参数 |
+| `/model/gemini/v1beta/models/:model:streamGenerateContent`    | POST | URL 路径 `:model` | `x-goog-api-key` header 或 `?key=` 查询参数 |
+| `/model/gemini/v1beta/models/:model:embedContent`             | POST | URL 路径 `:model` | `x-goog-api-key` header 或 `?key=` 查询参数 |
 
 ## 核心组件
 
@@ -68,9 +68,9 @@ const extractor = getApiKeyExtractor(format);
 
 ```typescript
 const apiRouter: Router = Router();
-apiRouter.use(openaiCompatRouter);
-apiRouter.use(geminiRouter);
-apiRouter.use(anthropicRouter);
+apiRouter.use('/model/openai-compat', openaiCompatRouter);
+apiRouter.use('/model/gemini', geminiRouter);
+apiRouter.use('/model/anthropic', anthropicRouter);
 ```
 
 ## 新增 / 重构 / 删除向导
