@@ -41,11 +41,12 @@ router.get('/', async (req: Request, res: Response) => {
 
     const data = result.data.map((a) => ({ object: 'app' as const, ...a }));
 
-    logger.debug({ count: data.length, has_more: result.has_more }, 'Apps listed');
+    logger.debug({ count: data.length, has_more: result.has_more, total: result.total }, 'Apps listed');
     res.json({
       object: 'list',
       url: '/api/apps',
       has_more: result.has_more,
+      total: result.total,
       data,
     });
   } catch (error) {
@@ -91,9 +92,9 @@ router.post('/', async (req: Request, res: Response) => {
   }
 });
 
-// ==================== 更新应用（Stripe 风格：POST, 非 PATCH） ====================
-// POST /api/apps/:id
-router.post('/:id', async (req: Request<{ id: string }>, res: Response) => {
+// ==================== 更新应用（Stripe 风格：PATCH 局部更新） ====================
+// PATCH /api/apps/:id
+router.patch('/:id', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const { id } = req.params;
     const body = req.body as { name?: string; is_active?: boolean; allowed_model_ids?: string[] };
@@ -170,32 +171,71 @@ router.post('/:appId/keys', async (req: Request<{ appId: string }>, res: Respons
   }
 });
 
+// ==================== 列出所有 Keys (全局) ====================
+// GET /api/apps/keys
+router.get('/keys', async (req: Request, res: Response) => {
+  try {
+    const { limit, starting_after, search } = req.query;
+
+    const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : 10;
+    const startingAfterStr = typeof starting_after === 'string' ? starting_after.trim() : undefined;
+    const searchStr = typeof search === 'string' ? search : undefined;
+
+    logger.debug({ limit: limitNum, starting_after: startingAfterStr }, 'Listing all keys globally');
+    const {
+      data: keys,
+      total,
+      has_more,
+    } = await listApiKeys({
+      limit: limitNum,
+      ...(startingAfterStr !== undefined ? { starting_after: startingAfterStr } : {}),
+      ...(searchStr !== undefined ? { search: searchStr } : {}),
+    });
+
+    const data = keys.map((k) => ({ object: 'api_key' as const, ...k }));
+
+    res.json({
+      object: 'list',
+      url: `/api/apps/keys`,
+      has_more,
+      total,
+      data,
+    });
+  } catch (error) {
+    handleAdminError(error, res);
+  }
+});
+
 // ==================== 列出 Keys ====================
 // GET /api/apps/:appId/keys
 router.get('/:appId/keys', async (req: Request<{ appId: string }>, res: Response) => {
   try {
     const { appId } = req.params;
-    const { limit, offset, search } = req.query;
+    const { limit, starting_after, search } = req.query;
 
     const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : 10;
-    const offsetNum = typeof offset === 'string' && offset !== '' ? Number.parseInt(offset, 10) : 0;
+    const startingAfterStr = typeof starting_after === 'string' ? starting_after.trim() : undefined;
     const searchStr = typeof search === 'string' ? search : undefined;
 
-    logger.debug({ appId, limit: limitNum, offset: offsetNum }, 'Listing keys for app');
-    const { data: keys, total } = await listApiKeys({
+    logger.debug({ appId, limit: limitNum, starting_after: startingAfterStr }, 'Listing keys for app');
+    const {
+      data: keys,
+      total,
+      has_more,
+    } = await listApiKeys({
       appId,
       limit: limitNum,
-      offset: offsetNum,
+      ...(startingAfterStr !== undefined ? { starting_after: startingAfterStr } : {}),
       ...(searchStr !== undefined ? { search: searchStr } : {}),
     });
 
     const data = keys.map((k) => ({ object: 'api_key' as const, ...k }));
-    const hasMore = offsetNum + data.length < total;
 
     res.json({
       object: 'list',
       url: `/api/apps/${appId}/keys`,
-      has_more: hasMore,
+      has_more,
+      total,
       data,
     });
   } catch (error) {
@@ -221,9 +261,9 @@ router.get('/:appId/keys/:keyId', async (req: Request<{ appId: string; keyId: st
   }
 });
 
-// ==================== 更新 Key（Stripe: POST, 非 PATCH） ====================
-// POST /api/apps/:appId/keys/:keyId
-router.post('/:appId/keys/:keyId', async (req: Request<{ appId: string; keyId: string }>, res: Response) => {
+// ==================== 更新 Key（Stripe: PATCH 局部更新） ====================
+// PATCH /api/apps/:appId/keys/:keyId
+router.patch('/:appId/keys/:keyId', async (req: Request<{ appId: string; keyId: string }>, res: Response) => {
   try {
     const { keyId } = req.params;
     const body = req.body as { name?: string; is_active?: boolean; expires_at?: string | null };

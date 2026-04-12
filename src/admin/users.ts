@@ -15,14 +15,18 @@ export const publicUsersRouter: Router = Router();
 /** GET /api/users — 列出所有用户 */
 usersRouter.get('/', async (req: Request, res: Response) => {
   try {
-    const { search, limit, offset } = req.query;
+    const { search, limit, starting_after } = req.query;
     const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : 10;
-    const offsetNum = typeof offset === 'string' && offset !== '' ? Number.parseInt(offset, 10) : 0;
+    const startingAfterStr = typeof starting_after === 'string' ? starting_after.trim() : undefined;
     const searchStr = typeof search === 'string' ? search : undefined;
 
-    const { data: users, total } = await listUsers({
+    const {
+      data: users,
+      total,
+      has_more,
+    } = await listUsers({
       limit: limitNum,
-      offset: offsetNum,
+      ...(startingAfterStr !== undefined ? { starting_after: startingAfterStr } : {}),
       ...(searchStr === undefined ? {} : { search: searchStr }),
     });
 
@@ -38,9 +42,7 @@ usersRouter.get('/', async (req: Request, res: Response) => {
       updated_at: u.updated_at,
     }));
 
-    const hasMore = offsetNum + data.length < total;
-
-    res.json({ object: 'list', data, total, has_more: hasMore });
+    res.json({ object: 'list', url: '/api/users', data, total, has_more });
   } catch (error) {
     handleAdminError(error, res);
   }

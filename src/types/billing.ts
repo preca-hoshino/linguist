@@ -15,15 +15,15 @@
  */
 export interface PricingTier {
   /** 本阶梯适用的起始 Token 数（含），如 0 / 32000 / 128000 */
-  readonly startTokens: number;
+  readonly start_tokens: number;
   /** 本阶梯适用的上限 Token 数（不含）。null 表示无上限兜底档位 */
-  readonly maxTokens: number | null;
-  /** 每千 Token 输入价格 */
-  readonly inputPrice: number;
-  /** 每千 Token 输出价格 */
-  readonly outputPrice: number;
-  /** 每千 Token 缓存命中价格 */
-  readonly cachePrice: number;
+  readonly max_tokens: number | null;
+  /** 每百万 Token 输入价格 */
+  readonly input_price: number;
+  /** 每百万 Token 输出价格 */
+  readonly output_price: number;
+  /** 每百万 Token 缓存命中价格 */
+  readonly cache_price: number;
 }
 
 // ==================== 计费明细 ====================

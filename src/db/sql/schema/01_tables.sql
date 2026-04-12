@@ -5,7 +5,7 @@
 BEGIN;
 
 CREATE TABLE IF NOT EXISTS users (
-    id            VARCHAR(8)   PRIMARY KEY,
+    id            VARCHAR(32)   PRIMARY KEY,
     username      VARCHAR(50)  UNIQUE NOT NULL,
     email         VARCHAR(200) UNIQUE NOT NULL,
     password_hash TEXT         NOT NULL,
@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE TABLE IF NOT EXISTS providers (
-    id              VARCHAR(8)   PRIMARY KEY,
+    id              VARCHAR(32)   PRIMARY KEY,
     name            VARCHAR(100) NOT NULL,
     kind            VARCHAR(50)  NOT NULL,
     base_url        TEXT         NOT NULL,
@@ -28,8 +28,8 @@ CREATE TABLE IF NOT EXISTS providers (
 );
 
 CREATE TABLE IF NOT EXISTS provider_models (
-    id              VARCHAR(8)   PRIMARY KEY,
-    provider_id     VARCHAR(8)   NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+    id              VARCHAR(32)   PRIMARY KEY,
+    provider_id     VARCHAR(32)   NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
     name            VARCHAR(200) NOT NULL,
     model_type      VARCHAR(20)  NOT NULL CHECK (model_type IN ('chat', 'embedding')),
     capabilities    TEXT[]       DEFAULT '{}',
@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS virtual_models (
 CREATE TABLE IF NOT EXISTS virtual_model_backends (
     id                  UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
     virtual_model_id    VARCHAR(100) NOT NULL REFERENCES virtual_models(id) ON DELETE CASCADE,
-    provider_model_id   VARCHAR(8)   NOT NULL REFERENCES provider_models(id) ON DELETE CASCADE,
+    provider_model_id   VARCHAR(32)   NOT NULL REFERENCES provider_models(id) ON DELETE CASCADE,
     weight              INT          NOT NULL DEFAULT 1,
     priority            INT          NOT NULL DEFAULT 0,
     UNIQUE(virtual_model_id, provider_model_id)
@@ -77,7 +77,7 @@ CREATE TABLE IF NOT EXISTS request_logs (
     request_model           VARCHAR(200),
     routed_model            VARCHAR(200),
     provider_kind           VARCHAR(50),
-    provider_id             VARCHAR(8)     REFERENCES providers(id) ON DELETE SET NULL,
+    provider_id             VARCHAR(32)     REFERENCES providers(id) ON DELETE SET NULL,
     api_key_prefix          VARCHAR(11),
     is_stream               BOOLEAN,
     error_message           TEXT,
@@ -122,7 +122,7 @@ CREATE TABLE IF NOT EXISTS request_logs_details_2026_h2 PARTITION OF request_log
 CREATE TABLE IF NOT EXISTS request_logs_details_default PARTITION OF request_logs_details DEFAULT;
 
 CREATE TABLE IF NOT EXISTS apps (
-    id              VARCHAR(8)   PRIMARY KEY,
+    id              VARCHAR(32)   PRIMARY KEY,
     name            VARCHAR(200) NOT NULL,
     auth_mode       VARCHAR(20)  NOT NULL DEFAULT 'api_key'
                     CHECK (auth_mode IN ('api_key')),
@@ -132,14 +132,14 @@ CREATE TABLE IF NOT EXISTS apps (
 );
 
 CREATE TABLE IF NOT EXISTS app_allowed_models (
-    app_id           VARCHAR(8)   NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    app_id           VARCHAR(32)   NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
     virtual_model_id VARCHAR(100) NOT NULL REFERENCES virtual_models(id) ON DELETE CASCADE,
     PRIMARY KEY (app_id, virtual_model_id)
 );
 
 CREATE TABLE IF NOT EXISTS api_keys (
-    id          VARCHAR(8)   PRIMARY KEY,
-    app_id      VARCHAR(8)   NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    id          VARCHAR(32)   PRIMARY KEY,
+    app_id      VARCHAR(32)   NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
     name        VARCHAR(200) NOT NULL,
     key_value   TEXT         NOT NULL UNIQUE,
     key_prefix  VARCHAR(20)  NOT NULL,

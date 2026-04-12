@@ -109,11 +109,14 @@ function withThroughput<T extends { id: string }>(vm: T): T & { throughput: { rp
 // ==================== 列出所有虚拟模型 ====================
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { search, limit, offset } = req.query;
+    const { search, limit, starting_after, expand } = req.query;
     const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : 10;
-    const offsetNum = typeof offset === 'string' && offset !== '' ? Number.parseInt(offset, 10) : 0;
+    const startingAfterStr = typeof starting_after === 'string' ? starting_after.trim() : undefined;
 
-    logger.debug({ search, limit: limitNum, offset: offsetNum }, 'Listing virtual models');
+    // 展开参数判定 (expand[]=backends 或 expand=backends)
+    const isExpandBackends = Array.isArray(expand) ? expand.includes('backends') : expand === 'backends';
+
+    logger.debug({ search, limit: limitNum, starting_after: startingAfterStr, expand }, 'Listing virtual models');
 
     const conditions: string[] = [];
     const values: unknown[] = [];
@@ -127,78 +130,83 @@ router.get('/', async (req: Request, res: Response) => {
       values.push(`%${search.trim()}%`);
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const baseWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // 单独计算 total
+    const countSql = `SELECT COUNT(*) AS total FROM virtual_models ${baseWhereClause}`;
+    const countResult = await db.query(countSql, values);
+    const total = Number.parseInt((countResult.rows[0] as { total: string } | undefined)?.total ?? '0', 10);
+
+    // 加入游标过滤
+    if (startingAfterStr !== undefined && startingAfterStr !== '') {
+      conditions.push(`created_at < (SELECT created_at FROM virtual_models WHERE id = $${String(values.length + 1)})`);
+      values.push(startingAfterStr);
+    }
+
+    const dataWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const sql = `
       SELECT id, name, description, model_type, routing_strategy, is_active, rpm_limit, tpm_limit,
-             created_at, updated_at,
-             COUNT(*) OVER() AS full_count
+             created_at, updated_at
       FROM virtual_models
-      ${whereClause}
+      ${dataWhereClause}
       ORDER BY created_at DESC
-      LIMIT $${String(values.length + 1)} OFFSET $${String(values.length + 2)}
+      LIMIT $${String(values.length + 1)}
     `;
 
-    values.push(limitNum, offsetNum);
+    // 抓取 limit+1 个来判断 has_more
+    values.push(limitNum + 1);
 
-    const vmResult = await db.query<VirtualModelRow & { full_count: string }>(sql, values);
-    const rows = vmResult.rows;
-    const firstRow = rows[0];
-    const total = firstRow ? Number.parseInt(firstRow.full_count, 10) : 0;
+    const vmResult = await db.query<VirtualModelRow>(sql, values);
 
-    const data = rows.map((row) => {
-      // eslint-disable-next-line @typescript-eslint/naming-convention
-      const { full_count: _full_count, ...rest } = row;
-      return rest as VirtualModelRow;
-    });
+    const dataRows = vmResult.rows.length > limitNum ? vmResult.rows.slice(0, limitNum) : vmResult.rows;
+    const hasMore = vmResult.rows.length > limitNum;
 
-    if (data.length === 0) {
-      res.json({ object: 'list', data: [], total: 0, has_more: false });
+    if (dataRows.length === 0) {
+      res.json({ object: 'list', url: '/api/virtual-models', data: [], total, has_more: false });
       return;
     }
 
-    const vmIds = data.map((vm) => vm.id);
-
-    // 加载当前页模型的后端
-    const backendResult = await db.query<BackendRow & { virtual_model_id: string }>(
-      `SELECT vmb.virtual_model_id, vmb.provider_model_id, vmb.weight, vmb.priority,
-              pm.name AS provider_model_name, p.name AS provider_name, pm.provider_id
-       FROM virtual_model_backends vmb
-       JOIN provider_models pm ON vmb.provider_model_id = pm.id
-       JOIN providers p ON pm.provider_id = p.id
-       WHERE vmb.virtual_model_id = ANY($1)
-       ORDER BY vmb.priority ASC, vmb.weight DESC`,
-      [vmIds],
-    );
-
-    // 分组
+    const vmIds = dataRows.map((vm) => vm.id);
     const backendsByVm = new Map<string, BackendRow[]>();
-    for (const row of backendResult.rows) {
-      const list = backendsByVm.get(row.virtual_model_id) ?? [];
-      list.push({
-        provider_model_id: row.provider_model_id,
-        weight: row.weight,
-        priority: row.priority,
-        provider_model_name: row.provider_model_name,
-        provider_name: row.provider_name,
-        provider_id: row.provider_id,
-      });
-      backendsByVm.set(row.virtual_model_id, list);
+
+    if (isExpandBackends) {
+      // 仅在 expand=backends 时加载模型关联后端
+      const backendResult = await db.query<BackendRow & { virtual_model_id: string }>(
+        `SELECT vmb.virtual_model_id, vmb.provider_model_id, vmb.weight, vmb.priority,
+                pm.name AS provider_model_name, p.name AS provider_name, pm.provider_id
+         FROM virtual_model_backends vmb
+         JOIN provider_models pm ON vmb.provider_model_id = pm.id
+         JOIN providers p ON pm.provider_id = p.id
+         WHERE vmb.virtual_model_id = ANY($1)
+         ORDER BY vmb.priority ASC, vmb.weight DESC`,
+        [vmIds],
+      );
+
+      for (const row of backendResult.rows) {
+        const list = backendsByVm.get(row.virtual_model_id) ?? [];
+        list.push({
+          provider_model_id: row.provider_model_id,
+          weight: row.weight,
+          priority: row.priority,
+          provider_model_name: row.provider_model_name,
+          provider_name: row.provider_name,
+          provider_id: row.provider_id,
+        });
+        backendsByVm.set(row.virtual_model_id, list);
+      }
     }
 
-    const finalData = data.map((vm) =>
-      withThroughput(
-        withObjectType({
-          ...vm,
-          backends: backendsByVm.get(vm.id) ?? [],
-        }),
-      ),
-    );
-
-    const hasMore = offsetNum + data.length < total;
+    const finalData = dataRows.map((vm) => {
+      const baseObj = withThroughput(withObjectType(vm));
+      if (isExpandBackends) {
+        return { ...baseObj, backends: backendsByVm.get(vm.id) ?? [] };
+      }
+      return baseObj;
+    });
 
     logger.debug({ count: finalData.length, total, has_more: hasMore }, 'Virtual models listed');
-    res.json({ object: 'list', data: finalData, total, has_more: hasMore });
+    res.json({ object: 'list', url: '/api/virtual-models', data: finalData, total, has_more: hasMore });
   } catch (error) {
     handleAdminError(error, res);
   }
