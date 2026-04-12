@@ -1,0 +1,174 @@
+// src/db/mcp-providers/queries.ts — 提供商 MCP CRUD 查询
+// Stripe 风格游标分页
+
+import { db, withTransaction } from '@/db/client';
+import { generateShortId } from '@/db/id-generator';
+import { buildUpdateSet, createLogger } from '@/utils';
+import type { McpProviderCreateInput, McpProviderRow, McpProviderUpdateInput } from './types';
+
+const logger = createLogger('McpProviders');
+
+// ==================== CRUD 函数 ====================
+
+/**
+ * 创建提供商 MCP
+ */
+export async function createMcpProvider(input: McpProviderCreateInput): Promise<McpProviderRow> {
+  const id = await generateShortId('mcp_providers');
+
+  const result = await db.query<McpProviderRow>(
+    `INSERT INTO mcp_providers (id, name, transport_type, endpoint_url, headers, stdio_command, stdio_args, stdio_env, api_keys)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9::jsonb)
+     RETURNING *`,
+    [
+      id,
+      input.name,
+      input.transport_type,
+      input.endpoint_url ?? '',
+      JSON.stringify(input.headers ?? {}),
+      input.stdio_command ?? '',
+      JSON.stringify(input.stdio_args ?? []),
+      JSON.stringify(input.stdio_env ?? {}),
+      JSON.stringify(input.api_keys ?? []),
+    ],
+  );
+
+  const row = result.rows[0];
+  if (!row) {
+    throw new Error('Failed to create MCP provider: no row returned');
+  }
+
+  logger.info({ id: row.id, name: input.name }, 'MCP provider created');
+  return row;
+}
+
+/**
+ * 列出提供商 MCP（Stripe 风格游标分页）
+ */
+export async function listMcpProviders(options?: {
+  limit?: number;
+  starting_after?: string;
+  search?: string;
+  is_active?: boolean;
+}): Promise<{ data: McpProviderRow[]; has_more: boolean; total: number }> {
+  const limit = Math.min(Math.max(options?.limit ?? 10, 1), 100);
+  const startingAfter = options?.starting_after;
+  const search = options?.search;
+  const isActive = options?.is_active;
+
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+  let paramIdx = 1;
+
+  if (typeof search === 'string' && search.trim() !== '') {
+    conditions.push(`name ILIKE $${String(paramIdx)}`);
+    values.push(`%${search.trim()}%`);
+    paramIdx++;
+  }
+
+  if (typeof isActive === 'boolean') {
+    conditions.push(`is_active = $${String(paramIdx)}`);
+    values.push(isActive);
+    paramIdx++;
+  }
+
+  const baseWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const countResult = await db.query(`SELECT COUNT(*) AS total FROM mcp_providers ${baseWhereClause}`, values);
+  const total = Number.parseInt((countResult.rows[0] as { total: string } | undefined)?.total ?? '0', 10);
+
+  if (typeof startingAfter === 'string' && startingAfter.trim() !== '') {
+    conditions.push(`created_at < (SELECT created_at FROM mcp_providers WHERE id = $${String(paramIdx)})`);
+    values.push(startingAfter);
+    paramIdx++;
+  }
+
+  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const fetchLimit = limit + 1;
+  values.push(fetchLimit);
+
+  const sql = `SELECT * FROM mcp_providers ${whereClause} ORDER BY created_at DESC LIMIT $${String(paramIdx)}`;
+  const result = await db.query<McpProviderRow>(sql, values);
+  const hasMore = result.rows.length > limit;
+  const data = hasMore ? result.rows.slice(0, limit) : result.rows;
+
+  return { data, has_more: hasMore, total };
+}
+
+/**
+ * 按 ID 查询提供商 MCP
+ */
+export async function getMcpProviderById(id: string): Promise<McpProviderRow | null> {
+  const result = await db.query<McpProviderRow>('SELECT * FROM mcp_providers WHERE id = $1', [id]);
+  return result.rows[0] ?? null;
+}
+
+/**
+ * 更新提供商 MCP
+ */
+export async function updateMcpProvider(id: string, updates: McpProviderUpdateInput): Promise<McpProviderRow | null> {
+  return await withTransaction(async (tx) => {
+    const fieldUpdates: Record<string, unknown> = {};
+
+    if (updates.name !== undefined) {
+      fieldUpdates.name = updates.name;
+    }
+    if (updates.transport_type !== undefined) {
+      fieldUpdates.transport_type = updates.transport_type;
+    }
+    if (updates.endpoint_url !== undefined) {
+      fieldUpdates.endpoint_url = updates.endpoint_url;
+    }
+    if (updates.headers !== undefined) {
+      fieldUpdates.headers = JSON.stringify(updates.headers);
+    }
+    if (updates.stdio_command !== undefined) {
+      fieldUpdates.stdio_command = updates.stdio_command;
+    }
+    if (updates.stdio_args !== undefined) {
+      fieldUpdates.stdio_args = JSON.stringify(updates.stdio_args);
+    }
+    if (updates.stdio_env !== undefined) {
+      fieldUpdates.stdio_env = JSON.stringify(updates.stdio_env);
+    }
+    if (updates.api_keys !== undefined) {
+      fieldUpdates.api_keys = JSON.stringify(updates.api_keys);
+    }
+    if (updates.is_active !== undefined) {
+      fieldUpdates.is_active = updates.is_active;
+    }
+
+    const update = buildUpdateSet(fieldUpdates);
+    if (!update) {
+      return await getMcpProviderById(id);
+    }
+
+    update.values.push(id);
+    const result = await tx.query<McpProviderRow>(
+      `UPDATE mcp_providers SET ${update.setClause}, updated_at = NOW() WHERE id = $${String(update.nextIdx)} RETURNING *`,
+      update.values,
+    );
+
+    const row = result.rows[0];
+    if (!row) {
+      return null;
+    }
+
+    logger.info({ id }, 'MCP provider updated');
+    return row;
+  });
+}
+
+/**
+ * 删除提供商 MCP（CASCADE 级联删除关联的虚拟 MCP）
+ */
+export async function deleteMcpProvider(id: string): Promise<boolean> {
+  const result = await db.query('DELETE FROM mcp_providers WHERE id = $1 RETURNING id', [id]);
+
+  if (result.rowCount === 0) {
+    return false;
+  }
+
+  logger.info({ id }, 'MCP provider deleted');
+  return true;
+}
