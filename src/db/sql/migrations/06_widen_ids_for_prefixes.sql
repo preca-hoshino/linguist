@@ -28,9 +28,4 @@ ALTER TABLE api_keys ALTER COLUMN app_id TYPE VARCHAR(32);
 -- Note: PostgreSQL partitioned tables automatically propagate ALTER COLUMN to partitions
 ALTER TABLE request_logs ALTER COLUMN provider_id TYPE VARCHAR(32);
 
--- Write to migration history
-INSERT INTO migration_history (version, filename, executed_at)
-VALUES (6, '06_widen_ids_for_prefixes.sql', NOW())
-ON CONFLICT (version) DO NOTHING;
-
 COMMIT;
