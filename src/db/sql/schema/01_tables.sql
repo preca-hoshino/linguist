@@ -71,6 +71,23 @@ CREATE TABLE IF NOT EXISTS virtual_model_backends (
     UNIQUE(virtual_model_id, provider_model_id)
 );
 
+CREATE TABLE IF NOT EXISTS apps (
+    id              VARCHAR(32)   PRIMARY KEY,
+    name            VARCHAR(200) NOT NULL,
+    auth_mode       VARCHAR(20)  NOT NULL DEFAULT 'api_key'
+                    CHECK (auth_mode IN ('api_key')),
+    is_active       BOOLEAN      DEFAULT true,
+    created_at      TIMESTAMPTZ  DEFAULT NOW(),
+    updated_at      TIMESTAMPTZ  DEFAULT NOW(),
+    api_key         VARCHAR(100) UNIQUE NOT NULL DEFAULT ('lk-' || encode(gen_random_bytes(24), 'hex'))
+);
+
+CREATE TABLE IF NOT EXISTS app_allowed_models (
+    app_id           VARCHAR(32)   NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    virtual_model_id VARCHAR(100) NOT NULL REFERENCES virtual_models(id) ON DELETE CASCADE,
+    PRIMARY KEY (app_id, virtual_model_id)
+);
+
 CREATE TABLE IF NOT EXISTS request_logs (
     id                      VARCHAR(36)    NOT NULL,
     status                  VARCHAR(20)    NOT NULL DEFAULT 'processing'
@@ -123,22 +140,7 @@ CREATE TABLE IF NOT EXISTS request_logs_details_2026_06 PARTITION OF request_log
 CREATE TABLE IF NOT EXISTS request_logs_details_2026_h2 PARTITION OF request_logs_details FOR VALUES FROM ('2026-07-01') TO ('2027-01-01');
 CREATE TABLE IF NOT EXISTS request_logs_details_default PARTITION OF request_logs_details DEFAULT;
 
-CREATE TABLE IF NOT EXISTS apps (
-    id              VARCHAR(32)   PRIMARY KEY,
-    name            VARCHAR(200) NOT NULL,
-    auth_mode       VARCHAR(20)  NOT NULL DEFAULT 'api_key'
-                    CHECK (auth_mode IN ('api_key')),
-    is_active       BOOLEAN      DEFAULT true,
-    created_at      TIMESTAMPTZ  DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ  DEFAULT NOW(),
-    api_key         VARCHAR(100) UNIQUE NOT NULL DEFAULT ('lk-' || encode(gen_random_bytes(24), 'hex'))
-);
 
-CREATE TABLE IF NOT EXISTS app_allowed_models (
-    app_id           VARCHAR(32)   NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
-    virtual_model_id VARCHAR(100) NOT NULL REFERENCES virtual_models(id) ON DELETE CASCADE,
-    PRIMARY KEY (app_id, virtual_model_id)
-);
 
 
 COMMIT;
