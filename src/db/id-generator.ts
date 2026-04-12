@@ -11,11 +11,10 @@ const ALLOWED_TABLES = new Set([
   'providers',
   'provider_models',
   'virtual_models',
-  'api_keys',
   'users',
   'apps',
-  'provider_mcps',
-  'virtual_mcps',
+  'mcp_providers',
+  'mcp_virtual_servers',
 ]);
 
 /**
@@ -24,12 +23,11 @@ const ALLOWED_TABLES = new Set([
 const TABLE_PREFIXES: Record<string, string> = {
   users: 'usr',
   apps: 'app',
-  api_keys: 'key',
   providers: 'model_pvd',
   provider_models: 'model_p',
   virtual_models: 'model_v',
-  provider_mcps: 'mcp_p',
-  virtual_mcps: 'mcp_v',
+  mcp_providers: 'mcp_p',
+  mcp_virtual_servers: 'mcp_v',
 };
 
 /**
