@@ -1,23 +1,27 @@
-// src/api/http/mcp/index.ts — MCP HTTP 端点占位路由
+// src/api/http/mcp/index.ts — MCP 网关 HTTP 路由处理
 
-// TODO: Phase 4 实现工具清单与调用转发
 import { Router } from 'express';
-import { createLogger, logColors } from '@/utils';
+import type { Request, Response, NextFunction } from 'express';
+import { handleMcpMessage, handleMcpSseConnect } from '@/mcp';
 
-const logger = createLogger('MCP-HTTP', logColors.magenta);
-const mcpRouter: Router = Router();
+export const mcpRouter: Router = Router();
 
-// GET /v1/mcp/tools — 返回虚拟 MCP Server 工具清单（待实现）
-mcpRouter.get('/v1/mcp/tools', (req, res) => {
-  logger.warn({ ip: req.ip, method: req.method }, 'MCP /tools list requested (Not Implemented)');
-  res.status(501).json({ error: 'not_implemented', message: 'MCP gateway is not yet implemented' });
+// ==========================================
+// Virtual MCP Endpoints
+// ==========================================
+
+/**
+ * 建立 SSE 连接 (MCP Server 规范)
+ * GET /mcp/:virtualMcpId/sse
+ */
+mcpRouter.get('/mcp/:virtualMcpId/sse', (req: Request, res: Response, next: NextFunction) => {
+  handleMcpSseConnect(req, res).catch(next);
 });
 
-// POST /v1/mcp/tools/call — 调用指定工具（待实现）
-mcpRouter.post('/v1/mcp/tools/call', (req, res) => {
-  const body = req.body as { toolName?: string } | undefined;
-  logger.warn({ ip: req.ip, method: req.method, tool: body?.toolName }, 'MCP /tools/call invoked (Not Implemented)');
-  res.status(501).json({ error: 'not_implemented', message: 'MCP gateway is not yet implemented' });
+/**
+ * 接收 JSON-RPC 消息 (MCP Server 规范)
+ * POST /mcp/messages?sessionId=...
+ */
+mcpRouter.post('/mcp/messages', (req: Request, res: Response, next: NextFunction) => {
+  handleMcpMessage(req, res).catch(next);
 });
-
-export { mcpRouter };
