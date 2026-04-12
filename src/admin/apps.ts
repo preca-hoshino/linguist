@@ -171,6 +171,41 @@ router.post('/:appId/keys', async (req: Request<{ appId: string }>, res: Respons
   }
 });
 
+// ==================== 列出所有 Keys (全局) ====================
+// GET /api/apps/keys
+router.get('/keys', async (req: Request, res: Response) => {
+  try {
+    const { limit, starting_after, search } = req.query;
+
+    const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : 10;
+    const startingAfterStr = typeof starting_after === 'string' ? starting_after.trim() : undefined;
+    const searchStr = typeof search === 'string' ? search : undefined;
+
+    logger.debug({ limit: limitNum, starting_after: startingAfterStr }, 'Listing all keys globally');
+    const {
+      data: keys,
+      total,
+      has_more,
+    } = await listApiKeys({
+      limit: limitNum,
+      ...(startingAfterStr !== undefined ? { starting_after: startingAfterStr } : {}),
+      ...(searchStr !== undefined ? { search: searchStr } : {}),
+    });
+
+    const data = keys.map((k) => ({ object: 'api_key' as const, ...k }));
+
+    res.json({
+      object: 'list',
+      url: `/api/apps/keys`,
+      has_more,
+      total,
+      data,
+    });
+  } catch (error) {
+    handleAdminError(error, res);
+  }
+});
+
 // ==================== 列出 Keys ====================
 // GET /api/apps/:appId/keys
 router.get('/:appId/keys', async (req: Request<{ appId: string }>, res: Response) => {
