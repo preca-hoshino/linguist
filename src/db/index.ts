@@ -2,6 +2,34 @@
 
 export { closePool, createListenClient, db, withTransaction } from './client';
 export { generateShortId } from './id-generator';
+export type { McpLogCreateInput, McpLogDirection, McpLogRow } from './mcp-logs/index';
+export { getMcpLogById, insertMcpLog, listMcpLogs } from './mcp-logs/index';
+export type {
+  McpProviderCreateInput,
+  McpProviderRow,
+  McpProviderUpdateInput,
+  McpTransportType,
+} from './mcp-providers/index';
+export {
+  createMcpProvider,
+  deleteMcpProvider,
+  getMcpProviderById,
+  listMcpProviders,
+  updateMcpProvider,
+} from './mcp-providers/index';
+export type {
+  McpToolFilterMode,
+  McpVirtualServerCreateInput,
+  McpVirtualServerRow,
+  McpVirtualServerUpdateInput,
+} from './mcp-virtual-servers/index';
+export {
+  createMcpVirtualServer,
+  deleteMcpVirtualServer,
+  getMcpVirtualServerById,
+  listMcpVirtualServers,
+  updateMcpVirtualServer,
+} from './mcp-virtual-servers/index';
 export { runMigrations } from './migrate';
 export type { RequestLogStatus } from './request-logs/index';
 export {
