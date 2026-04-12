@@ -21,8 +21,8 @@ ALTER TABLE apps ALTER COLUMN id TYPE VARCHAR(32);
 
 ALTER TABLE app_allowed_models ALTER COLUMN app_id TYPE VARCHAR(32);
 
-ALTER TABLE api_keys ALTER COLUMN id TYPE VARCHAR(32);
-ALTER TABLE api_keys ALTER COLUMN app_id TYPE VARCHAR(32);
+ALTER TABLE IF EXISTS api_keys ALTER COLUMN id TYPE VARCHAR(32);
+ALTER TABLE IF EXISTS api_keys ALTER COLUMN app_id TYPE VARCHAR(32);
 
 -- 5. request_logs (foreign key to providers)
 -- Note: PostgreSQL partitioned tables automatically propagate ALTER COLUMN to partitions

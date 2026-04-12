@@ -46,7 +46,7 @@ export interface RequestLogQuery {
   provider_kind?: string | undefined;
   provider_id?: string | undefined;
   error_type?: string | undefined;
-  api_key_prefix?: string | undefined;
+  app_id?: string | undefined;
   user_format?: string | undefined;
   is_stream?: boolean | undefined;
   limit?: number | undefined;

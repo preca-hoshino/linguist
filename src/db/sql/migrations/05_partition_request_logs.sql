@@ -33,7 +33,7 @@ BEGIN
             routed_model            VARCHAR(200),
             provider_kind           VARCHAR(50),
             provider_id             VARCHAR(8)     REFERENCES providers(id) ON DELETE SET NULL,
-            api_key_prefix          VARCHAR(11),
+            app_id                  VARCHAR(32),
             is_stream               BOOLEAN,
             
             error_message           TEXT,
@@ -88,13 +88,13 @@ BEGIN
         -- 5. 执行数据无损转移 (冷热拆分写入)
         INSERT INTO request_logs (
             id, status, ip, request_model, routed_model, provider_kind, provider_id, 
-            api_key_prefix, is_stream, error_message, error_code, error_type, 
+            app_id, is_stream, error_message, error_code, error_type, 
             prompt_tokens, completion_tokens, total_tokens, cached_tokens, reasoning_tokens, 
             calculated_cost, created_at, updated_at
         )
         SELECT 
             id, status, ip, request_model, routed_model, provider_kind, provider_id, 
-            api_key_prefix, is_stream, error_message, error_code, error_type, 
+            app_id, is_stream, error_message, error_code, error_type, 
             prompt_tokens, completion_tokens, total_tokens, cached_tokens, reasoning_tokens, 
             calculated_cost, created_at, updated_at
         FROM request_logs_old;
@@ -110,7 +110,7 @@ BEGIN
         CREATE INDEX idx_rl_status_created           ON request_logs(status, created_at DESC);
         CREATE INDEX idx_rl_provider_created         ON request_logs(provider_id, created_at DESC);
         CREATE INDEX idx_rl_routed_model_created     ON request_logs(routed_model, created_at DESC);
-        CREATE INDEX idx_rl_apikey_created           ON request_logs(api_key_prefix, created_at DESC);
+        CREATE INDEX idx_rl_appid_created           ON request_logs(app_id, created_at DESC);
         CREATE INDEX idx_rl_request_model_created    ON request_logs(request_model, created_at DESC);
 
         -- 新增扩展：引入超大请求字段前缀加速

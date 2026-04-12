@@ -44,9 +44,9 @@ export async function queryRequestLogs(query: RequestLogQuery = {}): Promise<{
     conditions.push(`r.error_type = $${String(idx++)}`);
     values.push(query.error_type);
   }
-  if (query.api_key_prefix !== undefined && query.api_key_prefix !== '') {
-    conditions.push(`r.api_key_prefix = $${String(idx++)}`);
-    values.push(query.api_key_prefix);
+  if (query.app_id !== undefined && query.app_id !== '') {
+    conditions.push(`r.app_id = $${String(idx++)}`);
+    values.push(query.app_id);
   }
   if (query.user_format !== undefined && query.user_format !== '') {
     // 若查询包含了独立的冷数据部分，临时改变主驱动表关联

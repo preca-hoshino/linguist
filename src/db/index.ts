@@ -1,6 +1,5 @@
 // src/db/index.ts — 数据库模块统一出口
 
-export { invalidateApiKeyCache, validateApiKey } from './api-keys/index';
 export { closePool, createListenClient, db, withTransaction } from './client';
 export { generateShortId } from './id-generator';
 export { runMigrations } from './migrate';

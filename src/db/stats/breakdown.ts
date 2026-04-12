@@ -95,53 +95,6 @@ async function breakdownByProviderModel(params: StatsQueryParams): Promise<Stats
 }
 
 /**
- * api_key 分组：LEFT JOIN api_keys 表获取名称，避免只展示前缀
- * timing 字段已迁移至 request_logs_details，故需 LEFT JOIN
- */
-async function breakdownByApiKey(params: StatsQueryParams): Promise<StatsBreakdown> {
-  const timeFilter = buildTimeFilter(params, 1);
-  const dimFilter = buildDimensionFilterAliased(params.dimension, params.id, timeFilter.nextIdx, 'rl');
-
-  const rlTimeClause = timeFilter.clause.replaceAll(/\bcreated_at\b/g, 'rl.created_at');
-  const rlValues = [...timeFilter.values, ...dimFilter.values];
-
-  const latExpr = latencyExpr('d');
-  const ttftEx = ttftExpr('d');
-  const itlEx = itlExpr('d', 'rl');
-
-  const sql = `
-    SELECT
-      COALESCE(MAX(ak.name), rl.api_key_prefix, 'unknown') AS name,
-      NULL::text AS provider_name,
-      COUNT(*)::int AS request_count,
-      COALESCE(SUM(rl.total_tokens), 0)::bigint AS total_tokens,
-      COUNT(*) FILTER (WHERE rl.status = 'error')::int AS error_count,
-      AVG(${latExpr})::float AS avg_latency_ms,
-      PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY ${latExpr})::float AS p50_latency_ms,
-      PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY ${latExpr})::float AS p90_latency_ms,
-      PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY ${latExpr})::float AS p99_latency_ms,
-      AVG(${ttftEx})::float AS ttft_avg_ms,
-      AVG(${itlEx})::float AS itl_avg_ms,
-      AVG(rl.completion_tokens)::float AS avg_completion_tokens,
-      COALESCE(SUM(rl.calculated_cost), 0.0)::float AS total_cost
-    FROM request_logs rl
-    LEFT JOIN request_logs_details d ON d.id = rl.id
-    LEFT JOIN api_keys ak ON ak.key_prefix = rl.api_key_prefix
-    WHERE ${rlTimeClause}
-    ${dimFilter.clause}
-    GROUP BY rl.api_key_prefix
-    ORDER BY request_count DESC
-    LIMIT 50
-  `;
-
-  const result = await db.query<Record<string, unknown>>(sql, rlValues);
-  return {
-    group_by: 'api_key',
-    items: result.rows.map((row) => mapBreakdownRow(row as unknown as BreakdownRow, null)),
-  };
-}
-
-/**
  * app 分组：从 request_logs_details 的 gateway_context 中提取 appId 和 appName
  */
 async function breakdownByApp(params: StatsQueryParams): Promise<StatsBreakdown> {
@@ -300,9 +253,6 @@ export async function getStatsBreakdown(
   switch (groupBy) {
     case 'provider_model': {
       return await breakdownByProviderModel(params);
-    }
-    case 'api_key': {
-      return await breakdownByApiKey(params);
     }
     case 'app': {
       return await breakdownByApp(params);

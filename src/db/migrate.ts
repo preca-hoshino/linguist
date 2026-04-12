@@ -84,9 +84,9 @@ async function executeMigrationFiles(executor: QueryExecutor, log: Logger): Prom
 /**
  * 清空数据库所有表（CASCADE）并重新运行迁移
  * 开发专用 ⚠️ — 绝不可在生产环境运行！
- * 用法：npm run db:reset（即 ts-node migrate.ts --reset）
+ * 用法：npm run db:reset（全部清空） 或 npm run db:clear（保留用户表）
  */
-async function resetDatabase(): Promise<void> {
+async function resetDatabase(preserveUsers = false): Promise<void> {
   const pool = getPool();
 
   logger.warn('═══════════════════════════════════════════════════════════');
@@ -104,6 +104,7 @@ async function resetDatabase(): Promise<void> {
         SELECT quote_ident(t.tablename)
         FROM pg_tables t
         WHERE t.schemaname = 'public'
+        ${preserveUsers ? "AND t.tablename != 'users'" : ''}
       LOOP
         EXECUTE 'DROP TABLE IF EXISTS ' || tbl || ' CASCADE';
       END LOOP;
@@ -123,10 +124,19 @@ export async function runMigrations(): Promise<void> {
   await executeMigrationFiles(pool, logger);
 }
 
-// 直接执行入口（npm run db:migrate 或 npm run db:reset）
+// 直接执行入口（npm run db 或 npm run db:reset 或 npm run db:clear）
 if (require.main === module) {
   const isReset = process.argv.includes('--reset');
-  const task = isReset ? resetDatabase() : executeMigrationFiles(getPool(), logger);
+  const isClear = process.argv.includes('--clear');
+  
+  let task;
+  if (isReset) {
+    task = resetDatabase(false);
+  } else if (isClear) {
+    task = resetDatabase(true);
+  } else {
+    task = executeMigrationFiles(getPool(), logger);
+  }
 
   task
 
@@ -137,7 +147,7 @@ if (require.main === module) {
     .catch((error: unknown) => {
       logger.error(
         error instanceof Error ? error : new Error(String(error)),
-        isReset ? 'Reset failed' : 'Migration failed',
+        isReset || isClear ? 'Database reset failed' : 'Migration failed',
       );
       process.exit(1);
     });
