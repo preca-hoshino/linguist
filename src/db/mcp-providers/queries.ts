@@ -47,12 +47,12 @@ export async function createMcpProvider(input: McpProviderCreateInput): Promise<
  */
 export async function listMcpProviders(options?: {
   limit?: number;
-  starting_after?: string;
+  offset?: number;
   search?: string;
   is_active?: boolean;
 }): Promise<{ data: McpProviderRow[]; has_more: boolean; total: number }> {
   const limit = Math.min(Math.max(options?.limit ?? 10, 1), 100);
-  const startingAfter = options?.starting_after;
+  const offset = typeof options?.offset === 'number' ? Math.max(options.offset, 0) : 0;
   const search = options?.search;
   const isActive = options?.is_active;
 
@@ -77,22 +77,17 @@ export async function listMcpProviders(options?: {
   const countResult = await db.query(`SELECT COUNT(*) AS total FROM mcp_providers ${baseWhereClause}`, values);
   const total = Number.parseInt((countResult.rows[0] as { total: string } | undefined)?.total ?? '0', 10);
 
-  if (typeof startingAfter === 'string' && startingAfter.trim() !== '') {
-    conditions.push(`created_at < (SELECT created_at FROM mcp_providers WHERE id = $${String(paramIdx)})`);
-    values.push(startingAfter);
-    paramIdx++;
+  if (offset > 0) {
+    // We append OFFSET as a plain statement, not parameterized in WHERE
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  const fetchLimit = limit + 1;
-  values.push(fetchLimit);
-
-  const sql = `SELECT * FROM mcp_providers ${whereClause} ORDER BY created_at DESC LIMIT $${String(paramIdx)}`;
+  values.push(limit, offset);
+  const sql = `SELECT * FROM mcp_providers ${whereClause} ORDER BY created_at DESC LIMIT $${String(paramIdx)} OFFSET $${String(paramIdx + 1)}`;
   const result = await db.query<McpProviderRow>(sql, values);
-  const hasMore = result.rows.length > limit;
-  const data = hasMore ? result.rows.slice(0, limit) : result.rows;
+  const data = result.rows;
 
-  return { data, has_more: hasMore, total };
+  return { data, has_more: offset + data.length < total, total };
 }
 
 /**

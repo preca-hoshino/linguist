@@ -44,13 +44,13 @@ export async function createMcpVirtualServer(input: McpVirtualServerCreateInput)
  */
 export async function listMcpVirtualServers(options?: {
   limit?: number;
-  starting_after?: string;
+  offset?: number;
   search?: string;
   is_active?: boolean;
   mcp_provider_id?: string;
 }): Promise<{ data: McpVirtualServerRow[]; has_more: boolean; total: number }> {
   const limit = Math.min(Math.max(options?.limit ?? 10, 1), 100);
-  const startingAfter = options?.starting_after;
+  const offset = typeof options?.offset === 'number' ? Math.max(options.offset, 0) : 0;
   const search = options?.search;
   const isActive = options?.is_active;
   const providerId = options?.mcp_provider_id;
@@ -82,22 +82,18 @@ export async function listMcpVirtualServers(options?: {
   const countResult = await db.query(`SELECT COUNT(*) AS total FROM mcp_virtual_servers ${baseWhereClause}`, values);
   const total = Number.parseInt((countResult.rows[0] as { total: string } | undefined)?.total ?? '0', 10);
 
-  if (typeof startingAfter === 'string' && startingAfter.trim() !== '') {
-    conditions.push(`created_at < (SELECT created_at FROM mcp_virtual_servers WHERE id = $${String(paramIdx)})`);
-    values.push(startingAfter);
-    paramIdx++;
+  if (offset > 0) {
+    // offset will be appended later
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  const fetchLimit = limit + 1;
-  values.push(fetchLimit);
+  values.push(limit, offset);
 
-  const sql = `SELECT * FROM mcp_virtual_servers ${whereClause} ORDER BY created_at DESC LIMIT $${String(paramIdx)}`;
+  const sql = `SELECT * FROM mcp_virtual_servers ${whereClause} ORDER BY created_at DESC LIMIT $${String(paramIdx)} OFFSET $${String(paramIdx + 1)}`;
   const result = await db.query<McpVirtualServerRow>(sql, values);
-  const hasMore = result.rows.length > limit;
-  const data = hasMore ? result.rows.slice(0, limit) : result.rows;
+  const data = result.rows;
 
-  return { data, has_more: hasMore, total };
+  return { data, has_more: offset + data.length < total, total };
 }
 
 /**
