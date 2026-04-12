@@ -13,7 +13,12 @@ export const mcpRouter: Router = Router();
 /**
  * 建立 SSE 连接 (MCP Server 规范)
  * GET /mcp/:virtualMcpId/sse
+ * GET /mcp/sse (通过 Authorization Bearer 或 Query Parameter 提供 ID)
  */
+mcpRouter.get('/mcp/sse', (req: Request, res: Response, next: NextFunction) => {
+  handleMcpSseConnect(req, res).catch(next);
+});
+
 mcpRouter.get('/mcp/:virtualMcpId/sse', (req: Request, res: Response, next: NextFunction) => {
   handleMcpSseConnect(req, res).catch(next);
 });

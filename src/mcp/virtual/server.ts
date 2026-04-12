@@ -74,9 +74,19 @@ async function logMcp(
  * 处理客户端通过 SSE 建立连接请求
  */
 export async function handleMcpSseConnect(req: Request, res: Response): Promise<void> {
-  const virtualMcpId = req.params.virtualMcpId as string | undefined;
+  let virtualMcpId = req.params.virtualMcpId as string | undefined;
+
   if (virtualMcpId === undefined || virtualMcpId === '') {
-    res.status(400).json({ error: 'virtualMcpId parameter is required' });
+    const authHeader = req.headers.authorization;
+    if (authHeader?.startsWith('Bearer ')) {
+      virtualMcpId = authHeader.substring(7).trim();
+    } else if (typeof req.query.token === 'string' && req.query.token) {
+      virtualMcpId = req.query.token;
+    }
+  }
+
+  if (virtualMcpId === undefined || virtualMcpId === '') {
+    res.status(400).json({ error: 'virtualMcpId parameter or Bearer token is required' });
     return;
   }
 
