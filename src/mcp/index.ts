@@ -1,14 +1,19 @@
-// src/mcp/index.ts — MCP 网关模块出口（占位）
-
-// TODO: Phase 4
-// - 导出 virtual 层的核心类
-// - 负责整体 MCP Server 阵列的生命周期启动与卸载
+// src/mcp/index.ts — MCP 代理网关出口
 
 import { createLogger, logColors } from '@/utils';
+import { mcpConnectionManager } from './providers/connection-manager';
 
-const logger = createLogger('MCP-Virtual', logColors.magenta);
+export { handleMcpMessage, handleMcpSseConnect } from './virtual/server';
 
+const logger = createLogger('McpGateway', logColors.blue);
+
+/** 初始化 MCP 网关模块（暂留钩子结构） */
 export function initMcpGateway(): void {
-  logger.info('MCP Virtual gateway initialization deferred to Phase 4');
-  // Phase 4
+  logger.info('MCP Gateway module initialized');
+}
+
+/** 优雅关闭 MCP 网关服务并断开所有 Provider */
+export async function shutdownMcpGateway(): Promise<void> {
+  logger.info('Shutting down MCP Gateway...');
+  await mcpConnectionManager.disconnectAll();
 }

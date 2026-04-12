@@ -7,7 +7,7 @@ dns.setDefaultResultOrder('ipv4first');
 import 'dotenv/config';
 import { configManager } from './config';
 import { closePool, countUsers, createUser, runMigrations } from './db';
-import { initMcpGateway } from './mcp';
+import { initMcpGateway, shutdownMcpGateway } from './mcp';
 import { setupWebSocket } from './socket';
 import { app } from './server';
 import { createLogger, logColors, rateLimiter } from './utils';
@@ -98,6 +98,7 @@ async function start(): Promise<void> {
       await configManager.stopListening();
       logger.info('Config listener stopped');
       rateLimiter.stop();
+      await shutdownMcpGateway();
       await closePool();
       logger.info('Database pool closed. Goodbye.');
       process.exit(0);
