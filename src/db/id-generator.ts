@@ -39,7 +39,7 @@ export async function generateShortId(table: string): Promise<string> {
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   while (true) {
-    const hash = crypto.randomBytes(8).toString('hex');
+    const hash = crypto.randomBytes(3).toString('hex');
     const id = `${prefix}_${hash}`;
     const result = await db.query(`SELECT 1 FROM ${table} WHERE id = $1`, [id]);
     if (result.rowCount === 0) {
