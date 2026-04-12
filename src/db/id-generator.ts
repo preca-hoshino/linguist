@@ -7,18 +7,29 @@ import { db } from './client';
 /**
  * 允许使用短 ID 的表白名单（防止 SQL 注入）
  */
-const ALLOWED_TABLES = new Set(['providers', 'provider_models', 'api_keys', 'virtual_models', 'users', 'apps']);
+const ALLOWED_TABLES = new Set([
+  'providers',
+  'provider_models',
+  'virtual_models',
+  'api_keys',
+  'users',
+  'apps',
+  'provider_mcps',
+  'virtual_mcps',
+]);
 
 /**
  * 表对应的 Stripe 风格 ID 前缀映射
  */
 const TABLE_PREFIXES: Record<string, string> = {
   users: 'usr',
-  providers: 'pvd',
-  provider_models: 'pm',
-  virtual_models: 'vm',
   apps: 'app',
   api_keys: 'key',
+  providers: 'model_pvd',
+  provider_models: 'model_p',
+  virtual_models: 'model_v',
+  provider_mcps: 'mcp_p',
+  virtual_mcps: 'mcp_v',
 };
 
 /**
@@ -39,8 +50,8 @@ export async function generateShortId(table: string): Promise<string> {
 
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   while (true) {
-    const hash = crypto.randomBytes(3).toString('hex');
-    const id = `${prefix}_${hash}`;
+    const hexSegment = crypto.randomBytes(3).toString('hex');
+    const id = `${prefix}_${hexSegment}`;
     const result = await db.query(`SELECT 1 FROM ${table} WHERE id = $1`, [id]);
     if (result.rowCount === 0) {
       return id;
