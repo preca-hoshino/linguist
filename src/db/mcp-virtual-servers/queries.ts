@@ -17,17 +17,10 @@ export async function createMcpVirtualServer(input: McpVirtualServerCreateInput)
   const id = await generateShortId('mcp_virtual_servers');
 
   const result = await db.query<McpVirtualServerRow>(
-    `INSERT INTO mcp_virtual_servers (id, name, description, mcp_provider_id, tool_filter_mode, tool_filter_list)
-     VALUES ($1, $2, $3, $4, $5, $6::jsonb)
+    `INSERT INTO mcp_virtual_servers (id, name, description, mcp_provider_id, tools)
+     VALUES ($1, $2, $3, $4, $5::jsonb)
      RETURNING *`,
-    [
-      id,
-      input.name,
-      input.description ?? '',
-      input.mcp_provider_id,
-      input.tool_filter_mode ?? 'all',
-      JSON.stringify(input.tool_filter_list ?? []),
-    ],
+    [id, input.name, input.description ?? '', input.mcp_provider_id, JSON.stringify(input.tools ?? [])],
   );
 
   const row = result.rows[0];
@@ -123,11 +116,8 @@ export async function updateMcpVirtualServer(
     if (updates.mcp_provider_id !== undefined) {
       fieldUpdates.mcp_provider_id = updates.mcp_provider_id;
     }
-    if (updates.tool_filter_mode !== undefined) {
-      fieldUpdates.tool_filter_mode = updates.tool_filter_mode;
-    }
-    if (updates.tool_filter_list !== undefined) {
-      fieldUpdates.tool_filter_list = JSON.stringify(updates.tool_filter_list);
+    if (updates.tools !== undefined) {
+      fieldUpdates.tools = JSON.stringify(updates.tools);
     }
     if (updates.is_active !== undefined) {
       fieldUpdates.is_active = updates.is_active;

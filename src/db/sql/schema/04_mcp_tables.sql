@@ -33,10 +33,8 @@ CREATE TABLE IF NOT EXISTS mcp_virtual_servers (
     name              VARCHAR(200)  NOT NULL,
     description       TEXT          DEFAULT '',
     mcp_provider_id   VARCHAR(32)   NOT NULL REFERENCES mcp_providers(id) ON DELETE CASCADE,
-    -- 工具过滤模式：allow=白名单 / deny=黑名单 / all=全量透传
-    tool_filter_mode  VARCHAR(10)   NOT NULL DEFAULT 'all'
-                      CHECK (tool_filter_mode IN ('allow', 'deny', 'all')),
-    tool_filter_list  JSONB         DEFAULT '[]'::jsonb,
+    -- 启用的工具白名单
+    tools             JSONB         DEFAULT '[]'::jsonb,
     is_active         BOOLEAN       DEFAULT true,
     created_at        TIMESTAMPTZ   DEFAULT NOW(),
     updated_at        TIMESTAMPTZ   DEFAULT NOW()

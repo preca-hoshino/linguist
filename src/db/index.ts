@@ -18,7 +18,6 @@ export {
   updateMcpProvider,
 } from './mcp-providers/index';
 export type {
-  McpToolFilterMode,
   McpVirtualServerCreateInput,
   McpVirtualServerRow,
   McpVirtualServerUpdateInput,

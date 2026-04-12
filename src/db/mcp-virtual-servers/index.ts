@@ -7,7 +7,6 @@ export {
   updateMcpVirtualServer,
 } from './queries';
 export type {
-  McpToolFilterMode,
   McpVirtualServerCreateInput,
   McpVirtualServerRow,
   McpVirtualServerUpdateInput,

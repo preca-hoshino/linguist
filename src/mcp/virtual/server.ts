@@ -125,7 +125,7 @@ export async function handleMcpSseConnect(req: Request, res: Response): Promise<
       const tools = await client.listTools();
 
       // 根据 ACL 过滤
-      const filtered = filterTools(tools, virtualServer.tool_filter_mode, virtualServer.tool_filter_list);
+      const filtered = filterTools(tools, virtualServer.tools);
 
       const result = { tools: filtered };
       await logMcp(virtualServer.id, provider.id, sessionId, 'tools/list', {}, result, undefined, Date.now() - start);
@@ -147,7 +147,7 @@ export async function handleMcpSseConnect(req: Request, res: Response): Promise<
 
     try {
       // 检查 ACL 是否允许
-      if (!isToolAllowed(name, virtualServer.tool_filter_mode, virtualServer.tool_filter_list)) {
+      if (!isToolAllowed(name, virtualServer.tools)) {
         throw new Error(`Tool call denied by ACL: ${name}`);
       }
 

@@ -12,6 +12,7 @@ import {
 import type { McpProviderCreateInput, McpProviderUpdateInput } from '@/db/mcp-providers/types';
 import { GatewayError } from '@/utils';
 import { handleAdminError } from './error';
+import { mcpConnectionManager } from '@/mcp/providers/connection-manager';
 
 const router: Router = Router();
 
@@ -35,6 +36,25 @@ router.get('/', async (req: Request, res: Response) => {
     const { data, has_more, total } = await listMcpProviders(opts);
 
     res.json({ object: 'list', data, total, has_more });
+  } catch (error) {
+    handleAdminError(error, res);
+  }
+});
+
+// ==================== 查询单个提供商 MCP 的工具集 ====================
+router.get('/:id/tools', async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    const provider = await getMcpProviderById(id);
+
+    if (!provider) {
+      throw new GatewayError(404, 'not_found', `MCP Provider ${id} not found`);
+    }
+
+    const client = await mcpConnectionManager.getClient(provider);
+    const tools = await client.listTools();
+
+    res.json({ object: 'list', data: tools });
   } catch (error) {
     handleAdminError(error, res);
   }
