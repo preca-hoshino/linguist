@@ -21,7 +21,7 @@ export async function markProcessing(ctx: RoutedModelHttpContext): Promise<void>
     // 写入基础热数据
     await db.query(
       `INSERT INTO request_logs
-         (id, status, api_key_prefix, ip, is_stream, request_model, routed_model, provider_kind, provider_id)
+         (id, status, app_id, ip, is_stream, request_model, routed_model, provider_kind, provider_id)
        VALUES ($1, 'processing', $2, $3, $4, $5, $6, $7, $8)`,
       [
         ctx.id,
@@ -191,13 +191,13 @@ export async function markError(ctx: ModelHttpContext, err: unknown): Promise<vo
       // 记录尚不存在（路由通过但 markProcessing 写入异常等极端情况），执行 INSERT
       await db.query(
         `INSERT INTO request_logs
-           (id, status, api_key_prefix, ip, is_stream, request_model,
+           (id, status, app_id, ip, is_stream, request_model,
             routed_model, provider_kind, provider_id,
             error_message, error_code, error_type)
          VALUES ($1, 'error', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [
           ctx.id,
-          ctx.apiKeyPrefix ?? null,
+          ctx.appId ?? null,
           ctx.ip,
           ctx.stream ?? null,
           ctx.requestModel,

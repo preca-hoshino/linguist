@@ -1,7 +1,6 @@
 // src/middleware/request/api-key-auth.ts — 用户侧 API Key 鉴权中间件
 
-import { validateApiKey } from '@/db/api-keys';
-import { lookupApp } from '@/db/apps';
+import { lookupAppByKey } from '@/db/apps';
 import type { ModelHttpContext } from '@/types';
 import { createLogger, GatewayError, logColors } from '@/utils';
 
@@ -11,10 +10,8 @@ const logger = createLogger('Middleware:ApiKeyAuth', logColors.bold + logColors.
  * API Key 鉴权中间件
  *
  * 从 ModelHttpContext.apiKey 读取用户提供的 API Key，
- * 验证其在数据库中是否存在且活跃（通过内存缓存加速）。
- * 同时提取所属 App 信息写入上下文。
- *
- * 鉴权失败时抛出 GatewayError（401）。
+ * 根据单应用-单秘钥（api_key）机制，通过内存字典查找匹配的归属 App。
+ * 不存在或验证失败时抛出 GatewayError（401）。
  *
  * 可通过环境变量 REQUIRE_API_KEY=false 关闭鉴权（开发环境）。
  */
@@ -38,24 +35,17 @@ export async function apiKeyAuth(ctx: ModelHttpContext): Promise<void> {
     throw new GatewayError(401, 'unauthorized', hint);
   }
 
-  const keyInfo = await validateApiKey(rawKey);
+  const appInfo = await lookupAppByKey(rawKey);
 
-  if (!keyInfo) {
-    logger.warn({ requestId: ctx.id, ip: ctx.ip, keyPrefix: rawKey.slice(0, 11) }, 'Invalid or expired API key');
-    throw new GatewayError(401, 'invalid_api_key', 'Invalid or expired API key');
+  if (!appInfo?.isActive) {
+    logger.warn({ requestId: ctx.id, ip: ctx.ip, keyPrefix: rawKey.slice(0, 11) }, 'Invalid or inactive API key');
+    throw new GatewayError(401, 'invalid_api_key', 'Invalid or inactive API key');
   }
-
-  ctx.apiKeyName = keyInfo.name;
 
   // 写入 App 信息
-  ctx.appId = keyInfo.appId;
-  const appEntry = await lookupApp(keyInfo.appId);
-  if (appEntry) {
-    ctx.appName = appEntry.name;
-  }
+  ctx.appId = appInfo.id;
+  ctx.appName = appInfo.name;
+  ctx.apiKeyName = appInfo.name; // In single key setup, the key identity resolves directly to the app's entity.
 
-  logger.debug(
-    { requestId: ctx.id, keyPrefix: rawKey.slice(0, 11), keyName: keyInfo.name, appId: ctx.appId },
-    'API key auth passed',
-  );
+  logger.debug({ requestId: ctx.id, keyPrefix: rawKey.slice(0, 11), appId: ctx.appId }, 'API key auth passed');
 }

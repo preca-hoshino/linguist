@@ -4,6 +4,8 @@
 
 BEGIN;
 
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 CREATE TABLE IF NOT EXISTS users (
     id            VARCHAR(32)   PRIMARY KEY,
     username      VARCHAR(50)  UNIQUE NOT NULL,
@@ -78,7 +80,7 @@ CREATE TABLE IF NOT EXISTS request_logs (
     routed_model            VARCHAR(200),
     provider_kind           VARCHAR(50),
     provider_id             VARCHAR(32)     REFERENCES providers(id) ON DELETE SET NULL,
-    api_key_prefix          VARCHAR(11),
+    app_id                  VARCHAR(32)     REFERENCES apps(id) ON DELETE SET NULL,
     is_stream               BOOLEAN,
     error_message           TEXT,
     error_code              VARCHAR(50),
@@ -128,7 +130,8 @@ CREATE TABLE IF NOT EXISTS apps (
                     CHECK (auth_mode IN ('api_key')),
     is_active       BOOLEAN      DEFAULT true,
     created_at      TIMESTAMPTZ  DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ  DEFAULT NOW()
+    updated_at      TIMESTAMPTZ  DEFAULT NOW(),
+    api_key         VARCHAR(100) UNIQUE NOT NULL DEFAULT ('lk-' || encode(gen_random_bytes(24), 'hex'))
 );
 
 CREATE TABLE IF NOT EXISTS app_allowed_models (
@@ -137,16 +140,5 @@ CREATE TABLE IF NOT EXISTS app_allowed_models (
     PRIMARY KEY (app_id, virtual_model_id)
 );
 
-CREATE TABLE IF NOT EXISTS api_keys (
-    id          VARCHAR(32)   PRIMARY KEY,
-    app_id      VARCHAR(32)   NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
-    name        VARCHAR(200) NOT NULL,
-    key_value   TEXT         NOT NULL UNIQUE,
-    key_prefix  VARCHAR(20)  NOT NULL,
-    is_active   BOOLEAN      DEFAULT true,
-    expires_at  TIMESTAMPTZ,
-    created_at  TIMESTAMPTZ  DEFAULT NOW(),
-    updated_at  TIMESTAMPTZ  DEFAULT NOW()
-);
 
 COMMIT;

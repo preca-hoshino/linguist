@@ -8,11 +8,6 @@ BEGIN;
 CREATE INDEX IF NOT EXISTS idx_users_active ON users(is_active);
 CREATE INDEX IF NOT EXISTS idx_users_email  ON users(email);
 
-CREATE INDEX IF NOT EXISTS idx_ak_active        ON api_keys(is_active);
-CREATE INDEX IF NOT EXISTS idx_ak_prefix        ON api_keys(key_prefix);
-CREATE INDEX IF NOT EXISTS idx_ak_app_id        ON api_keys(app_id);
-CREATE INDEX IF NOT EXISTS idx_ak_key_value     ON api_keys(key_value);
-
 CREATE INDEX IF NOT EXISTS idx_apps_active      ON apps(is_active);
 CREATE INDEX IF NOT EXISTS idx_aam_app          ON app_allowed_models(app_id);
 CREATE INDEX IF NOT EXISTS idx_aam_model        ON app_allowed_models(virtual_model_id);
@@ -36,7 +31,7 @@ CREATE INDEX IF NOT EXISTS idx_rl_created_at         ON request_logs(created_at 
 CREATE INDEX IF NOT EXISTS idx_rl_status_created           ON request_logs(status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_rl_provider_created         ON request_logs(provider_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_rl_routed_model_created     ON request_logs(routed_model, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_rl_apikey_created           ON request_logs(api_key_prefix, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_rl_appid_created           ON request_logs(app_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_rl_request_model_created    ON request_logs(request_model, created_at DESC);
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;

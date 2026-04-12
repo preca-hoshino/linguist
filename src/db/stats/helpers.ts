@@ -200,7 +200,6 @@ export function buildDimensionFilter(
     provider_model: 'routed_model',
     virtual_model: 'request_model',
     app: 'app_id',
-    api_key: 'api_key_prefix',
   };
 
   const column = columnMap[dimension];
@@ -229,7 +228,6 @@ export function buildDimensionFilterAliased(
     provider_model: 'routed_model',
     virtual_model: 'request_model',
     app: 'app_id',
-    api_key: 'api_key_prefix',
   };
 
   const column = `${alias}.${columnMap[dimension]}`;

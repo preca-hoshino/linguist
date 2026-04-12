@@ -11,16 +11,13 @@ const logger = createLogger('Apps');
 
 // ==================== 内部常量 ====================
 
-/** 带聚合的完整查询片段（key_count + allowed_model_ids） */
 const APP_SELECT = `
   SELECT a.*,
-         COUNT(DISTINCT ak.id)::int AS key_count,
          COALESCE(
            array_agg(DISTINCT aam.virtual_model_id) FILTER (WHERE aam.virtual_model_id IS NOT NULL),
            '{}'
          ) AS allowed_model_ids
   FROM apps a
-  LEFT JOIN api_keys ak ON ak.app_id = a.id
   LEFT JOIN app_allowed_models aam ON aam.app_id = a.id
 `;
 
@@ -132,7 +129,7 @@ export async function listApps(options?: {
 }
 
 /**
- * 按 ID 查询应用详情（含 key_count + allowed_model_ids）
+ * 按 ID 查询应用详情（含 allowed_model_ids）
  */
 export async function getAppById(id: string): Promise<AppRow | null> {
   const result = await db.query<AppRow>(`${APP_SELECT} WHERE a.id = $1 GROUP BY a.id`, [id]);
@@ -204,4 +201,27 @@ export async function deleteApp(id: string): Promise<boolean> {
   invalidateAppCache();
   logger.info({ id }, 'App deleted');
   return true;
+}
+
+/**
+ * 轮换应用的 API Key
+ */
+export async function rotateAppKey(id: string): Promise<AppRow | null> {
+  const result = await db.query<AppRow>(
+    `
+    UPDATE apps 
+    SET api_key = 'lk-' || encode(gen_random_bytes(24), 'hex') 
+    WHERE id = $1 
+    RETURNING *
+  `,
+    [id],
+  );
+
+  if (result.rowCount === 0) {
+    return null;
+  }
+
+  invalidateAppCache();
+  logger.info({ id }, 'App API key rotated');
+  return result.rows[0] ?? null;
 }

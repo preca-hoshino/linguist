@@ -9,7 +9,7 @@ export interface AppRow {
   is_active: boolean;
   created_at: string;
   updated_at: string;
-  key_count: number;
+  api_key: string;
   allowed_model_ids: string[];
 }
 

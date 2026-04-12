@@ -1,5 +1,5 @@
 import type { Client } from 'pg';
-import { createListenClient, db, invalidateApiKeyCache } from '@/db';
+import { createListenClient, db } from '@/db';
 import { invalidateAppCache } from '@/db/apps';
 import type {
   ProviderAdvancedConfig,
@@ -328,18 +328,10 @@ export class ConfigManager {
       this.listenClient.on('notification', (msg) => {
         logger.info({ channel: msg.channel, payload: msg.payload }, 'Received config change notification');
 
-        // API Key 表变更时仅刷新 key 缓存，无需重载全部配置
-        if (msg.payload?.startsWith('api_keys:')) {
-          invalidateApiKeyCache();
-          logger.info('API key cache invalidated due to database change');
-          return;
-        }
-
-        // Apps 表变更时刷新 App 缓存 + Key 缓存（Key 加载依赖 App 活跃状态）
+        // Apps 表变更时刷新 App 缓存
         if (msg.payload?.startsWith('apps:') || msg.payload?.startsWith('app_allowed_models:')) {
           invalidateAppCache();
-          invalidateApiKeyCache();
-          logger.info('App and API key caches invalidated due to database change');
+          logger.info('App cache invalidated due to database change');
           return;
         }
 

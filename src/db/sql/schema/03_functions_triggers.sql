@@ -18,8 +18,6 @@ CREATE TRIGGER trigger_users_updated_at BEFORE UPDATE ON users FOR EACH ROW EXEC
 DROP TRIGGER IF EXISTS trigger_apps_updated_at ON apps;
 CREATE TRIGGER trigger_apps_updated_at BEFORE UPDATE ON apps FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-DROP TRIGGER IF EXISTS trigger_api_keys_updated_at ON api_keys;
-CREATE TRIGGER trigger_api_keys_updated_at BEFORE UPDATE ON api_keys FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 DROP TRIGGER IF EXISTS trigger_providers_updated_at ON providers;
 CREATE TRIGGER trigger_providers_updated_at BEFORE UPDATE ON providers FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -48,8 +46,6 @@ CREATE TRIGGER trigger_apps_change AFTER INSERT OR UPDATE OR DELETE ON apps FOR 
 DROP TRIGGER IF EXISTS trigger_app_allowed_models_change ON app_allowed_models;
 CREATE TRIGGER trigger_app_allowed_models_change AFTER INSERT OR UPDATE OR DELETE ON app_allowed_models FOR EACH STATEMENT EXECUTE FUNCTION notify_config_change();
 
-DROP TRIGGER IF EXISTS trigger_api_keys_change ON api_keys;
-CREATE TRIGGER trigger_api_keys_change AFTER INSERT OR UPDATE OR DELETE ON api_keys FOR EACH STATEMENT EXECUTE FUNCTION notify_config_change();
 
 DROP TRIGGER IF EXISTS trigger_providers_change ON providers;
 CREATE TRIGGER trigger_providers_change AFTER INSERT OR UPDATE OR DELETE ON providers FOR EACH STATEMENT EXECUTE FUNCTION notify_config_change();
