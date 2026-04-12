@@ -119,7 +119,7 @@ docker-compose logs -f
 サービス起動後（ローカルまたは Docker）：
 - ヘルスチェック：`GET http://localhost:3000/api/health`
 - モデルリスト（OpenAI 形式）：`GET http://localhost:3000/v1/models`
-- チャットエンドポイント（OpenAI 形式）：`POST http://localhost:3000/v1/chat/completions`
+- チャットエンドポイント（OpenAI 形式）：`POST http://localhost:3000/model/openai-compat/v1/chat/completions`
 - 埋め込みエンドポイント（OpenAI 形式）：`POST http://localhost:3000/v1/embeddings`
 - チャットエンドポイント（Gemini 形式）：`POST http://localhost:3000/v1beta/models/:model:generateContent`
 - ストリーミングチャット（Gemini 形式）：`POST http://localhost:3000/v1beta/models/:model:streamGenerateContent`
@@ -182,7 +182,7 @@ Content-Type: application/json
 設定は即座に有効になります（再起動不要）。チャットリクエストを送信します：
 
 ```http
-POST http://localhost:3000/v1/chat/completions
+POST http://localhost:3000/model/openai-compat/v1/chat/completions
 Content-Type: application/json
 
 {
@@ -207,7 +207,7 @@ Content-Type: application/json
 
 | フォーマット | 説明       | チャットエンドポイント                | 埋め込みエンドポイント              |
 | ------------ | ---------- | ------------------------------------- | ----------------------------------- |
-| OpenAI       | 互換形式    | `/v1/chat/completions`               | `/v1/embeddings`                   |
+| OpenAI       | 互換形式    | `/model/openai-compat/v1/chat/completions`               | `/v1/embeddings`                   |
 | Gemini       | ネイティブ形式 | `/v1beta/models/:model:generateContent` | `/v1beta/models/:model:embedContent` |
 
 ---
@@ -220,7 +220,7 @@ Content-Type: application/json
 | -------- | ----------------------------------------- | -------------------------- |
 | `GET`    | `/api/health`                             | ヘルスチェック             |
 | `GET`    | `/v1/models`                              | モデルリストを取得         |
-| `POST`   | `/v1/chat/completions`                    | OpenAI 形式チャット補完   |
+| `POST`   | `/model/openai-compat/v1/chat/completions`                    | OpenAI 形式チャット補完   |
 | `POST`   | `/v1/embeddings`                          | OpenAI 形式テキスト埋め込み |
 | `POST`   | `/v1beta/models/:model:generateContent`   | Gemini 形式チャット補完   |
 | `POST`   | `/v1beta/models/:model:streamGenerateContent` | Gemini 形式ストリーミング |

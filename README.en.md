@@ -119,7 +119,7 @@ After services start:
 After service starts (locally or Docker):
 - Health check: `GET http://localhost:3000/api/health`
 - Model list (OpenAI format): `GET http://localhost:3000/v1/models`
-- Chat endpoint (OpenAI format): `POST http://localhost:3000/v1/chat/completions`
+- Chat endpoint (OpenAI format): `POST http://localhost:3000/model/openai-compat/v1/chat/completions`
 - Embedding endpoint (OpenAI format): `POST http://localhost:3000/v1/embeddings`
 - Chat endpoint (Gemini format): `POST http://localhost:3000/v1beta/models/:model:generateContent`
 - Streaming chat (Gemini format): `POST http://localhost:3000/v1beta/models/:model:streamGenerateContent`
@@ -182,7 +182,7 @@ Content-Type: application/json
 Configuration takes effect immediately (no restart needed). Send a chat request:
 
 ```http
-POST http://localhost:3000/v1/chat/completions
+POST http://localhost:3000/model/openai-compat/v1/chat/completions
 Content-Type: application/json
 
 {
@@ -207,7 +207,7 @@ Content-Type: application/json
 
 | Format   | Description      | Chat Endpoint                     | Embedding Endpoint              |
 | -------- | ---------------- | --------------------------------- | ------------------------------- |
-| OpenAI   | Compatible format | `/v1/chat/completions`           | `/v1/embeddings`                |
+| OpenAI   | Compatible format | `/model/openai-compat/v1/chat/completions`           | `/v1/embeddings`                |
 | Gemini   | Native format     | `/v1beta/models/:model:generateContent` | `/v1beta/models/:model:embedContent` |
 
 ---
@@ -220,7 +220,7 @@ Content-Type: application/json
 | ------ | ----------------------------------------- | ----------------------------------- |
 | `GET`  | `/api/health`                             | Health check                        |
 | `GET`  | `/v1/models`                              | Get model list                      |
-| `POST` | `/v1/chat/completions`                    | OpenAI format chat completion       |
+| `POST` | `/model/openai-compat/v1/chat/completions`                    | OpenAI format chat completion       |
 | `POST` | `/v1/embeddings`                          | OpenAI format text embedding        |
 | `POST` | `/v1beta/models/:model:generateContent`   | Gemini format chat completion       |
 | `POST` | `/v1beta/models/:model:streamGenerateContent` | Gemini format streaming chat     |

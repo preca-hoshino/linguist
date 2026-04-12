@@ -42,7 +42,7 @@ export interface ModelHttpContext {
   http: {
     /** HTTP 请求方法（大写，如 'POST'） */
     method: string;
-    /** 请求路径（如 '/v1/chat/completions'） */
+    /** 请求路径（如 '/model/openai-compat/v1/chat/completions'） */
     path: string;
     /** 客户端 User-Agent */
     userAgent?: string | undefined;

@@ -49,7 +49,14 @@ app.use(mcpRouter);
 // ==================== 404 处理 ====================
 app.use((req: Request, res: Response) => {
   logger.warn({ method: req.method, path: req.path }, 'Route not found');
-  const format = req.path.startsWith('/v1beta/') ? 'gemini' : undefined;
+  let format: string | undefined;
+  if (req.path.startsWith('/model/gemini/')) {
+    format = 'gemini';
+  } else if (req.path.startsWith('/model/openai-compat/')) {
+    format = 'openaicompat';
+  } else if (req.path.startsWith('/model/anthropic/')) {
+    format = 'anthropic';
+  }
   handleError(new GatewayError(404, 'not_found', 'Not Found'), res, format);
 });
 

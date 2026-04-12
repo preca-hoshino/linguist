@@ -38,7 +38,7 @@ describe('Process Flow', () => {
     mockReq = {
       ip: '127.0.0.1',
       method: 'POST',
-      path: '/v1/chat/completions',
+      path: '/model/openai-compat/v1/chat/completions',
       headers: { 'user-agent': 'jest' },
       body: { model: 'test-model' },
     } as unknown as jest.Mocked<Request>;

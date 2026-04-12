@@ -56,7 +56,7 @@ describe('Integration: OpenAICompat -> DeepSeek -> Gateway', () => {
     const ctx: GatewayContext = {
       ...mockContext,
       ip: '127.0.0.1',
-      http: { method: 'POST', path: '/v1/chat/completions' },
+      http: { method: 'POST', path: '/model/openai-compat/v1/chat/completions' },
       userFormat: 'openaicompat',
       requestModel: 'gpt-4',
     };
