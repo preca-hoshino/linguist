@@ -17,19 +17,17 @@ export async function createMcpProvider(input: McpProviderCreateInput): Promise<
   const id = await generateShortId('mcp_providers');
 
   const result = await db.query<McpProviderRow>(
-    `INSERT INTO mcp_providers (id, name, transport_type, endpoint_url, headers, stdio_command, stdio_args, stdio_env, api_keys)
-     VALUES ($1, $2, $3, $4, $5::jsonb, $6, $7::jsonb, $8::jsonb, $9::jsonb)
+    `INSERT INTO mcp_providers (id, name, kind, base_url, credential_type, credential, config)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)
      RETURNING *`,
     [
       id,
       input.name,
-      input.transport_type,
-      input.endpoint_url ?? '',
-      JSON.stringify(input.headers ?? {}),
-      input.stdio_command ?? '',
-      JSON.stringify(input.stdio_args ?? []),
-      JSON.stringify(input.stdio_env ?? {}),
-      JSON.stringify(input.api_keys ?? []),
+      input.kind,
+      input.base_url ?? '',
+      input.credential_type ?? 'api_key',
+      JSON.stringify(input.credential ?? []),
+      JSON.stringify(input.config ?? {}),
     ],
   );
 
@@ -108,26 +106,20 @@ export async function updateMcpProvider(id: string, updates: McpProviderUpdateIn
     if (updates.name !== undefined) {
       fieldUpdates.name = updates.name;
     }
-    if (updates.transport_type !== undefined) {
-      fieldUpdates.transport_type = updates.transport_type;
+    if (updates.kind !== undefined) {
+      fieldUpdates.kind = updates.kind;
     }
-    if (updates.endpoint_url !== undefined) {
-      fieldUpdates.endpoint_url = updates.endpoint_url;
+    if (updates.base_url !== undefined) {
+      fieldUpdates.base_url = updates.base_url;
     }
-    if (updates.headers !== undefined) {
-      fieldUpdates.headers = JSON.stringify(updates.headers);
+    if (updates.credential_type !== undefined) {
+      fieldUpdates.credential_type = updates.credential_type;
     }
-    if (updates.stdio_command !== undefined) {
-      fieldUpdates.stdio_command = updates.stdio_command;
+    if (updates.credential !== undefined) {
+      fieldUpdates.credential = JSON.stringify(updates.credential);
     }
-    if (updates.stdio_args !== undefined) {
-      fieldUpdates.stdio_args = JSON.stringify(updates.stdio_args);
-    }
-    if (updates.stdio_env !== undefined) {
-      fieldUpdates.stdio_env = JSON.stringify(updates.stdio_env);
-    }
-    if (updates.api_keys !== undefined) {
-      fieldUpdates.api_keys = JSON.stringify(updates.api_keys);
+    if (updates.config !== undefined) {
+      fieldUpdates.config = JSON.stringify(updates.config);
     }
     if (updates.is_active !== undefined) {
       fieldUpdates.is_active = updates.is_active;

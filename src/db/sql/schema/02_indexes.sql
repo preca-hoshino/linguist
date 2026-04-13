@@ -13,13 +13,13 @@ CREATE INDEX IF NOT EXISTS idx_aam_app          ON app_allowed_models(app_id);
 CREATE INDEX IF NOT EXISTS idx_aam_model        ON app_allowed_models(virtual_model_id);
 
 -- ==================== 02: 核心业务模型与路由 ====================
-CREATE INDEX IF NOT EXISTS idx_providers_kind           ON providers(kind);
-CREATE INDEX IF NOT EXISTS idx_pm_provider              ON provider_models(provider_id);
-CREATE INDEX IF NOT EXISTS idx_pm_type                  ON provider_models(model_type);
-CREATE INDEX IF NOT EXISTS idx_pm_active                ON provider_models(is_active);
-CREATE INDEX IF NOT EXISTS idx_vm_active                ON virtual_models(is_active);
-CREATE INDEX IF NOT EXISTS idx_vmb_virtual_model        ON virtual_model_backends(virtual_model_id);
-CREATE INDEX IF NOT EXISTS idx_vmb_provider_model       ON virtual_model_backends(provider_model_id);
+CREATE INDEX IF NOT EXISTS idx_model_providers_kind      ON model_providers(kind);
+CREATE INDEX IF NOT EXISTS idx_mpm_provider              ON model_provider_models(provider_id);
+CREATE INDEX IF NOT EXISTS idx_mpm_type                  ON model_provider_models(model_type);
+CREATE INDEX IF NOT EXISTS idx_mpm_active                ON model_provider_models(is_active);
+CREATE INDEX IF NOT EXISTS idx_vm_active                 ON virtual_models(is_active);
+CREATE INDEX IF NOT EXISTS idx_vmb_virtual_model         ON virtual_model_backends(virtual_model_id);
+CREATE INDEX IF NOT EXISTS idx_vmb_provider_model        ON virtual_model_backends(provider_model_id);
 
 -- ==================== 03: 分析审计与冷热数据 ====================
 CREATE INDEX IF NOT EXISTS idx_rl_status             ON request_logs(status);

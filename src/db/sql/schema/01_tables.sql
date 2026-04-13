@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS users (
     updated_at    TIMESTAMPTZ  DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS providers (
+CREATE TABLE IF NOT EXISTS model_providers (
     id              VARCHAR(32)   PRIMARY KEY,
     name            VARCHAR(100) NOT NULL,
     kind            VARCHAR(50)  NOT NULL,
@@ -29,9 +29,9 @@ CREATE TABLE IF NOT EXISTS providers (
     updated_at      TIMESTAMPTZ  DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS provider_models (
+CREATE TABLE IF NOT EXISTS model_provider_models (
     id              VARCHAR(32)   PRIMARY KEY,
-    provider_id     VARCHAR(32)   NOT NULL REFERENCES providers(id) ON DELETE CASCADE,
+    provider_id     VARCHAR(32)   NOT NULL REFERENCES model_providers(id) ON DELETE CASCADE,
     name            VARCHAR(200) NOT NULL,
     model_type      VARCHAR(20)  NOT NULL CHECK (model_type IN ('chat', 'embedding')),
     capabilities    TEXT[]       DEFAULT '{}',
@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS virtual_models (
 CREATE TABLE IF NOT EXISTS virtual_model_backends (
     id                  UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
     virtual_model_id    VARCHAR(100) NOT NULL REFERENCES virtual_models(id) ON DELETE CASCADE,
-    provider_model_id   VARCHAR(32)   NOT NULL REFERENCES provider_models(id) ON DELETE CASCADE,
+    provider_model_id   VARCHAR(32)   NOT NULL REFERENCES model_provider_models(id) ON DELETE CASCADE,
     weight              INT          NOT NULL DEFAULT 1,
     priority            INT          NOT NULL DEFAULT 0,
     UNIQUE(virtual_model_id, provider_model_id)
@@ -96,7 +96,7 @@ CREATE TABLE IF NOT EXISTS request_logs (
     request_model           VARCHAR(200),
     routed_model            VARCHAR(200),
     provider_kind           VARCHAR(50),
-    provider_id             VARCHAR(32)     REFERENCES providers(id) ON DELETE SET NULL,
+    provider_id             VARCHAR(32)     REFERENCES model_providers(id) ON DELETE SET NULL,
     app_id                  VARCHAR(32)     REFERENCES apps(id) ON DELETE SET NULL,
     is_stream               BOOLEAN,
     error_message           TEXT,

@@ -49,7 +49,7 @@ router.get('/', async (req: Request, res: Response) => {
 
     const sql = `
       SELECT ${SELECT_COLUMNS}, COUNT(*) OVER() AS full_count
-      FROM providers
+      FROM model_providers
       ${whereClause}
       ORDER BY created_at DESC
       LIMIT $${String(values.length + 1)} OFFSET $${String(values.length + 2)}
@@ -83,7 +83,7 @@ router.get('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     logger.debug({ id }, 'Getting provider by ID');
-    const result = await db.query(`SELECT ${SELECT_COLUMNS} FROM providers WHERE id = $1`, [id]);
+    const result = await db.query(`SELECT ${SELECT_COLUMNS} FROM model_providers WHERE id = $1`, [id]);
 
     if (result.rowCount === 0) {
       throw new GatewayError(404, 'not_found', `Provider ${id} not found`);
@@ -127,11 +127,11 @@ router.post('/', async (req: Request, res: Response) => {
     const finalConfig: ProviderAdvancedConfig = { ...DEFAULT_PROVIDER_CONFIG, ...config };
 
     const result = await db.query(
-      `INSERT INTO providers (id, name, kind, base_url, credential_type, credential, config)
+      `INSERT INTO model_providers (id, name, kind, base_url, credential_type, credential, config)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING ${SELECT_COLUMNS}`,
       [
-        await generateShortId('providers'),
+        await generateShortId('model_providers'),
         name,
         kind,
         base_url,
@@ -182,7 +182,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
 
     update.values.push(id);
     const result = await db.query(
-      `UPDATE providers SET ${update.setClause} WHERE id = $${String(update.nextIdx)}
+      `UPDATE model_providers SET ${update.setClause} WHERE id = $${String(update.nextIdx)}
        RETURNING ${SELECT_COLUMNS}`,
       update.values,
     );
@@ -203,7 +203,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     logger.debug({ id }, 'Deleting provider');
-    const result = await db.query('DELETE FROM providers WHERE id = $1 RETURNING id', [id]);
+    const result = await db.query('DELETE FROM model_providers WHERE id = $1 RETURNING id', [id]);
 
     if (result.rowCount === 0) {
       throw new GatewayError(404, 'not_found', `Provider ${id} not found`);

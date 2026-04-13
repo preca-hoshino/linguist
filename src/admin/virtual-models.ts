@@ -80,8 +80,8 @@ async function loadVirtualModelWithBackends(
     `SELECT vmb.provider_model_id, vmb.weight, vmb.priority,
             pm.name AS provider_model_name, p.name AS provider_name, pm.provider_id
      FROM virtual_model_backends vmb
-     JOIN provider_models pm ON vmb.provider_model_id = pm.id
-     JOIN providers p ON pm.provider_id = p.id
+     JOIN model_provider_models pm ON vmb.provider_model_id = pm.id
+     JOIN model_providers p ON pm.provider_id = p.id
      WHERE vmb.virtual_model_id = $1
      ORDER BY vmb.priority ASC, vmb.weight DESC`,
     [vmId],
@@ -176,8 +176,8 @@ router.get('/', async (req: Request, res: Response) => {
         `SELECT vmb.virtual_model_id, vmb.provider_model_id, vmb.weight, vmb.priority,
                 pm.name AS provider_model_name, p.name AS provider_name, pm.provider_id
          FROM virtual_model_backends vmb
-         JOIN provider_models pm ON vmb.provider_model_id = pm.id
-         JOIN providers p ON pm.provider_id = p.id
+         JOIN model_provider_models pm ON vmb.provider_model_id = pm.id
+         JOIN model_providers p ON pm.provider_id = p.id
          WHERE vmb.virtual_model_id = ANY($1)
          ORDER BY vmb.priority ASC, vmb.weight DESC`,
         [vmIds],
@@ -255,7 +255,7 @@ router.post('/', async (req: Request, res: Response) => {
     // 校验所有 provider_model_id 存在且 model_type 一致
     const pmIds: string[] = backends.map((b) => b.provider_model_id);
     const pmCheck = await db.query<{ id: string; model_type: string }>(
-      `SELECT id, model_type FROM provider_models WHERE id = ANY($1)`,
+      `SELECT id, model_type FROM model_provider_models WHERE id = ANY($1)`,
       [pmIds],
     );
     if (pmCheck.rowCount !== pmIds.length) {
@@ -349,7 +349,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
       // 校验 provider_model_id 存在且 model_type 一致
       const pmIds: string[] = backends.map((b) => b.provider_model_id);
       const pmCheck = await db.query<{ id: string; model_type: string }>(
-        `SELECT id, model_type FROM provider_models WHERE id = ANY($1)`,
+        `SELECT id, model_type FROM model_provider_models WHERE id = ANY($1)`,
         [pmIds],
       );
       if (pmCheck.rowCount !== pmIds.length) {

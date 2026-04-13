@@ -21,7 +21,7 @@ const logger = createLogger('Billing', logColors.bold + logColors.green);
 export async function lookupPricingTiers(providerId: string, modelName: string): Promise<readonly PricingTier[]> {
   try {
     const result = await db.query<{ pricing_tiers: PricingTier[] }>(
-      'SELECT pricing_tiers FROM provider_models WHERE provider_id = $1 AND name = $2 LIMIT 1',
+      'SELECT pricing_tiers FROM model_provider_models WHERE provider_id = $1 AND name = $2 LIMIT 1',
       [providerId, modelName],
     );
     const row = result.rows[0];

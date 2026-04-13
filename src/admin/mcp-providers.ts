@@ -13,6 +13,7 @@ import type { McpProviderCreateInput, McpProviderUpdateInput } from '@/db/mcp-pr
 import { GatewayError } from '@/utils';
 import { handleAdminError } from './error';
 import { mcpConnectionManager } from '@/mcp/providers/connection-manager';
+import type { McpToolInfo } from '@/mcp/providers/base-client';
 
 const router: Router = Router();
 
@@ -51,8 +52,23 @@ router.get('/:id/tools', async (req: Request, res: Response) => {
       throw new GatewayError(404, 'not_found', `MCP Provider ${id} not found`);
     }
 
-    const client = await mcpConnectionManager.getClient(provider);
-    const toolsResult = await client.listTools();
+    let toolsResult: McpToolInfo[];
+    try {
+      const client = await mcpConnectionManager.getClient(provider);
+      toolsResult = await client.listTools();
+    } catch (err: unknown) {
+      if (err instanceof GatewayError) {
+        throw err;
+      }
+      if (err instanceof Error) {
+        throw new GatewayError(
+          502,
+          'provider_connection_failed',
+          `Failed to connect to or query MCP provider: ${err.message}`,
+        );
+      }
+      throw err;
+    }
 
     res.json({ object: 'list', data: toolsResult });
   } catch (error) {
@@ -83,10 +99,10 @@ router.post('/', async (req: Request, res: Response) => {
     if (
       typeof body.name !== 'string' ||
       body.name === '' ||
-      typeof body.transport_type !== 'string' ||
-      (body.transport_type as unknown as string) === ''
+      typeof body.kind !== 'string' ||
+      (body.kind as unknown as string) === ''
     ) {
-      throw new GatewayError(400, 'invalid_request', 'Fields name, transport_type are required');
+      throw new GatewayError(400, 'invalid_request', 'Fields name, kind are required');
     }
 
     const created = await createMcpProvider(body);

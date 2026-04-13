@@ -5,7 +5,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { Request, Response } from 'express';
-import { getMcpVirtualServerById } from '@/db/mcp-virtual-servers';
+import { getVirtualMcpById } from '@/db/mcp-virtual-servers';
 import { getMcpProviderById } from '@/db/mcp-providers';
 import { insertMcpLog } from '@/db/mcp-logs';
 import { mcpConnectionManager } from '../providers/connection-manager';
@@ -60,7 +60,7 @@ async function logMcp(
   await insertMcpLog({
     id,
     virtual_mcp_id: virtualId,
-    provider_mcp_id: providerId,
+    mcp_provider_id: providerId,
     app_id: appId,
     session_id: sessionId,
     direction: 'inbound',
@@ -87,32 +87,38 @@ export async function handleMcpSseConnect(req: Request, res: Response): Promise<
     return;
   }
 
-  // 1. 获取并验证虚拟 Server 配置
-  const virtualServer = await getMcpVirtualServerById(virtualMcpId);
-  if (!virtualServer) {
-    res.status(404).json({ error: `Virtual MCP server not found: ${virtualMcpId}` });
+  // 1. 获取并验证虚拟 MCP 配置
+  const virtualMcp = await getVirtualMcpById(virtualMcpId);
+  if (!virtualMcp) {
+    res.status(404).json({ error: `Virtual MCP not found: ${virtualMcpId}` });
     return;
   }
-  if (!virtualServer.is_active) {
-    res.status(403).json({ error: `Virtual MCP server is disabled: ${virtualMcpId}` });
+  if (!virtualMcp.is_active) {
+    res.status(403).json({ error: `Virtual MCP is disabled: ${virtualMcpId}` });
     return;
   }
 
   // 验证关联的 Provider 是否有效
-  const provider = await getMcpProviderById(virtualServer.mcp_provider_id);
+  const provider = await getMcpProviderById(virtualMcp.mcp_provider_id);
   if (!provider) {
     res.status(500).json({ error: 'Associated MCP provider not found' });
     return;
   }
 
-  const sessionId = crypto.randomUUID();
+  // eslint-disable-next-line @typescript-eslint/no-deprecated
+  const transport = new SSEServerTransport('/mcp/messages', res);
+  // transport provides its own generated session ID
+  const sessionId = transport.sessionId;
 
   // 2. 建立 SDK Server 实例
   // eslint-disable-next-line @typescript-eslint/no-deprecated -- 忽略由 SDK 引发的弃用警告
   const server = new Server(
-    { name: `linguist-virtual/${virtualServer.name}`, version: '1.0.0' },
+    { name: `linguist-virtual/${virtualMcp.name}`, version: '1.0.0' },
     { capabilities: { tools: {} } },
   );
+
+  // 工具白名单来自 virtualMcp.config.tools（config JSONB 字段）
+  const allowedTools = virtualMcp.config.tools ?? [];
 
   // 3. 注册 tools/list 处理程序
   server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -122,11 +128,11 @@ export async function handleMcpSseConnect(req: Request, res: Response): Promise<
       const tools = await client.listTools();
 
       // 根据 ACL 过滤
-      const filtered = filterTools(tools, virtualServer.tools);
+      const filtered = filterTools(tools, allowedTools);
 
       const result = { tools: filtered };
       await logMcp(
-        virtualServer.id,
+        virtualMcp.id,
         provider.id,
         (req as AuthenticatedRequest).appId,
         sessionId,
@@ -140,7 +146,7 @@ export async function handleMcpSseConnect(req: Request, res: Response): Promise<
     } catch (err) {
       const errObj = { message: err instanceof Error ? err.message : String(err) };
       await logMcp(
-        virtualServer.id,
+        virtualMcp.id,
         provider.id,
         (req as AuthenticatedRequest).appId,
         sessionId,
@@ -164,7 +170,7 @@ export async function handleMcpSseConnect(req: Request, res: Response): Promise<
 
     try {
       // 检查 ACL 是否允许
-      if (!isToolAllowed(name, virtualServer.tools)) {
+      if (!isToolAllowed(name, allowedTools)) {
         throw new Error(`Tool call denied by ACL: ${name}`);
       }
 
@@ -172,9 +178,9 @@ export async function handleMcpSseConnect(req: Request, res: Response): Promise<
       const result = await client.callTool(name, args as Record<string, unknown>);
 
       await logMcp(
-        virtualServer.id,
+        virtualMcp.id,
         provider.id,
-        (req as AuthenticatedRequest).appId, // 从网关层透传过来的 appId
+        (req as AuthenticatedRequest).appId,
         sessionId,
         'tools/call',
         params,
@@ -186,7 +192,7 @@ export async function handleMcpSseConnect(req: Request, res: Response): Promise<
     } catch (err) {
       const errObj = { message: err instanceof Error ? err.message : String(err) };
       await logMcp(
-        virtualServer.id,
+        virtualMcp.id,
         provider.id,
         (req as AuthenticatedRequest).appId,
         sessionId,
@@ -200,11 +206,7 @@ export async function handleMcpSseConnect(req: Request, res: Response): Promise<
     }
   });
 
-  // eslint-disable-next-line @typescript-eslint/no-deprecated
-  const transport = new SSEServerTransport('/mcp/messages', res);
-  await server.connect(transport);
-
-  // Store in cache
+  // Store in cache BEFORE connecting so that if client connects quickly, it doesn't 404
   activeSessions.set(sessionId, {
     sessionId,
     virtualMcpId,
@@ -212,6 +214,8 @@ export async function handleMcpSseConnect(req: Request, res: Response): Promise<
     server,
     createdAt: Date.now(),
   });
+
+  await server.connect(transport);
 
   logger.info({ virtualMcpId, sessionId }, 'Virtual MCP SSE session established');
 }
@@ -232,8 +236,12 @@ export async function handleMcpMessage(req: Request, res: Response): Promise<voi
     return;
   }
 
+  if (req.body === undefined) {
+    res.status(500).json({ error: 'req.body is undefined' });
+    return;
+  }
   try {
-    await session.transport.handlePostMessage(req, res);
+    await session.transport.handlePostMessage(req, res, req.body);
   } catch (err) {
     logger.error({ err, sessionId }, 'Error handling MCP message');
     res.status(500).json({ error: 'Internal Server Error' });

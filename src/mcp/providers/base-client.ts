@@ -105,13 +105,15 @@ export abstract class McpProviderClient {
 
   /**
    * 建立连接
+   * 从 credential（API Key 池数组）中轮询选取 Key
    */
   public async connect(): Promise<void> {
     if (this.connected) {
       return;
     }
 
-    const apiKey = getNextApiKey(this.provider.id, this.provider.api_keys);
+    // credential 字段存储 API Key 池，与 model_providers.credential 对称
+    const apiKey = getNextApiKey(this.provider.id, this.provider.credential);
     this.transport = this.createTransport(apiKey);
     await this.client.connect(this.transport);
     this.connected = true;

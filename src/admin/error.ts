@@ -46,6 +46,34 @@ export function handleAdminError(err: unknown, res: Response): void {
     return;
   }
 
+  // 拦截 Postgres 唯一约束与外键约束违规
+  const pgErr = err as Record<string, unknown> | null;
+  if (pgErr && typeof pgErr.code === 'string') {
+    const tableStr = typeof pgErr.table === 'string' ? pgErr.table : 'unknown';
+    if (pgErr.code === '23503') {
+      res.status(400).json({
+        error: {
+          code: 'invalid_reference',
+          message: `Foreign key constraint violation on table ${tableStr}: referenced record does not exist.`,
+          type: 'invalid_request_error',
+          param: null,
+        },
+      } satisfies ApiErrorResponse);
+      return;
+    }
+    if (pgErr.code === '23505') {
+      res.status(409).json({
+        error: {
+          code: 'conflict_error',
+          message: `Unique constraint violation on table ${tableStr}.`,
+          type: 'conflict_error',
+          param: null,
+        },
+      } satisfies ApiErrorResponse);
+      return;
+    }
+  }
+
   // 非预期错误：记录日志并返回通用 500
   logger.error(err instanceof Error ? err : new Error(String(err)), 'Unhandled admin error');
   const body: ApiErrorResponse = {

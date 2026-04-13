@@ -5,6 +5,7 @@ export { generateShortId } from './id-generator';
 export type { McpLogCreateInput, McpLogDirection, McpLogRow } from './mcp-logs/index';
 export { getMcpLogById, insertMcpLog, listMcpLogs } from './mcp-logs/index';
 export type {
+  McpProviderConfig,
   McpProviderCreateInput,
   McpProviderRow,
   McpProviderUpdateInput,
@@ -18,16 +19,17 @@ export {
   updateMcpProvider,
 } from './mcp-providers/index';
 export type {
-  McpVirtualServerCreateInput,
-  McpVirtualServerRow,
-  McpVirtualServerUpdateInput,
+  VirtualMcpConfig,
+  VirtualMcpCreateInput,
+  VirtualMcpRow,
+  VirtualMcpUpdateInput,
 } from './mcp-virtual-servers/index';
 export {
-  createMcpVirtualServer,
-  deleteMcpVirtualServer,
-  getMcpVirtualServerById,
-  listMcpVirtualServers,
-  updateMcpVirtualServer,
+  createVirtualMcp,
+  deleteVirtualMcp,
+  getVirtualMcpById,
+  listVirtualMcps,
+  updateVirtualMcp,
 } from './mcp-virtual-servers/index';
 export { runMigrations } from './migrate';
 export type { RequestLogStatus } from './request-logs/index';

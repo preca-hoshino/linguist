@@ -1,15 +1,15 @@
-// src/admin/mcp-virtual-servers.ts — Virtual MCP Servers CRUD API
+// src/admin/mcp-virtual-servers.ts — Virtual MCPs CRUD API
 
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import {
-  createMcpVirtualServer,
-  deleteMcpVirtualServer,
-  getMcpVirtualServerById,
-  listMcpVirtualServers,
-  updateMcpVirtualServer,
+  createVirtualMcp,
+  deleteVirtualMcp,
+  getVirtualMcpById,
+  listVirtualMcps,
+  updateVirtualMcp,
 } from '@/db/mcp-virtual-servers/queries';
-import type { McpVirtualServerCreateInput, McpVirtualServerUpdateInput } from '@/db/mcp-virtual-servers/types';
+import type { VirtualMcpCreateInput, VirtualMcpUpdateInput } from '@/db/mcp-virtual-servers/types';
 import { GatewayError } from '@/utils';
 import { handleAdminError } from './error';
 
@@ -24,7 +24,7 @@ router.get('/', async (req: Request, res: Response) => {
     const offsetNum = typeof offset === 'string' && offset !== '' ? Number.parseInt(offset, 10) : 0;
     const isActiveParsed = typeof is_active === 'string' ? is_active === 'true' : undefined;
 
-    const opts: Parameters<typeof listMcpVirtualServers>[0] = { limit: limitNum, offset: offsetNum };
+    const opts: Parameters<typeof listVirtualMcps>[0] = { limit: limitNum, offset: offsetNum };
     if (typeof search === 'string') {
       opts.search = search;
     }
@@ -35,7 +35,7 @@ router.get('/', async (req: Request, res: Response) => {
       opts.mcp_provider_id = mcp_provider_id;
     }
 
-    const { data, has_more, total } = await listMcpVirtualServers(opts);
+    const { data, has_more, total } = await listVirtualMcps(opts);
 
     res.json({ object: 'list', data, total, has_more });
   } catch (error) {
@@ -47,13 +47,13 @@ router.get('/', async (req: Request, res: Response) => {
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
-    const virtualServer = await getMcpVirtualServerById(id);
+    const virtualMcp = await getVirtualMcpById(id);
 
-    if (!virtualServer) {
+    if (!virtualMcp) {
       throw new GatewayError(404, 'not_found', `Virtual MCP ${id} not found`);
     }
 
-    res.json({ object: 'mcp_virtual_server', ...virtualServer });
+    res.json({ object: 'virtual_mcp', ...virtualMcp });
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -62,7 +62,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 // ==================== 创建虚拟 MCP ====================
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const body = req.body as McpVirtualServerCreateInput;
+    const body = req.body as VirtualMcpCreateInput;
     if (
       typeof body.name !== 'string' ||
       body.name === '' ||
@@ -72,8 +72,8 @@ router.post('/', async (req: Request, res: Response) => {
       throw new GatewayError(400, 'invalid_request', 'Fields name, mcp_provider_id are required');
     }
 
-    const created = await createMcpVirtualServer(body);
-    res.status(201).json({ object: 'mcp_virtual_server', ...created });
+    const created = await createVirtualMcp(body);
+    res.status(201).json({ object: 'virtual_mcp', ...created });
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -83,14 +83,14 @@ router.post('/', async (req: Request, res: Response) => {
 router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
-    const body = req.body as McpVirtualServerUpdateInput;
+    const body = req.body as VirtualMcpUpdateInput;
 
-    const updated = await updateMcpVirtualServer(id, body);
+    const updated = await updateVirtualMcp(id, body);
     if (!updated) {
       throw new GatewayError(404, 'not_found', `Virtual MCP ${id} not found or no fields to update`);
     }
 
-    res.json({ object: 'mcp_virtual_server', ...updated });
+    res.json({ object: 'virtual_mcp', ...updated });
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -100,13 +100,13 @@ router.patch('/:id', async (req: Request, res: Response) => {
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
-    const success = await deleteMcpVirtualServer(id);
+    const success = await deleteVirtualMcp(id);
 
     if (!success) {
       throw new GatewayError(404, 'not_found', `Virtual MCP ${id} not found`);
     }
 
-    res.json({ id, object: 'mcp_virtual_server', deleted: true });
+    res.json({ id, object: 'virtual_mcp', deleted: true });
   } catch (error) {
     handleAdminError(error, res);
   }

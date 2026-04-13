@@ -80,7 +80,7 @@ async function parseStatsParams(req: Request): Promise<{
 
   // provider_model: id 是 provider_models.id → 需转换为 provider_models.name (= routed_model)
   if (dimension === 'provider_model' && id !== undefined) {
-    const res = await db.query<{ name: string }>('SELECT name FROM provider_models WHERE id = $1 LIMIT 1', [id]);
+    const res = await db.query<{ name: string }>('SELECT name FROM model_provider_models WHERE id = $1 LIMIT 1', [id]);
     if (res.rowCount === 0) {
       throw new GatewayError(404, 'not_found', `Provider model '${id}' not found`);
     }

@@ -60,7 +60,7 @@ export class ConfigManager {
       credential: Record<string, unknown>;
       base_url: string;
       config: Record<string, unknown>;
-    }>('SELECT id, kind, name, credential_type, credential, base_url, config FROM providers');
+    }>('SELECT id, kind, name, credential_type, credential, base_url, config FROM model_providers');
 
     for (const row of providersRes.rows) {
       const cred = this.parseCredential(row.credential_type, row.credential);
@@ -128,13 +128,12 @@ export class ConfigManager {
         p.config           AS provider_config
       FROM virtual_models vm
       JOIN virtual_model_backends vmb ON vmb.virtual_model_id = vm.id
-      JOIN provider_models pm         ON vmb.provider_model_id = pm.id
-      JOIN providers p                ON pm.provider_id = p.id
+      JOIN model_provider_models pm   ON vmb.provider_model_id = pm.id
+      JOIN model_providers p          ON pm.provider_id = p.id
       WHERE vm.is_active = true
         AND pm.is_active = true
       ORDER BY vm.id, vmb.priority ASC, vmb.weight DESC
     `);
-
     for (const row of backendsRes.rows) {
       let config = newVirtualModels.get(row.vm_name);
       if (!config) {
@@ -329,7 +328,11 @@ export class ConfigManager {
         logger.info({ channel: msg.channel, payload: msg.payload }, 'Received config change notification');
 
         // Apps 表变更时刷新 App 缓存
-        if (msg.payload?.startsWith('apps:') || msg.payload?.startsWith('app_allowed_models:')) {
+        if (
+          msg.payload?.startsWith('apps:') ||
+          msg.payload?.startsWith('app_allowed_models:') ||
+          msg.payload?.startsWith('app_allowed_mcps:')
+        ) {
           invalidateAppCache();
           logger.info('App cache invalidated due to database change');
           return;

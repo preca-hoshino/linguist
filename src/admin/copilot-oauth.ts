@@ -133,7 +133,7 @@ router.post('/device-codes/:device_code/poll', async (req: Request, res: Respons
 
     // 如果有 provider_id，验证 provider 存在
     if (providerId !== undefined) {
-      const providerResult = await db.query('SELECT id FROM providers WHERE id = $1', [providerId]);
+      const providerResult = await db.query('SELECT id FROM model_providers WHERE id = $1', [providerId]);
       if (providerResult.rowCount === 0) {
         throw new GatewayError(404, 'not_found', `Provider ${providerId} not found`);
       }
@@ -172,7 +172,7 @@ router.post('/device-codes/:device_code/poll', async (req: Request, res: Respons
       if (providerId !== undefined) {
         // 有 provider_id：直接写入数据库，返回脱敏前缀
         await db.query(
-          `UPDATE providers
+          `UPDATE model_providers
            SET credential_type = 'copilot',
                credential = $1::jsonb,
                updated_at = NOW()
@@ -247,7 +247,9 @@ router.post('/verify', async (req: Request, res: Response) => {
     logger.debug({ providerId }, 'Verifying Copilot OAuth token');
 
     // 查询 provider 的凭证
-    const result = await db.query(`SELECT credential_type, credential FROM providers WHERE id = $1`, [providerId]);
+    const result = await db.query(`SELECT credential_type, credential FROM model_providers WHERE id = $1`, [
+      providerId,
+    ]);
 
     if (result.rowCount === 0) {
       throw new GatewayError(404, 'not_found', `Provider ${providerId} not found`);

@@ -10,11 +10,15 @@ import { McpProviderClient, replaceApiKeyInObject, replaceApiKeyMarker } from '.
  *
  * 用于兼容旧版 MCP Server（2024-11-05 规范），
  * 通过 GET /sse + POST /messages 方式通信。
+ *
+ * 传输配置从对称字段中读取：
+ *   - provider.base_url：SSE 端点 URL（对称 model_providers.base_url）
+ *   - provider.config.headers：自定义请求头
  */
 export class SseMcpClient extends McpProviderClient {
   protected createTransport(apiKey: string | undefined): Transport {
-    const url = replaceApiKeyMarker(this.provider.endpoint_url, apiKey);
-    const headers = replaceApiKeyInObject(this.provider.headers, apiKey);
+    const url = replaceApiKeyMarker(this.provider.base_url, apiKey);
+    const headers = replaceApiKeyInObject(this.provider.config.headers ?? {}, apiKey);
 
     // eslint-disable-next-line @typescript-eslint/no-deprecated -- SSE 传输用于兼容旧版 MCP Server
     return new SSEClientTransport(new URL(url), {
