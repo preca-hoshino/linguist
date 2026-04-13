@@ -48,6 +48,7 @@ setInterval(
 async function logMcp(
   virtualId: string,
   providerId: string,
+  appId: string | undefined,
   sessionId: string,
   method: string,
   params: Record<string, unknown>,
@@ -60,6 +61,7 @@ async function logMcp(
     id,
     virtual_mcp_id: virtualId,
     provider_mcp_id: providerId,
+    app_id: appId,
     session_id: sessionId,
     direction: 'inbound',
     method,
@@ -74,19 +76,10 @@ async function logMcp(
  * 处理客户端通过 SSE 建立连接请求
  */
 export async function handleMcpSseConnect(req: Request, res: Response): Promise<void> {
-  let virtualMcpId = req.params.virtualMcpId as string | undefined;
+  const virtualMcpId = req.params.virtualMcpId as string | undefined;
 
   if (virtualMcpId === undefined || virtualMcpId === '') {
-    const authHeader = req.headers.authorization;
-    if (authHeader?.startsWith('Bearer ')) {
-      virtualMcpId = authHeader.substring(7).trim();
-    } else if (typeof req.query.token === 'string' && req.query.token) {
-      virtualMcpId = req.query.token;
-    }
-  }
-
-  if (virtualMcpId === undefined || virtualMcpId === '') {
-    res.status(400).json({ error: 'virtualMcpId parameter or Bearer token is required' });
+    res.status(400).json({ error: 'virtualMcpId path parameter is required' });
     return;
   }
 
@@ -128,11 +121,31 @@ export async function handleMcpSseConnect(req: Request, res: Response): Promise<
       const filtered = filterTools(tools, virtualServer.tools);
 
       const result = { tools: filtered };
-      await logMcp(virtualServer.id, provider.id, sessionId, 'tools/list', {}, result, undefined, Date.now() - start);
+      await logMcp(
+        virtualServer.id,
+        provider.id,
+        (req as any).appId as string | undefined,
+        sessionId,
+        'tools/list',
+        {},
+        result,
+        undefined,
+        Date.now() - start
+      );
       return result;
     } catch (err) {
       const errObj = { message: err instanceof Error ? err.message : String(err) };
-      await logMcp(virtualServer.id, provider.id, sessionId, 'tools/list', {}, {}, errObj, Date.now() - start);
+      await logMcp(
+        virtualServer.id,
+        provider.id,
+        (req as any).appId as string | undefined,
+        sessionId,
+        'tools/list',
+        {},
+        {},
+        errObj,
+        Date.now() - start
+      );
       throw err;
     }
   });
@@ -157,6 +170,7 @@ export async function handleMcpSseConnect(req: Request, res: Response): Promise<
       await logMcp(
         virtualServer.id,
         provider.id,
+        (req as any).appId as string | undefined, // 从网关层透传过来的 appId
         sessionId,
         'tools/call',
         params,
@@ -167,7 +181,17 @@ export async function handleMcpSseConnect(req: Request, res: Response): Promise<
       return result;
     } catch (err) {
       const errObj = { message: err instanceof Error ? err.message : String(err) };
-      await logMcp(virtualServer.id, provider.id, sessionId, 'tools/call', params, {}, errObj, Date.now() - start);
+      await logMcp(
+        virtualServer.id,
+        provider.id,
+        (req as any).appId as string | undefined,
+        sessionId,
+        'tools/call',
+        params,
+        {},
+        errObj,
+        Date.now() - start
+      );
       throw err;
     }
   });
