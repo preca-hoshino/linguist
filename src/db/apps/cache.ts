@@ -13,6 +13,7 @@ export interface AppCacheEntry {
   isActive: boolean;
   apiKey: string;
   allowedModelIds: string[];
+  allowedMcpIds: string[];
 }
 
 let appCacheById: Map<string, AppCacheEntry> | null = null;
@@ -28,14 +29,20 @@ async function loadAppCache(): Promise<void> {
     is_active: boolean;
     api_key: string;
     allowed_model_ids: string[];
+    allowed_mcp_ids: string[];
   }>(`
     SELECT a.id, a.name, a.is_active, a.api_key,
            COALESCE(
              array_agg(DISTINCT aam.virtual_model_id) FILTER (WHERE aam.virtual_model_id IS NOT NULL),
              '{}'
-           ) AS allowed_model_ids
+           ) AS allowed_model_ids,
+           COALESCE(
+             array_agg(DISTINCT aamcp.virtual_mcp_id) FILTER (WHERE aamcp.virtual_mcp_id IS NOT NULL),
+             '{}'
+           ) AS allowed_mcp_ids
     FROM apps a
     LEFT JOIN app_allowed_models aam ON aam.app_id = a.id
+    LEFT JOIN app_allowed_mcps aamcp ON aamcp.app_id = a.id
     WHERE a.is_active = true
     GROUP BY a.id, a.name, a.is_active, a.api_key
   `);
@@ -50,6 +57,7 @@ async function loadAppCache(): Promise<void> {
       isActive: row.is_active,
       apiKey: row.api_key,
       allowedModelIds: row.allowed_model_ids,
+      allowedMcpIds: row.allowed_mcp_ids,
     };
     newCacheById.set(row.id, entry);
     // 同时也存入以 apiKey 为键的 map 中，用于鉴权极速匹配

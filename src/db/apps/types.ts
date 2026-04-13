@@ -17,6 +17,7 @@ export interface AppRow {
 export interface AppCreateInput {
   name: string;
   allowed_model_ids?: string[] | undefined;
+  allowed_mcp_ids?: string[] | undefined;
 }
 
 /** API 更新输入（不含 auth_mode） */
@@ -24,4 +25,5 @@ export interface AppUpdateInput {
   name?: string | undefined;
   is_active?: boolean | undefined;
   allowed_model_ids?: string[] | undefined;
+  allowed_mcp_ids?: string[] | undefined;
 }

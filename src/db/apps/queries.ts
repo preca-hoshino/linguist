@@ -16,9 +16,14 @@ const APP_SELECT = `
          COALESCE(
            array_agg(DISTINCT aam.virtual_model_id) FILTER (WHERE aam.virtual_model_id IS NOT NULL),
            '{}'
-         ) AS allowed_model_ids
+         ) AS allowed_model_ids,
+         COALESCE(
+           array_agg(DISTINCT aamcp.virtual_mcp_id) FILTER (WHERE aamcp.virtual_mcp_id IS NOT NULL),
+           '{}'
+         ) AS allowed_mcp_ids
   FROM apps a
   LEFT JOIN app_allowed_models aam ON aam.app_id = a.id
+  LEFT JOIN app_allowed_mcps aamcp ON aamcp.app_id = a.id
 `;
 
 // ==================== CRUD 函数 ====================
@@ -29,7 +34,7 @@ const APP_SELECT = `
  */
 export async function createApp(input: AppCreateInput): Promise<AppRow> {
   const id = await generateShortId('apps');
-  const { name, allowed_model_ids: allowedModelIds = [] } = input;
+  const { name, allowed_model_ids: allowedModelIds = [], allowed_mcp_ids: allowedMcpIds = [] } = input;
 
   return await withTransaction(async (tx) => {
     await tx.query(`INSERT INTO apps (id, name) VALUES ($1, $2)`, [id, name]);
@@ -40,6 +45,16 @@ export async function createApp(input: AppCreateInput): Promise<AppRow> {
       const batch = buildBatchInsert(rows, 2);
       await tx.query(
         `INSERT INTO app_allowed_models (app_id, virtual_model_id) VALUES ${batch.valuesClause}`,
+        batch.values,
+      );
+    }
+
+    // 批量插入 MCP 白名单
+    if (allowedMcpIds.length > 0) {
+      const rows = allowedMcpIds.map((mcpId) => [id, mcpId]);
+      const batch = buildBatchInsert(rows, 2);
+      await tx.query(
+        `INSERT INTO app_allowed_mcps (app_id, virtual_mcp_id) VALUES ${batch.valuesClause}`,
         batch.values,
       );
     }
@@ -141,7 +156,7 @@ export async function getAppById(id: string): Promise<AppRow | null> {
  * 支持更新基本字段 + 替换白名单
  */
 export async function updateApp(id: string, updates: AppUpdateInput): Promise<AppRow | null> {
-  const { allowed_model_ids: allowedModelIds, ...fieldUpdates } = updates;
+  const { allowed_model_ids: allowedModelIds, allowed_mcp_ids: allowedMcpIds, ...fieldUpdates } = updates;
 
   return await withTransaction(async (tx) => {
     // 更新基本字段
@@ -169,6 +184,19 @@ export async function updateApp(id: string, updates: AppUpdateInput): Promise<Ap
         const batch = buildBatchInsert(rows, 2);
         await tx.query(
           `INSERT INTO app_allowed_models (app_id, virtual_model_id) VALUES ${batch.valuesClause}`,
+          batch.values,
+        );
+      }
+    }
+
+    // 替换 MCP 白名单
+    if (allowedMcpIds !== undefined) {
+      await tx.query('DELETE FROM app_allowed_mcps WHERE app_id = $1', [id]);
+      if (allowedMcpIds.length > 0) {
+        const rows = allowedMcpIds.map((mcpId) => [id, mcpId]);
+        const batch = buildBatchInsert(rows, 2);
+        await tx.query(
+          `INSERT INTO app_allowed_mcps (app_id, virtual_mcp_id) VALUES ${batch.valuesClause}`,
           batch.values,
         );
       }
