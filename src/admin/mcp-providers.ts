@@ -54,7 +54,6 @@ router.get('/:id/tools', async (req: Request, res: Response) => {
     const client = await mcpConnectionManager.getClient(provider);
     const toolsResult = await client.listTools();
 
-     
     res.json({ object: 'list', data: toolsResult });
   } catch (error) {
     handleAdminError(error, res);

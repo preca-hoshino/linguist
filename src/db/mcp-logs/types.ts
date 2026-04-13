@@ -9,6 +9,7 @@ export interface McpLogRow {
   id: string;
   virtual_mcp_id: string | null;
   provider_mcp_id: string | null;
+  app_id: string | null;
   session_id: string;
   direction: McpLogDirection;
   method: string;
@@ -24,6 +25,7 @@ export interface McpLogCreateInput {
   id: string;
   virtual_mcp_id?: string | undefined;
   provider_mcp_id?: string | undefined;
+  app_id?: string | undefined;
   session_id?: string | undefined;
   direction: McpLogDirection;
   method: string;

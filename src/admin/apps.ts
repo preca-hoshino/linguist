@@ -75,15 +75,15 @@ router.get('/:id', async (req: Request<{ id: string }>, res: Response) => {
 // POST /api/apps
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const body = req.body as { name?: string; allowed_model_ids?: string[] };
-    const { name, allowed_model_ids } = body;
+    const body = req.body as { name?: string; allowed_model_ids?: string[]; allowed_mcp_ids?: string[] };
+    const { name, allowed_model_ids, allowed_mcp_ids } = body;
 
     if (typeof name !== 'string' || name === '') {
       throw new GatewayError(400, 'invalid_request', 'Field "name" is required and must be a non-empty string');
     }
 
     logger.debug({ name }, 'Creating app');
-    const app = await createApp({ name, allowed_model_ids });
+    const app = await createApp({ name, allowed_model_ids, allowed_mcp_ids });
     logger.info({ id: app.id, name }, 'App created via admin API');
     res.status(201).json({ object: 'app', ...app });
   } catch (error) {
@@ -96,7 +96,12 @@ router.post('/', async (req: Request, res: Response) => {
 router.patch('/:id', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const { id } = req.params;
-    const body = req.body as { name?: string; is_active?: boolean; allowed_model_ids?: string[] };
+    const body = req.body as {
+      name?: string;
+      is_active?: boolean;
+      allowed_model_ids?: string[];
+      allowed_mcp_ids?: string[];
+    };
 
     logger.debug({ id }, 'Updating app');
     const app = await updateApp(id, body);

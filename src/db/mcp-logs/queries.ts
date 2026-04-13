@@ -14,12 +14,13 @@ const logger = createLogger('McpLogs');
  */
 export async function insertMcpLog(input: McpLogCreateInput): Promise<void> {
   await db.query(
-    `INSERT INTO mcp_logs (id, virtual_mcp_id, provider_mcp_id, session_id, direction, method, params, result, error, duration_ms)
-     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10)`,
+    `INSERT INTO mcp_logs (id, virtual_mcp_id, provider_mcp_id, app_id, session_id, direction, method, params, result, error, duration_ms)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11)`,
     [
       input.id,
       input.virtual_mcp_id ?? null,
       input.provider_mcp_id ?? null,
+      input.app_id ?? null,
       input.session_id ?? '',
       input.direction,
       input.method,
@@ -43,6 +44,7 @@ export async function listMcpLogs(options?: {
   offset?: number;
   virtual_mcp_id?: string;
   provider_mcp_id?: string;
+  app_id?: string;
   method?: string;
   direction?: string;
 }): Promise<{ data: McpLogRow[]; has_more: boolean; total: number }> {
@@ -62,6 +64,12 @@ export async function listMcpLogs(options?: {
   if (typeof options?.provider_mcp_id === 'string' && options.provider_mcp_id.trim() !== '') {
     conditions.push(`provider_mcp_id = $${String(paramIdx)}`);
     values.push(options.provider_mcp_id);
+    paramIdx++;
+  }
+
+  if (typeof options?.app_id === 'string' && options.app_id.trim() !== '') {
+    conditions.push(`app_id = $${String(paramIdx)}`);
+    values.push(options.app_id);
     paramIdx++;
   }
 
@@ -102,4 +110,20 @@ export async function listMcpLogs(options?: {
 export async function getMcpLogById(id: string): Promise<McpLogRow | null> {
   const result = await db.query<McpLogRow>('SELECT * FROM mcp_logs WHERE id = $1', [id]);
   return result.rows[0] ?? null;
+}
+
+/**
+ * 批量删除 MCP 日志
+ */
+export async function deleteMcpLogsBatch(ids: string[]): Promise<number> {
+  if (ids.length === 0) {
+    return 0;
+  }
+
+  const placeholders = ids.map((_, i) => `$${String(i + 1)}`).join(', ');
+  const result = await db.query(`DELETE FROM mcp_logs WHERE id IN (${placeholders})`, ids);
+
+  const count = result.rowCount ?? 0;
+  logger.debug({ deletedCount: count, requestedCount: ids.length }, 'Batch MCP logs deleted in db');
+  return count;
 }
