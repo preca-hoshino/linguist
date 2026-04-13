@@ -19,11 +19,11 @@ DROP TRIGGER IF EXISTS trigger_apps_updated_at ON apps;
 CREATE TRIGGER trigger_apps_updated_at BEFORE UPDATE ON apps FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 
-DROP TRIGGER IF EXISTS trigger_providers_updated_at ON providers;
-CREATE TRIGGER trigger_providers_updated_at BEFORE UPDATE ON providers FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS trigger_model_providers_updated_at ON model_providers;
+CREATE TRIGGER trigger_model_providers_updated_at BEFORE UPDATE ON model_providers FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-DROP TRIGGER IF EXISTS trigger_provider_models_updated_at ON provider_models;
-CREATE TRIGGER trigger_provider_models_updated_at BEFORE UPDATE ON provider_models FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS trigger_model_provider_models_updated_at ON model_provider_models;
+CREATE TRIGGER trigger_model_provider_models_updated_at BEFORE UPDATE ON model_provider_models FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 DROP TRIGGER IF EXISTS trigger_virtual_models_updated_at ON virtual_models;
 CREATE TRIGGER trigger_virtual_models_updated_at BEFORE UPDATE ON virtual_models FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -47,11 +47,11 @@ DROP TRIGGER IF EXISTS trigger_app_allowed_models_change ON app_allowed_models;
 CREATE TRIGGER trigger_app_allowed_models_change AFTER INSERT OR UPDATE OR DELETE ON app_allowed_models FOR EACH STATEMENT EXECUTE FUNCTION notify_config_change();
 
 
-DROP TRIGGER IF EXISTS trigger_providers_change ON providers;
-CREATE TRIGGER trigger_providers_change AFTER INSERT OR UPDATE OR DELETE ON providers FOR EACH STATEMENT EXECUTE FUNCTION notify_config_change();
+DROP TRIGGER IF EXISTS trigger_model_providers_change ON model_providers;
+CREATE TRIGGER trigger_model_providers_change AFTER INSERT OR UPDATE OR DELETE ON model_providers FOR EACH STATEMENT EXECUTE FUNCTION notify_config_change();
 
-DROP TRIGGER IF EXISTS trigger_provider_models_change ON provider_models;
-CREATE TRIGGER trigger_provider_models_change AFTER INSERT OR UPDATE OR DELETE ON provider_models FOR EACH STATEMENT EXECUTE FUNCTION notify_config_change();
+DROP TRIGGER IF EXISTS trigger_model_provider_models_change ON model_provider_models;
+CREATE TRIGGER trigger_model_provider_models_change AFTER INSERT OR UPDATE OR DELETE ON model_provider_models FOR EACH STATEMENT EXECUTE FUNCTION notify_config_change();
 
 DROP TRIGGER IF EXISTS trigger_virtual_models_change ON virtual_models;
 CREATE TRIGGER trigger_virtual_models_change AFTER INSERT OR UPDATE OR DELETE ON virtual_models FOR EACH STATEMENT EXECUTE FUNCTION notify_config_change();

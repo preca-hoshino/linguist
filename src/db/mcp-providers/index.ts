@@ -1,4 +1,4 @@
-// src/db/mcp-providers/index.ts — 提供商 MCP 模块导出
+// src/db/mcp-providers/index.ts — MCP Providers 模块导出
 export {
   createMcpProvider,
   deleteMcpProvider,
@@ -6,4 +6,10 @@ export {
   listMcpProviders,
   updateMcpProvider,
 } from './queries';
-export type { McpProviderCreateInput, McpProviderRow, McpProviderUpdateInput, McpTransportType } from './types';
+export type {
+  McpProviderConfig,
+  McpProviderCreateInput,
+  McpProviderRow,
+  McpProviderUpdateInput,
+  McpTransportType,
+} from './types';

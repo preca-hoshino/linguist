@@ -10,12 +10,18 @@ import { McpProviderClient, replaceApiKeyInObject, replaceApiKeyMarker } from '.
  *
  * 与 Claude Desktop 等标准 MCP Host 的行为一致：
  * 启动子进程，通过 stdin/stdout 交换 JSON-RPC 消息。
+ *
+ * 传输配置从 provider.config（JSONB）中读取：
+ *   - config.stdio_command：子进程命令
+ *   - config.stdio_args：子进程参数列表
+ *   - config.stdio_env：子进程环境变量
  */
 export class StdioMcpClient extends McpProviderClient {
   protected createTransport(apiKey: string | undefined): Transport {
-    const command = replaceApiKeyMarker(this.provider.stdio_command, apiKey);
-    const args = replaceApiKeyInObject(this.provider.stdio_args, apiKey);
-    const envOverrides = replaceApiKeyInObject(this.provider.stdio_env, apiKey);
+    const cfg = this.provider.config;
+    const command = replaceApiKeyMarker(cfg.stdio_command ?? '', apiKey);
+    const args = replaceApiKeyInObject(cfg.stdio_args ?? [], apiKey);
+    const envOverrides = replaceApiKeyInObject(cfg.stdio_env ?? {}, apiKey);
 
     // 合并环境变量并过滤 undefined 值
     const mergedEnv: Record<string, string> = {};

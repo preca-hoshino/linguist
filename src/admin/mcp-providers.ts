@@ -83,10 +83,10 @@ router.post('/', async (req: Request, res: Response) => {
     if (
       typeof body.name !== 'string' ||
       body.name === '' ||
-      typeof body.transport_type !== 'string' ||
-      (body.transport_type as unknown as string) === ''
+      typeof body.kind !== 'string' ||
+      (body.kind as unknown as string) === ''
     ) {
-      throw new GatewayError(400, 'invalid_request', 'Fields name, transport_type are required');
+      throw new GatewayError(400, 'invalid_request', 'Fields name, kind are required');
     }
 
     const created = await createMcpProvider(body);

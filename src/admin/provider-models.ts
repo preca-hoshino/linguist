@@ -170,8 +170,8 @@ router.get('/', async (req: Request, res: Response) => {
     // 单独拉取符合条件的 total 数量
     const countSql = `
       SELECT COUNT(*) AS total
-      FROM provider_models pm
-      JOIN providers p ON pm.provider_id = p.id
+      FROM model_provider_models pm
+      JOIN model_providers p ON pm.provider_id = p.id
       ${baseWhereClause}
     `;
     const countResult = await db.query(countSql, values);
@@ -180,7 +180,7 @@ router.get('/', async (req: Request, res: Response) => {
     // 加入游标过滤
     if (startingAfterStr !== undefined && startingAfterStr !== '') {
       conditions.push(
-        `pm.created_at < (SELECT created_at FROM provider_models WHERE id = $${String(values.length + 1)})`,
+        `pm.created_at < (SELECT created_at FROM model_provider_models WHERE id = $${String(values.length + 1)})`,
       );
       values.push(startingAfterStr);
     }
@@ -192,8 +192,8 @@ router.get('/', async (req: Request, res: Response) => {
              pm.model_config, pm.max_tokens, pm.is_active, pm.pricing_tiers, pm.rpm_limit, pm.tpm_limit,
              pm.created_at, pm.updated_at,
              p.name AS provider_name, p.kind AS provider_kind
-      FROM provider_models pm
-      JOIN providers p ON pm.provider_id = p.id
+      FROM model_provider_models pm
+      JOIN model_providers p ON pm.provider_id = p.id
       ${dataWhereClause}
       ORDER BY pm.created_at DESC
       LIMIT $${String(values.length + 1)}
@@ -233,8 +233,8 @@ router.get('/:id', async (req: Request, res: Response) => {
               pm.model_config, pm.max_tokens, pm.is_active, pm.pricing_tiers, pm.rpm_limit, pm.tpm_limit,
               pm.created_at, pm.updated_at,
               p.name AS provider_name, p.kind AS provider_kind
-       FROM provider_models pm
-       JOIN providers p ON pm.provider_id = p.id
+       FROM model_provider_models pm
+       JOIN model_providers p ON pm.provider_id = p.id
        WHERE pm.id = $1`,
       [id],
     );
@@ -301,17 +301,17 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     // 校验 provider 存在
-    const providerCheck = await db.query('SELECT id FROM providers WHERE id = $1', [provider_id]);
+    const providerCheck = await db.query('SELECT id FROM model_providers WHERE id = $1', [provider_id]);
     if (providerCheck.rowCount === 0) {
       throw new GatewayError(404, 'not_found', `Provider ${provider_id} not found`);
     }
 
     const result = await db.query(
-      `INSERT INTO provider_models (id, provider_id, name, model_type, capabilities, parameters, model_config, max_tokens, pricing_tiers, rpm_limit, tpm_limit)
+      `INSERT INTO model_provider_models (id, provider_id, name, model_type, capabilities, parameters, model_config, max_tokens, pricing_tiers, rpm_limit, tpm_limit)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING id, provider_id, name, model_type, capabilities, parameters, model_config, max_tokens, pricing_tiers, rpm_limit, tpm_limit, is_active, created_at, updated_at`,
       [
-        await generateShortId('provider_models'),
+        await generateShortId('model_provider_models'),
         provider_id,
         name,
         model_type,
@@ -360,7 +360,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
     if (Array.isArray(capabilities) && capabilities.length > 0) {
       let effectiveType = model_type;
       if (effectiveType === undefined) {
-        const currentRow = await db.query('SELECT model_type FROM provider_models WHERE id = $1', [id]);
+        const currentRow = await db.query('SELECT model_type FROM model_provider_models WHERE id = $1', [id]);
         effectiveType = (currentRow.rows[0] as { model_type: string } | undefined)?.model_type;
       }
       if (effectiveType !== undefined && effectiveType !== '') {
@@ -372,7 +372,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
     if (Array.isArray(pricing_tiers) && pricing_tiers.length > 0) {
       let currentMaxTokens = max_tokens;
       if (typeof currentMaxTokens !== 'number' || currentMaxTokens <= 0) {
-        const row = await db.query('SELECT max_tokens FROM provider_models WHERE id = $1', [id]);
+        const row = await db.query('SELECT max_tokens FROM model_provider_models WHERE id = $1', [id]);
         currentMaxTokens = (row.rows[0]?.max_tokens as number | undefined) ?? 128;
       }
       validatePricingTiers(pricing_tiers, currentMaxTokens);
@@ -397,7 +397,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
 
     update.values.push(id);
     const result = await db.query(
-      `UPDATE provider_models SET ${update.setClause} WHERE id = $${String(update.nextIdx)}
+      `UPDATE model_provider_models SET ${update.setClause} WHERE id = $${String(update.nextIdx)}
        RETURNING id, provider_id, name, model_type, capabilities, parameters, model_config, max_tokens, pricing_tiers, rpm_limit, tpm_limit, is_active, created_at, updated_at`,
 
       update.values,
@@ -419,7 +419,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     logger.debug({ id }, 'Deleting provider model');
-    const result = await db.query('DELETE FROM provider_models WHERE id = $1 RETURNING id', [id]);
+    const result = await db.query('DELETE FROM model_provider_models WHERE id = $1 RETURNING id', [id]);
 
     if (result.rowCount === 0) {
       throw new GatewayError(404, 'not_found', `Provider model ${id} not found`);

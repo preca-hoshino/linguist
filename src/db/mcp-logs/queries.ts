@@ -14,12 +14,12 @@ const logger = createLogger('McpLogs');
  */
 export async function insertMcpLog(input: McpLogCreateInput): Promise<void> {
   await db.query(
-    `INSERT INTO mcp_logs (id, virtual_mcp_id, provider_mcp_id, app_id, session_id, direction, method, params, result, error, duration_ms)
+    `INSERT INTO mcp_logs (id, virtual_mcp_id, mcp_provider_id, app_id, session_id, direction, method, params, result, error, duration_ms)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11)`,
     [
       input.id,
       input.virtual_mcp_id ?? null,
-      input.provider_mcp_id ?? null,
+      input.mcp_provider_id ?? null,
       input.app_id ?? null,
       input.session_id ?? '',
       input.direction,
@@ -43,7 +43,7 @@ export async function listMcpLogs(options?: {
   limit?: number;
   offset?: number;
   virtual_mcp_id?: string;
-  provider_mcp_id?: string;
+  mcp_provider_id?: string;
   app_id?: string;
   method?: string;
   direction?: string;
@@ -61,9 +61,9 @@ export async function listMcpLogs(options?: {
     paramIdx++;
   }
 
-  if (typeof options?.provider_mcp_id === 'string' && options.provider_mcp_id.trim() !== '') {
-    conditions.push(`provider_mcp_id = $${String(paramIdx)}`);
-    values.push(options.provider_mcp_id);
+  if (typeof options?.mcp_provider_id === 'string' && options.mcp_provider_id.trim() !== '') {
+    conditions.push(`mcp_provider_id = $${String(paramIdx)}`);
+    values.push(options.mcp_provider_id);
     paramIdx++;
   }
 

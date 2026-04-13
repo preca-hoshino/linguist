@@ -63,10 +63,10 @@ async function breakdownByProviderModel(params: StatsQueryParams): Promise<Stats
 
   const sql = `
     SELECT
-      COALESCE((SELECT name FROM providers WHERE id = rl.provider_id), rl.provider_id::text, 'unknown') AS provider_name,
+      COALESCE((SELECT name FROM model_providers WHERE id = rl.provider_id), rl.provider_id::text, 'unknown') AS provider_name,
       MAX(rl.provider_kind) AS provider_kind,
       COALESCE(rl.routed_model::text, 'unknown') AS name,
-      (SELECT id FROM provider_models pm WHERE pm.provider_id = rl.provider_id AND pm.name = rl.routed_model LIMIT 1) AS provider_model_id,
+      (SELECT id FROM model_provider_models pm WHERE pm.provider_id = rl.provider_id AND pm.name = rl.routed_model LIMIT 1) AS provider_model_id,
       COUNT(*)::int AS request_count,
       COALESCE(SUM(rl.total_tokens), 0)::bigint AS total_tokens,
       COUNT(*) FILTER (WHERE rl.status = 'error')::int AS error_count,
@@ -154,7 +154,7 @@ async function breakdownByProvider(params: StatsQueryParams): Promise<StatsBreak
 
   const sql = `
     SELECT
-      COALESCE((SELECT name FROM providers WHERE id = r.provider_id), r.provider_id::text, 'unknown') AS name,
+      COALESCE((SELECT name FROM model_providers WHERE id = r.provider_id), r.provider_id::text, 'unknown') AS name,
       NULL::text AS provider_name,
       COUNT(*)::int AS request_count,
       COALESCE(SUM(r.total_tokens), 0)::bigint AS total_tokens,

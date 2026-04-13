@@ -34,53 +34,19 @@ export class McpConnectionManager {
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
   /**
-   * 应用 API Key 凭证缓存池并替换 {{APIKEY}} 变量
-   */
-  private applyApiKeyTemplate(provider: McpProviderRow): McpProviderRow {
-    if (provider.api_keys.length === 0) {
-      return provider;
-    }
-
-    const key = provider.api_keys[Math.floor(Math.random() * provider.api_keys.length)] ?? '';
-    const clone = { ...provider };
-    const replaceKey = (str: string): string => str.replace(/\{\{APIKEY\}\}/g, key);
-
-    clone.endpoint_url = replaceKey(clone.endpoint_url);
-    clone.stdio_command = replaceKey(clone.stdio_command);
-    const args = Array.isArray(clone.stdio_args) ? clone.stdio_args : [];
-    clone.stdio_args = args.map((arg) => (typeof arg === 'string' ? replaceKey(arg) : arg));
-
-    clone.headers = { ...clone.headers };
-    for (const [k, v] of Object.entries(clone.headers)) {
-      if (typeof v === 'string') {
-        clone.headers[k] = replaceKey(v);
-      }
-    }
-
-    clone.stdio_env = { ...clone.stdio_env };
-    for (const [k, v] of Object.entries(clone.stdio_env)) {
-      if (typeof v === 'string') {
-        clone.stdio_env[k] = replaceKey(v);
-      }
-    }
-
-    return clone;
-  }
-
-  /**
    * 根据 Provider 配置创建对应传输类型的客户端
+   * kind 字段对应传输类型（对称 model_providers.kind）
    */
   private createClient(provider: McpProviderRow): McpProviderClient {
-    const instantiatedProvider = this.applyApiKeyTemplate(provider);
-    switch (instantiatedProvider.transport_type) {
+    switch (provider.kind) {
       case 'stdio':
-        return new StdioMcpClient(instantiatedProvider);
+        return new StdioMcpClient(provider);
       case 'sse':
-        return new SseMcpClient(instantiatedProvider);
+        return new SseMcpClient(provider);
       case 'streamable_http':
-        return new StreamableHttpMcpClient(instantiatedProvider);
+        return new StreamableHttpMcpClient(provider);
       default:
-        throw new Error(`Unsupported transport type: ${provider.transport_type}`);
+        throw new Error(`Unsupported MCP transport kind: ${String(provider.kind)}`);
     }
   }
 
@@ -138,7 +104,7 @@ export class McpConnectionManager {
     });
 
     this.ensureCleanupTimer();
-    logger.info({ providerId: provider.id, transport: provider.transport_type }, 'MCP client cached');
+    logger.info({ providerId: provider.id, kind: provider.kind }, 'MCP client cached');
     return client;
   }
 

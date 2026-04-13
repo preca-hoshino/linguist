@@ -8,7 +8,8 @@ export interface McpLogRow {
   [key: string]: unknown;
   id: string;
   virtual_mcp_id: string | null;
-  provider_mcp_id: string | null;
+  /** 关联的 MCP 提供商 ID（外键字段名与 mcp_providers.id 对称） */
+  mcp_provider_id: string | null;
   app_id: string | null;
   session_id: string;
   direction: McpLogDirection;
@@ -24,7 +25,7 @@ export interface McpLogRow {
 export interface McpLogCreateInput {
   id: string;
   virtual_mcp_id?: string | undefined;
-  provider_mcp_id?: string | undefined;
+  mcp_provider_id?: string | undefined;
   app_id?: string | undefined;
   session_id?: string | undefined;
   direction: McpLogDirection;

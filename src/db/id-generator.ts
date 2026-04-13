@@ -8,13 +8,13 @@ import { db } from './client';
  * 允许使用短 ID 的表白名单（防止 SQL 注入）
  */
 const ALLOWED_TABLES = new Set([
-  'providers',
-  'provider_models',
+  'model_providers',
+  'model_provider_models',
   'virtual_models',
   'users',
   'apps',
   'mcp_providers',
-  'mcp_virtual_servers',
+  'virtual_mcps',
 ]);
 
 /**
@@ -23,11 +23,11 @@ const ALLOWED_TABLES = new Set([
 const TABLE_PREFIXES: Record<string, string> = {
   users: 'usr',
   apps: 'app',
-  providers: 'model_pvd',
-  provider_models: 'model_p',
+  model_providers: 'model_pvd',
+  model_provider_models: 'model_p',
   virtual_models: 'model_v',
   mcp_providers: 'mcp_p',
-  mcp_virtual_servers: 'mcp_v',
+  virtual_mcps: 'mcp_v',
 };
 
 /**

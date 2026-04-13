@@ -31,7 +31,7 @@ adminRouter.use('/provider-models', providerModelsRouter);
 adminRouter.use('/virtual-models', virtualModelsRouter);
 adminRouter.use('/request-logs', requestLogsRouter);
 adminRouter.use('/mcp-providers', mcpProvidersRouter);
-adminRouter.use('/mcp-virtual-servers', mcpVirtualServersRouter);
+adminRouter.use('/virtual-mcps', mcpVirtualServersRouter);
 adminRouter.use('/mcp-logs', mcpLogsRouter);
 adminRouter.use('/apps', appsRouter);
 adminRouter.use('/stats', statsRouter);

@@ -25,7 +25,7 @@ export async function markProcessing(ctx: RoutedModelHttpContext): Promise<void>
        VALUES ($1, 'processing', $2, $3, $4, $5, $6, $7, $8)`,
       [
         ctx.id,
-        ctx.apiKeyPrefix ?? null,
+        ctx.appId ?? null,
         ctx.ip,
         ctx.stream ?? null,
         ctx.requestModel,
