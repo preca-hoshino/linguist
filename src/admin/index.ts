@@ -15,6 +15,7 @@ import { virtualModelsRouter } from './virtual-models';
 import { mcpProvidersRouter } from './mcp-providers';
 import { mcpVirtualServersRouter } from './mcp-virtual-servers';
 import { mcpLogsRouter } from './mcp-logs';
+import { mcpStatsRouter } from './mcp-stats';
 
 const adminRouter: Router = Router();
 
@@ -33,6 +34,7 @@ adminRouter.use('/request-logs', requestLogsRouter);
 adminRouter.use('/mcp-providers', mcpProvidersRouter);
 adminRouter.use('/virtual-mcps', mcpVirtualServersRouter);
 adminRouter.use('/mcp-logs', mcpLogsRouter);
+adminRouter.use('/mcp-stats', mcpStatsRouter);
 adminRouter.use('/apps', appsRouter);
 adminRouter.use('/stats', statsRouter);
 adminRouter.use('/users', usersRouter);
