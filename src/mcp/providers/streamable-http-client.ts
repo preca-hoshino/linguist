@@ -23,7 +23,29 @@ export class StreamableHttpMcpClient extends McpProviderClient {
     // 使用 as unknown as Transport 绕过 exactOptionalPropertyTypes 下的 sessionId 类型不兼容
     return new StreamableHTTPClientTransport(new URL(url), {
       requestInit: {
-        headers: headers,
+        headers: {
+          ...headers,
+          Connection: 'close', // Avoid Undici Keep-Alive race condition with aggressive FIN servers
+        },
+      },
+      fetch: async (input: string | URL | globalThis.Request, init?: RequestInit): Promise<globalThis.Response> => {
+        let lastError: unknown;
+        for (let attempt = 0; attempt < 3; attempt++) {
+          try {
+            return await fetch(input, init);
+          } catch (error) {
+            lastError = error;
+            // Native Undici fetch failed error is usually a TypeError
+            if (error instanceof TypeError && error.message === 'fetch failed') {
+              if (attempt < 2) {
+                await new Promise((r) => setTimeout(r, 1000));
+                continue;
+              }
+            }
+            throw error;
+          }
+        }
+        throw lastError;
       },
     }) as unknown as Transport;
   }
