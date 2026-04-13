@@ -6,7 +6,7 @@ BEGIN;
 
 CREATE TABLE IF NOT EXISTS app_allowed_mcps (
     app_id              VARCHAR(32)   NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
-    virtual_mcp_id      VARCHAR(32)   NOT NULL REFERENCES mcp_virtual_servers(id) ON DELETE CASCADE,
+    virtual_mcp_id      VARCHAR(32)   NOT NULL REFERENCES virtual_mcps(id) ON DELETE CASCADE,
     PRIMARY KEY (app_id, virtual_mcp_id)
 );
 
