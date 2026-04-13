@@ -328,7 +328,11 @@ export class ConfigManager {
         logger.info({ channel: msg.channel, payload: msg.payload }, 'Received config change notification');
 
         // Apps 表变更时刷新 App 缓存
-        if (msg.payload?.startsWith('apps:') || msg.payload?.startsWith('app_allowed_models:')) {
+        if (
+          msg.payload?.startsWith('apps:') ||
+          msg.payload?.startsWith('app_allowed_models:') ||
+          msg.payload?.startsWith('app_allowed_mcps:')
+        ) {
           invalidateAppCache();
           logger.info('App cache invalidated due to database change');
           return;

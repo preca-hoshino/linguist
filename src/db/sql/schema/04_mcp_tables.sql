@@ -68,4 +68,27 @@ CREATE TABLE IF NOT EXISTS mcp_logs_2026_06 PARTITION OF mcp_logs FOR VALUES FRO
 CREATE TABLE IF NOT EXISTS mcp_logs_2026_h2 PARTITION OF mcp_logs FOR VALUES FROM ('2026-07-01') TO ('2027-01-01');
 CREATE TABLE IF NOT EXISTS mcp_logs_default PARTITION OF mcp_logs DEFAULT;
 
+-- ==================== MCP 应用白名单 ====================
+CREATE TABLE IF NOT EXISTS app_allowed_mcps (
+    app_id              VARCHAR(32)   NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+    virtual_mcp_id      VARCHAR(32)   NOT NULL REFERENCES virtual_mcps(id) ON DELETE CASCADE,
+    PRIMARY KEY (app_id, virtual_mcp_id)
+);
+
+-- ==================== MCP 触发器 ====================
+DROP TRIGGER IF EXISTS trigger_mcp_providers_updated_at ON mcp_providers;
+CREATE TRIGGER trigger_mcp_providers_updated_at BEFORE UPDATE ON mcp_providers FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS trigger_virtual_mcps_updated_at ON virtual_mcps;
+CREATE TRIGGER trigger_virtual_mcps_updated_at BEFORE UPDATE ON virtual_mcps FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+
+DROP TRIGGER IF EXISTS trigger_mcp_providers_change ON mcp_providers;
+CREATE TRIGGER trigger_mcp_providers_change AFTER INSERT OR UPDATE OR DELETE ON mcp_providers FOR EACH STATEMENT EXECUTE FUNCTION notify_config_change();
+
+DROP TRIGGER IF EXISTS trigger_virtual_mcps_change ON virtual_mcps;
+CREATE TRIGGER trigger_virtual_mcps_change AFTER INSERT OR UPDATE OR DELETE ON virtual_mcps FOR EACH STATEMENT EXECUTE FUNCTION notify_config_change();
+
+DROP TRIGGER IF EXISTS trigger_app_allowed_mcps_change ON app_allowed_mcps;
+CREATE TRIGGER trigger_app_allowed_mcps_change AFTER INSERT OR UPDATE OR DELETE ON app_allowed_mcps FOR EACH STATEMENT EXECUTE FUNCTION notify_config_change();
+
 COMMIT;
