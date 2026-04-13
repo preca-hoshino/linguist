@@ -132,6 +132,8 @@ export interface McpStatsTimeSeriesPoint {
   requests: number;
   errors: number;
   avg_duration_ms: number | null;
+  p95_duration_ms: number | null;
+  p99_duration_ms: number | null;
 }
 
 function resolveInterval(params: McpStatsQueryParams, override?: McpStatsInterval): string {
@@ -173,7 +175,9 @@ export async function getMcpStatsTimeSeries(
       date_trunc('${intervalStr.replace(' ', '')}', created_at) AS ts,
       COUNT(*)::int                                              AS requests,
       COUNT(*) FILTER (WHERE error IS NOT NULL)::int             AS errors,
-      AVG(duration_ms)                                           AS avg_duration_ms
+      AVG(duration_ms)                                           AS avg_duration_ms,
+      PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms)  AS p95_duration_ms,
+      PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY duration_ms)  AS p99_duration_ms
     FROM mcp_logs
     WHERE ${timePart.clause}
     ${dimPart.clause}
@@ -186,6 +190,8 @@ export async function getMcpStatsTimeSeries(
     requests: number;
     errors: number;
     avg_duration_ms: number | null;
+    p95_duration_ms: number | null;
+    p99_duration_ms: number | null;
   }>(sql, values);
 
   return result.rows.map((r) => ({
@@ -193,6 +199,8 @@ export async function getMcpStatsTimeSeries(
     requests: r.requests,
     errors: r.errors,
     avg_duration_ms: r.avg_duration_ms === null ? null : Math.round(r.avg_duration_ms),
+    p95_duration_ms: r.p95_duration_ms === null ? null : Math.round(r.p95_duration_ms),
+    p99_duration_ms: r.p99_duration_ms === null ? null : Math.round(r.p99_duration_ms),
   }));
 }
 
