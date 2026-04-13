@@ -72,6 +72,10 @@ async function logMcp(
   });
 }
 
+interface AuthenticatedRequest extends Request {
+  appId?: string;
+}
+
 /**
  * 处理客户端通过 SSE 建立连接请求
  */
@@ -124,13 +128,13 @@ export async function handleMcpSseConnect(req: Request, res: Response): Promise<
       await logMcp(
         virtualServer.id,
         provider.id,
-        (req as any).appId as string | undefined,
+        (req as AuthenticatedRequest).appId,
         sessionId,
         'tools/list',
         {},
         result,
         undefined,
-        Date.now() - start
+        Date.now() - start,
       );
       return result;
     } catch (err) {
@@ -138,13 +142,13 @@ export async function handleMcpSseConnect(req: Request, res: Response): Promise<
       await logMcp(
         virtualServer.id,
         provider.id,
-        (req as any).appId as string | undefined,
+        (req as AuthenticatedRequest).appId,
         sessionId,
         'tools/list',
         {},
         {},
         errObj,
-        Date.now() - start
+        Date.now() - start,
       );
       throw err;
     }
@@ -170,7 +174,7 @@ export async function handleMcpSseConnect(req: Request, res: Response): Promise<
       await logMcp(
         virtualServer.id,
         provider.id,
-        (req as any).appId as string | undefined, // 从网关层透传过来的 appId
+        (req as AuthenticatedRequest).appId, // 从网关层透传过来的 appId
         sessionId,
         'tools/call',
         params,
@@ -184,13 +188,13 @@ export async function handleMcpSseConnect(req: Request, res: Response): Promise<
       await logMcp(
         virtualServer.id,
         provider.id,
-        (req as any).appId as string | undefined,
+        (req as AuthenticatedRequest).appId,
         sessionId,
         'tools/call',
         params,
         {},
         errObj,
-        Date.now() - start
+        Date.now() - start,
       );
       throw err;
     }

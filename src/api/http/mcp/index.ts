@@ -9,6 +9,10 @@ import { GatewayError } from '@/utils';
 
 export const mcpRouter: Router = Router();
 
+interface AuthenticatedRequest extends Request {
+  appId?: string;
+}
+
 // ==========================================
 // Virtual MCP Endpoints
 // ==========================================
@@ -20,7 +24,7 @@ export const mcpRouter: Router = Router();
 mcpRouter.get('/mcp/:virtualMcpId/sse', async (req: Request, res: Response, next: NextFunction) => {
   try {
     const { virtualMcpId } = req.params;
-    
+
     // 1. 验证 API Key
     await validateApiKeyFromRequest(req, (r) => {
       const authHeader = r.headers.authorization;
@@ -38,13 +42,13 @@ mcpRouter.get('/mcp/:virtualMcpId/sse', async (req: Request, res: Response, next
     if (requireApiKey) {
       const apiKey = req.headers.authorization?.substring(7).trim() ?? (req.query.key as string);
       const app = await lookupAppByKey(apiKey);
-      
+
       if (!app || !app.allowedMcpIds.includes(virtualMcpId)) {
         throw new GatewayError(403, 'forbidden', `App does not have access to virtual MCP: ${virtualMcpId}`);
       }
-      
+
       // 将 appId 注入 request 提供给下游处理逻辑和日志
-      (req as any).appId = app.id;
+      (req as AuthenticatedRequest).appId = app.id;
     }
 
     // 3. 建立连接
