@@ -43,8 +43,8 @@ mcpRouter.get('/mcp/:virtualMcpId/sse', async (req: Request, res: Response, next
       const apiKey = req.headers.authorization?.substring(7).trim() ?? (req.query.key as string);
       const app = await lookupAppByKey(apiKey);
 
-      if (!app?.allowedMcpIds.includes(virtualMcpId)) {
-        throw new GatewayError(403, 'forbidden', `App does not have access to virtual MCP: ${virtualMcpId}`);
+      if (!app?.allowedMcpIds.includes(String(virtualMcpId))) {
+        throw new GatewayError(403, 'forbidden', `App does not have access to virtual MCP: ${String(virtualMcpId)}`);
       }
 
       // 将 appId 注入 request 提供给下游处理逻辑和日志
