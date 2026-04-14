@@ -1,6 +1,8 @@
 // src/db/mcp-logs/stats.ts — MCP 日志统计聚合查询
 
 import { db } from '@/db/client';
+import { buildBucketExpr } from '../stats/helpers';
+import type { StatsInterval } from '../stats/types';
 
 // ── 时间范围支持 ──────────────────────────────────────────────────────────────
 
@@ -132,29 +134,22 @@ export interface McpStatsTimeSeriesPoint {
   requests: number;
   errors: number;
   avg_duration_ms: number | null;
+  p95_duration_ms: number | null;
+  p99_duration_ms: number | null;
 }
 
-function resolveInterval(params: McpStatsQueryParams, override?: McpStatsInterval): string {
+function resolveInterval(params: McpStatsQueryParams, override?: McpStatsInterval): McpStatsInterval {
   if (override !== undefined) {
-    const map: Record<McpStatsInterval, string> = {
-      '1m': '1 minute',
-      '5m': '5 minutes',
-      '10m': '10 minutes',
-      '15m': '15 minutes',
-      '1h': '1 hour',
-      '6h': '6 hours',
-      '1d': '1 day',
-    };
-    return map[override];
+    return override;
   }
-  const autoMap: Record<McpStatsRange, string> = {
-    '15m': '1 minute',
-    '1h': '5 minutes',
-    '6h': '15 minutes',
-    '24h': '1 hour',
-    '7d': '6 hours',
-    '14d': '6 hours',
-    '30d': '1 day',
+  const autoMap: Record<McpStatsRange, McpStatsInterval> = {
+    '15m': '1m',
+    '1h': '5m',
+    '6h': '15m',
+    '24h': '1h',
+    '7d': '6h',
+    '14d': '6h',
+    '30d': '1d',
   };
   return autoMap[params.range ?? '1h'];
 }
@@ -163,17 +158,20 @@ export async function getMcpStatsTimeSeries(
   params: McpStatsQueryParams,
   interval?: McpStatsInterval,
 ): Promise<McpStatsTimeSeriesPoint[]> {
-  const intervalStr = resolveInterval(params, interval);
+  const intervalKey = resolveInterval(params, interval);
+  const { expr: bucketExpr } = buildBucketExpr(intervalKey as StatsInterval);
   const timePart = buildTimeClause(params, 1);
   const dimPart = buildDimClause(params, timePart.nextIdx);
   const values = [...timePart.values, ...dimPart.values];
 
   const sql = `
     SELECT
-      date_trunc('${intervalStr.replace(' ', '')}', created_at) AS ts,
+      ${bucketExpr} AS ts,
       COUNT(*)::int                                              AS requests,
       COUNT(*) FILTER (WHERE error IS NOT NULL)::int             AS errors,
-      AVG(duration_ms)                                           AS avg_duration_ms
+      AVG(duration_ms)                                           AS avg_duration_ms,
+      PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms)  AS p95_duration_ms,
+      PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY duration_ms)  AS p99_duration_ms
     FROM mcp_logs
     WHERE ${timePart.clause}
     ${dimPart.clause}
@@ -186,6 +184,8 @@ export async function getMcpStatsTimeSeries(
     requests: number;
     errors: number;
     avg_duration_ms: number | null;
+    p95_duration_ms: number | null;
+    p99_duration_ms: number | null;
   }>(sql, values);
 
   return result.rows.map((r) => ({
@@ -193,6 +193,8 @@ export async function getMcpStatsTimeSeries(
     requests: r.requests,
     errors: r.errors,
     avg_duration_ms: r.avg_duration_ms === null ? null : Math.round(r.avg_duration_ms),
+    p95_duration_ms: r.p95_duration_ms === null ? null : Math.round(r.p95_duration_ms),
+    p99_duration_ms: r.p99_duration_ms === null ? null : Math.round(r.p99_duration_ms),
   }));
 }
 
