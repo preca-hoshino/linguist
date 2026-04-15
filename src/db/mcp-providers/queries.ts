@@ -48,6 +48,7 @@ export async function listMcpProviders(options?: {
   offset?: number;
   search?: string;
   is_active?: boolean;
+  kind?: string;
 }): Promise<{ data: McpProviderRow[]; has_more: boolean; total: number }> {
   const limit = Math.min(Math.max(options?.limit ?? 10, 1), 100);
   const offset = typeof options?.offset === 'number' ? Math.max(options.offset, 0) : 0;
@@ -67,6 +68,12 @@ export async function listMcpProviders(options?: {
   if (typeof isActive === 'boolean') {
     conditions.push(`is_active = $${String(paramIdx)}`);
     values.push(isActive);
+    paramIdx++;
+  }
+
+  if (typeof options?.kind === 'string' && options.kind.trim() !== '') {
+    conditions.push(`kind = $${String(paramIdx)}`);
+    values.push(options.kind.trim());
     paramIdx++;
   }
 

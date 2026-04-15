@@ -20,7 +20,7 @@ const router: Router = Router();
 // ==================== 列出所有提供商 MCP ====================
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { search, limit, offset, is_active } = req.query;
+    const { search, limit, offset, is_active, kind } = req.query;
 
     const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : 10;
     const offsetNum = typeof offset === 'string' && offset !== '' ? Number.parseInt(offset, 10) : 0;
@@ -32,6 +32,9 @@ router.get('/', async (req: Request, res: Response) => {
     }
     if (isActiveParsed !== undefined) {
       opts.is_active = isActiveParsed;
+    }
+    if (typeof kind === 'string') {
+      opts.kind = kind;
     }
 
     const { data, has_more, total } = await listMcpProviders(opts);
