@@ -4,7 +4,7 @@
 // 复用与 apiKeyAuth 中间件完全一致的逻辑：环境变量开关 + 哈希校验。
 
 import type { Request } from 'express';
-import { lookupAppByKey } from '@/db/apps';
+import { lookupAppByKey, type AppCacheEntry } from '@/db/apps';
 import { GatewayError } from '@/utils';
 
 /**
@@ -22,10 +22,10 @@ export async function validateApiKeyFromRequest(
   req: Request,
   extractKey: (req: Request) => string | undefined,
   missingKeyMessage = 'API key is required. Provide it via Authorization: Bearer <key> header.',
-): Promise<void> {
+): Promise<AppCacheEntry | undefined> {
   const requireApiKey = process.env.REQUIRE_API_KEY !== 'false';
   if (!requireApiKey) {
-    return;
+    return undefined;
   }
 
   const apiKey = extractKey(req);
@@ -37,4 +37,6 @@ export async function validateApiKeyFromRequest(
   if (!appInfo?.isActive) {
     throw new GatewayError(401, 'invalid_api_key', 'Invalid or expired API key');
   }
+
+  return appInfo;
 }

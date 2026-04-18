@@ -33,9 +33,12 @@ router.get('/v1/models', async (req: Request, res: Response): Promise<void> => {
   logger.debug({ ip: req.ip ?? req.socket.remoteAddress }, 'GET /v1/models');
   try {
     // API Key 鉴权（复用统一鉴权逻辑）
-    await validateApiKeyFromRequest(req, extractApiKey);
+    const appInfo = await validateApiKeyFromRequest(req, extractApiKey);
 
-    const modelNames = configManager.getAllVirtualModels();
+    let modelNames = configManager.getAllVirtualModels();
+    if (appInfo && appInfo.allowedModelIds.length > 0) {
+      modelNames = modelNames.filter((name) => appInfo.allowedModelIds.includes(name));
+    }
 
     const data = modelNames.map((name) => {
       const vmConfig = configManager.getVirtualModelConfig(name);
