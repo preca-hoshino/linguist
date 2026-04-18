@@ -105,17 +105,14 @@ export async function getMcpLogById(id: string): Promise<McpLogRow | null> {
 }
 
 /**
- * 批量删除 MCP 日志
+ * 删除单条 MCP 日志
+ * 返回是否实际删除了记录
  */
-export async function deleteMcpLogsBatch(ids: string[]): Promise<number> {
-  if (ids.length === 0) {
-    return 0;
+export async function deleteMcpLogById(id: string): Promise<boolean> {
+  const result = await db.query('DELETE FROM mcp_logs WHERE id = $1', [id]);
+  const deleted = (result.rowCount ?? 0) > 0;
+  if (deleted) {
+    logger.debug({ id }, 'MCP log deleted');
   }
-
-  const placeholders = ids.map((_, i) => `$${String(i + 1)}`).join(', ');
-  const result = await db.query(`DELETE FROM mcp_logs WHERE id IN (${placeholders})`, ids);
-
-  const count = result.rowCount ?? 0;
-  logger.debug({ deletedCount: count, requestedCount: ids.length }, 'Batch MCP logs deleted in db');
-  return count;
+  return deleted;
 }

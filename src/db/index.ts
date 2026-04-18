@@ -3,7 +3,7 @@
 export { closePool, createListenClient, db, withTransaction } from './client';
 export { generateShortId } from './id-generator';
 export type { McpLogCreateInput, McpLogRow } from './mcp-logs/index';
-export { getMcpLogById, insertMcpLog, listMcpLogs } from './mcp-logs/index';
+export { deleteMcpLogById, getMcpLogById, insertMcpLog, listMcpLogs } from './mcp-logs/index';
 export type {
   McpProviderConfig,
   McpProviderCreateInput,

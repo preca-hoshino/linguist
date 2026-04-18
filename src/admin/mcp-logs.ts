@@ -2,27 +2,11 @@
 
 import type { Request, Response } from 'express';
 import { Router } from 'express';
-import { getMcpLogById, listMcpLogs, deleteMcpLogsBatch } from '@/db/mcp-logs/queries';
+import { deleteMcpLogById, getMcpLogById, listMcpLogs } from '@/db/mcp-logs/queries';
 import { GatewayError } from '@/utils';
 import { handleAdminError } from './error';
 
 const router: Router = Router();
-
-// ==================== 批量删除 MCP 日志 ====================
-// POST /admin/mcp-logs/batch-delete
-router.post('/batch-delete', async (req: Request, res: Response) => {
-  try {
-    const { ids } = req.body as { ids: string[] };
-    if (!Array.isArray(ids) || ids.length === 0) {
-      throw new GatewayError(400, 'invalid_request', 'Missing or invalid "ids" array in request body');
-    }
-
-    const deletedCount = await deleteMcpLogsBatch(ids);
-    res.json({ object: 'batch_delete', deleted_count: deletedCount, requested_count: ids.length });
-  } catch (error) {
-    handleAdminError(error, res);
-  }
-});
 
 // ==================== 列出所有 MCP 日志 ====================
 router.get('/', async (req: Request, res: Response) => {
@@ -62,6 +46,23 @@ router.get('/:id', async (req: Request, res: Response) => {
     }
 
     res.json({ object: 'mcp_log', ...logResult });
+  } catch (error) {
+    handleAdminError(error, res);
+  }
+});
+
+// ==================== 删除单条 MCP 日志 ====================
+// DELETE /admin/mcp-logs/:id
+router.delete('/:id', async (req: Request, res: Response) => {
+  try {
+    const id = req.params.id as string;
+    const deleted = await deleteMcpLogById(id);
+
+    if (!deleted) {
+      throw new GatewayError(404, 'not_found', `MCP Log ${id} not found`);
+    }
+
+    res.json({ id, object: 'mcp_log', deleted: true });
   } catch (error) {
     handleAdminError(error, res);
   }
