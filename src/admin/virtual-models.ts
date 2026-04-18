@@ -3,7 +3,15 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { db, generateShortId, withTransaction } from '@/db';
-import { buildBatchInsert, buildUpdateSet, createLogger, GatewayError, logColors, rateLimiter } from '@/utils';
+import {
+  buildBatchInsert,
+  buildInClause,
+  buildUpdateSet,
+  createLogger,
+  GatewayError,
+  logColors,
+  rateLimiter,
+} from '@/utils';
 import { handleAdminError } from './error';
 
 const logger = createLogger('Admin:VirtualModels', logColors.bold + logColors.blue);
@@ -109,25 +117,63 @@ function withThroughput<T extends { id: string }>(vm: T): T & { throughput: { rp
 // ==================== 列出所有虚拟模型 ====================
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { search, limit, starting_after, expand } = req.query;
-    const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : 10;
+    const { search, limit, starting_after, expand, model_type, routing_strategy, is_active } = req.query;
+    const limitNum =
+      typeof limit === 'string' && limit !== '' ? Math.min(Math.max(Number.parseInt(limit, 10), 1), 100) : 10;
     const startingAfterStr = typeof starting_after === 'string' ? starting_after.trim() : undefined;
 
-    // 展开参数判定 (expand[]=backends 或 expand=backends)
-    const isExpandBackends = Array.isArray(expand) ? expand.includes('backends') : expand === 'backends';
+    // 解析按需展开字段
+    const expands = Array.isArray(expand) ? expand : typeof expand === 'string' ? [expand] : [];
+    const expandBackends = expands.includes('backends');
 
-    logger.debug({ search, limit: limitNum, starting_after: startingAfterStr, expand }, 'Listing virtual models');
+    logger.debug(
+      {
+        search,
+        limit: limitNum,
+        starting_after: startingAfterStr,
+        expandBackends,
+        model_type,
+        routing_strategy,
+        is_active,
+      },
+      'Listing virtual models',
+    );
 
     const conditions: string[] = [];
     const values: unknown[] = [];
+    let paramIdx = 1;
+
+    // 布尔筛选：is_active
+    if (typeof is_active === 'string' && (is_active === 'true' || is_active === 'false')) {
+      conditions.push(`is_active = $${String(paramIdx)}`);
+      values.push(is_active === 'true');
+      paramIdx++;
+    }
+
+    // IN 筛选：model_type
+    const typeIn = buildInClause('model_type', model_type as string | string[] | undefined, paramIdx);
+    if (typeIn) {
+      conditions.push(typeIn.clause);
+      values.push(...typeIn.values);
+      paramIdx = typeIn.nextIdx;
+    }
+
+    // IN 筛选：routing_strategy
+    const stratIn = buildInClause('routing_strategy', routing_strategy as string | string[] | undefined, paramIdx);
+    if (stratIn) {
+      conditions.push(stratIn.clause);
+      values.push(...stratIn.values);
+      paramIdx = stratIn.nextIdx;
+    }
 
     if (typeof search === 'string' && search.trim() !== '') {
       conditions.push(
-        `(name ILIKE $${String(values.length + 1)} OR routing_strategy ILIKE $${String(
-          values.length + 1,
-        )} OR model_type ILIKE $${String(values.length + 1)})`,
+        `(name ILIKE $${String(paramIdx)} OR routing_strategy ILIKE $${String(
+          paramIdx,
+        )} OR model_type ILIKE $${String(paramIdx)})`,
       );
       values.push(`%${search.trim()}%`);
+      paramIdx++;
     }
 
     const baseWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -139,8 +185,9 @@ router.get('/', async (req: Request, res: Response) => {
 
     // 加入游标过滤
     if (startingAfterStr !== undefined && startingAfterStr !== '') {
-      conditions.push(`created_at < (SELECT created_at FROM virtual_models WHERE id = $${String(values.length + 1)})`);
+      conditions.push(`created_at < (SELECT created_at FROM virtual_models WHERE id = $${String(paramIdx)})`);
       values.push(startingAfterStr);
+      paramIdx++;
     }
 
     const dataWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -151,16 +198,15 @@ router.get('/', async (req: Request, res: Response) => {
       FROM virtual_models
       ${dataWhereClause}
       ORDER BY created_at DESC
-      LIMIT $${String(values.length + 1)}
+      LIMIT $${String(paramIdx)}
     `;
 
-    // 抓取 limit+1 个来判断 has_more
     values.push(limitNum + 1);
 
     const vmResult = await db.query<VirtualModelRow>(sql, values);
 
-    const dataRows = vmResult.rows.length > limitNum ? vmResult.rows.slice(0, limitNum) : vmResult.rows;
     const hasMore = vmResult.rows.length > limitNum;
+    const dataRows = hasMore ? vmResult.rows.slice(0, limitNum) : vmResult.rows;
 
     if (dataRows.length === 0) {
       res.json({ object: 'list', url: '/api/virtual-models', data: [], total, has_more: false });
@@ -168,11 +214,11 @@ router.get('/', async (req: Request, res: Response) => {
     }
 
     const vmIds = dataRows.map((vm) => vm.id);
-    const backendsByVm = new Map<string, BackendRow[]>();
 
-    if (isExpandBackends) {
-      // 仅在 expand=backends 时加载模型关联后端
-      const backendResult = await db.query<BackendRow & { virtual_model_id: string }>(
+    // 根据 expand 参数决定是否深度联表查询后端名称
+    let backendResult: import('pg').QueryResult<BackendRow & { virtual_model_id: string }>;
+    if (expandBackends) {
+      backendResult = await db.query<BackendRow & { virtual_model_id: string }>(
         `SELECT vmb.virtual_model_id, vmb.provider_model_id, vmb.weight, vmb.priority,
                 pm.name AS provider_model_name, p.name AS provider_name, pm.provider_id
          FROM virtual_model_backends vmb
@@ -182,28 +228,40 @@ router.get('/', async (req: Request, res: Response) => {
          ORDER BY vmb.priority ASC, vmb.weight DESC`,
         [vmIds],
       );
-
-      for (const row of backendResult.rows) {
-        const list = backendsByVm.get(row.virtual_model_id) ?? [];
-        list.push({
-          provider_model_id: row.provider_model_id,
-          weight: row.weight,
-          priority: row.priority,
-          provider_model_name: row.provider_model_name,
-          provider_name: row.provider_name,
-          provider_id: row.provider_id,
-        });
-        backendsByVm.set(row.virtual_model_id, list);
-      }
+    } else {
+      // 默认（精简模式）：只获取主键和权重信息，节省大量 Join 和内存开销
+      backendResult = await db.query<BackendRow & { virtual_model_id: string }>(
+        `SELECT virtual_model_id, provider_model_id, weight, priority
+         FROM virtual_model_backends
+         WHERE virtual_model_id = ANY($1)
+         ORDER BY priority ASC, weight DESC`,
+        [vmIds],
+      );
     }
 
-    const finalData = dataRows.map((vm) => {
-      const baseObj = withThroughput(withObjectType(vm));
-      if (isExpandBackends) {
-        return { ...baseObj, backends: backendsByVm.get(vm.id) ?? [] };
-      }
-      return baseObj;
-    });
+    // 分组
+    const backendsByVm = new Map<string, BackendRow[]>();
+    for (const row of backendResult.rows) {
+      const list = backendsByVm.get(row.virtual_model_id) ?? [];
+      list.push({
+        provider_model_id: row.provider_model_id,
+        weight: row.weight,
+        priority: row.priority,
+        provider_model_name: row.provider_model_name,
+        provider_name: row.provider_name,
+        provider_id: row.provider_id,
+      });
+      backendsByVm.set(row.virtual_model_id, list);
+    }
+
+    const finalData = dataRows.map((vm) =>
+      withThroughput(
+        withObjectType({
+          ...vm,
+          backends: backendsByVm.get(vm.id) ?? [],
+        }),
+      ),
+    );
 
     logger.debug({ count: finalData.length, total, has_more: hasMore }, 'Virtual models listed');
     res.json({ object: 'list', url: '/api/virtual-models', data: finalData, total, has_more: hasMore });
@@ -216,7 +274,31 @@ router.get('/', async (req: Request, res: Response) => {
 router.get('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
-    logger.debug({ id }, 'Getting virtual model');
+    const { expand } = req.query;
+    const expands = Array.isArray(expand) ? expand : typeof expand === 'string' ? [expand] : [];
+    const expandBackends = expands.includes('backends');
+
+    logger.debug({ id, expandBackends }, 'Getting virtual model');
+
+    // 如果未指示深度展开，直接拿取骨架即可
+    if (!expandBackends) {
+      const vmResult = await db.query<VirtualModelRow>(
+        'SELECT id, name, description, model_type, routing_strategy, is_active, rpm_limit, tpm_limit, created_at, updated_at FROM virtual_models WHERE id = $1',
+        [id],
+      );
+      if (vmResult.rowCount === 0) {
+        throw new GatewayError(404, 'not_found', `Virtual model ${id} not found`);
+      }
+      const backendResult = await db.query<BackendRow>(
+        `SELECT provider_model_id, weight, priority FROM virtual_model_backends WHERE virtual_model_id = $1 ORDER BY priority ASC, weight DESC`,
+        [id],
+      );
+
+      const vm = Object.assign({}, vmResult.rows[0], { backends: backendResult.rows });
+      res.json(withThroughput(withObjectType(vm)));
+      return;
+    }
+
     const vm = await loadVirtualModelWithBackends(id);
     if (!vm) {
       throw new GatewayError(404, 'not_found', `Virtual model ${id} not found`);
@@ -302,7 +384,7 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // ==================== 更新虚拟模型 ====================
-router.patch('/:id', async (req: Request, res: Response) => {
+router.post('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const body = req.body as VirtualModelBody;

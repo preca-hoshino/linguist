@@ -41,16 +41,17 @@ export interface RequestLogEntry {
 
 /** 查询筛选参数 */
 export interface RequestLogQuery {
-  status?: RequestLogStatus | undefined;
+  status?: RequestLogStatus | string[] | undefined;
   request_model?: string | undefined;
-  provider_kind?: string | undefined;
-  provider_id?: string | undefined;
-  error_type?: string | undefined;
-  app_id?: string | undefined;
-  user_format?: string | undefined;
-  is_stream?: boolean | undefined;
+  provider_kind?: string | string[] | undefined;
+  provider_id?: string | string[] | undefined;
+  error_type?: string | string[] | undefined;
+  api_key_prefix?: string | string[] | undefined;
+  user_format?: string | string[] | undefined;
+  is_stream?: string | string[] | boolean | undefined;
+  app_id?: string | string[] | undefined;
+  starting_after?: string | undefined;
   limit?: number | undefined;
-  offset?: number | undefined;
 }
 
 /** 统一查询列：仅返回 DB 元数据 + gateway_context */

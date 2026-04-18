@@ -16,7 +16,8 @@ export const publicUsersRouter: Router = Router();
 usersRouter.get('/', async (req: Request, res: Response) => {
   try {
     const { search, limit, starting_after } = req.query;
-    const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : 10;
+    const limitNum =
+      typeof limit === 'string' && limit !== '' ? Math.min(Math.max(Number.parseInt(limit, 10), 1), 100) : 10;
     const startingAfterStr = typeof starting_after === 'string' ? starting_after.trim() : undefined;
     const searchStr = typeof search === 'string' ? search : undefined;
 
@@ -92,8 +93,8 @@ usersRouter.post('/', async (req: Request, res: Response) => {
   }
 });
 
-/** PATCH /api/users/:id — 通用用户更新（支持部分字段） */
-usersRouter.patch('/:id', async (req: Request, res: Response) => {
+/** POST /api/users/:id — 通用用户更新（支持部分字段） */
+usersRouter.post('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const { username, email, password, avatar_data, is_active } = req.body as {

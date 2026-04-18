@@ -6,7 +6,7 @@ import { db, generateShortId } from '@/db';
 import { getRegisteredProviderKinds } from '@/model/http/providers';
 import type { ProviderAdvancedConfig } from '@/types';
 import { DEFAULT_PROVIDER_CONFIG } from '@/types';
-import { buildUpdateSet, createLogger, GatewayError, logColors } from '@/utils';
+import { buildInClause, buildUpdateSet, createLogger, GatewayError, logColors } from '@/utils';
 import { handleAdminError } from './error';
 
 const logger = createLogger('Admin:Providers', logColors.bold + logColors.blue);
@@ -32,47 +32,56 @@ const router: Router = Router();
 // ==================== 列出所有提供商 ====================
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { search, limit, offset } = req.query;
+    const { search, limit, starting_after, kind } = req.query;
 
-    const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : 10;
-    const offsetNum = typeof offset === 'string' && offset !== '' ? Number.parseInt(offset, 10) : 0;
+    const limitNum =
+      typeof limit === 'string' && limit !== '' ? Math.min(Math.max(Number.parseInt(limit, 10), 1), 100) : 10;
+    const startingAfter = typeof starting_after === 'string' ? starting_after : undefined;
 
     const conditions: string[] = [];
     const values: unknown[] = [];
+    let paramIdx = 1;
+
+    // 多 Tag 过滤支持
+
+    const kindIn = buildInClause('kind', kind as string | string[] | undefined, paramIdx);
+    if (kindIn) {
+      conditions.push(kindIn.clause);
+      values.push(...kindIn.values);
+      paramIdx = kindIn.nextIdx;
+    }
+
+    if (typeof startingAfter === 'string' && startingAfter.trim() !== '') {
+      conditions.push(`created_at < (SELECT created_at FROM providers WHERE id = $${String(paramIdx)})`);
+      values.push(startingAfter);
+      paramIdx++;
+    }
 
     if (typeof search === 'string' && search.trim() !== '') {
-      conditions.push(`(name ILIKE $${String(values.length + 1)} OR kind ILIKE $${String(values.length + 1)})`);
+      conditions.push(`(name ILIKE $${String(paramIdx)} OR kind ILIKE $${String(paramIdx)})`);
       values.push(`%${search.trim()}%`);
+      paramIdx++;
     }
 
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const fetchLimit = limitNum + 1;
+    values.push(fetchLimit);
 
     const sql = `
-      SELECT ${SELECT_COLUMNS}, COUNT(*) OVER() AS full_count
+      SELECT ${SELECT_COLUMNS}
       FROM model_providers
       ${whereClause}
       ORDER BY created_at DESC
-      LIMIT $${String(values.length + 1)} OFFSET $${String(values.length + 2)}
+      LIMIT $${String(paramIdx)}
     `;
-    values.push(limitNum, offsetNum);
 
-    logger.debug({ search, limit: limitNum, offset: offsetNum }, 'Listing providers');
+    logger.debug({ search, limit: limitNum, starting_after: startingAfter }, 'Listing providers');
     const result = await db.query(sql, values);
 
-    const rows = result.rows;
-    const firstRow = rows[0] as { full_count: string } | undefined;
-    const total = firstRow ? Number.parseInt(firstRow.full_count, 10) : 0;
+    const hasMore = result.rows.length > limitNum;
+    const data = hasMore ? result.rows.slice(0, limitNum) : result.rows;
 
-    const data = rows.map((row) => {
-      // eslint-disable-next-line @typescript-eslint/naming-convention
-      const { full_count: _full_count, ...rest } = row;
-      return rest;
-    });
-
-    const hasMore = offsetNum + data.length < total;
-
-    logger.debug({ count: data.length, total, has_more: hasMore }, 'Providers listed');
-    res.json({ object: 'list', data, total, has_more: hasMore });
+    res.json({ object: 'list', data, has_more: hasMore });
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -150,7 +159,7 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // ==================== 更新提供商 ====================
-router.patch('/:id', async (req: Request, res: Response) => {
+router.post('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const body = req.body as ProviderBody;

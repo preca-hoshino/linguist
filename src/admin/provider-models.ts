@@ -3,7 +3,7 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { db, generateShortId } from '@/db';
-import { buildUpdateSet, createLogger, GatewayError, logColors, rateLimiter } from '@/utils';
+import { buildInClause, buildUpdateSet, createLogger, GatewayError, logColors, rateLimiter } from '@/utils';
 import { handleAdminError } from './error';
 
 const logger = createLogger('Admin:ProviderModels', logColors.bold + logColors.blue);
@@ -139,30 +139,49 @@ const router: Router = Router();
 // ==================== 列出所有提供商模型 ====================
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { provider_id, search, limit, starting_after } = req.query;
-    const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : 10;
+    const { provider_id, model_type, is_active, search, limit, starting_after } = req.query;
+    const limitNum =
+      typeof limit === 'string' && limit !== '' ? Math.min(Math.max(Number.parseInt(limit, 10), 1), 100) : 10;
     const startingAfterStr = typeof starting_after === 'string' ? starting_after.trim() : undefined;
 
     logger.debug(
-      { providerId: provider_id ?? 'all', search, limit: limitNum, starting_after: startingAfterStr },
+      { providerId: provider_id ?? 'all', search, limit: limitNum, starting_after: startingAfterStr, is_active },
       'Listing provider models',
     );
 
     const conditions: string[] = [];
     const values: unknown[] = [];
+    let paramIdx = 1;
 
-    if (typeof provider_id === 'string' && provider_id !== '') {
-      conditions.push(`pm.provider_id = $${String(values.length + 1)}`);
-      values.push(provider_id);
+    // 布尔筛选：is_active
+    if (typeof is_active === 'string' && (is_active === 'true' || is_active === 'false')) {
+      conditions.push(`pm.is_active = $${String(paramIdx)}`);
+      values.push(is_active === 'true');
+      paramIdx++;
+    }
+
+    const pidIn = buildInClause('pm.provider_id', provider_id as string | string[] | undefined, paramIdx);
+    if (pidIn) {
+      conditions.push(pidIn.clause);
+      values.push(...pidIn.values);
+      paramIdx = pidIn.nextIdx;
+    }
+
+    const typeIn = buildInClause('pm.model_type', model_type as string | string[] | undefined, paramIdx);
+    if (typeIn) {
+      conditions.push(typeIn.clause);
+      values.push(...typeIn.values);
+      paramIdx = typeIn.nextIdx;
     }
 
     if (typeof search === 'string' && search.trim() !== '') {
       conditions.push(
-        `(pm.name ILIKE $${String(values.length + 1)} OR pm.model_type ILIKE $${String(
-          values.length + 1,
-        )} OR p.name ILIKE $${String(values.length + 1)})`,
+        `(pm.name ILIKE $${String(paramIdx)} OR pm.model_type ILIKE $${String(
+          paramIdx,
+        )} OR p.name ILIKE $${String(paramIdx)})`,
       );
       values.push(`%${search.trim()}%`);
+      paramIdx++;
     }
 
     const baseWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -179,10 +198,9 @@ router.get('/', async (req: Request, res: Response) => {
 
     // 加入游标过滤
     if (startingAfterStr !== undefined && startingAfterStr !== '') {
-      conditions.push(
-        `pm.created_at < (SELECT created_at FROM model_provider_models WHERE id = $${String(values.length + 1)})`,
-      );
+      conditions.push(`pm.created_at < (SELECT created_at FROM model_provider_models WHERE id = $${String(paramIdx)})`);
       values.push(startingAfterStr);
+      paramIdx++;
     }
 
     const dataWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -196,10 +214,9 @@ router.get('/', async (req: Request, res: Response) => {
       JOIN model_providers p ON pm.provider_id = p.id
       ${dataWhereClause}
       ORDER BY pm.created_at DESC
-      LIMIT $${String(values.length + 1)}
+      LIMIT $${String(paramIdx)}
     `;
 
-    // 抓取 limit+1 个来判断 has_more
     values.push(limitNum + 1);
 
     const result = await db.query(sql, values);
@@ -334,7 +351,7 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // ==================== 更新提供商模型 ====================
-router.patch('/:id', async (req: Request, res: Response) => {
+router.post('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const body = req.body as ProviderModelBody;

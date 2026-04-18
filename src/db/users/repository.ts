@@ -42,9 +42,6 @@ export async function findById(id: string): Promise<UserRow | null> {
   return result.rows[0] ?? null;
 }
 
-/**
- * 列出所有用户（安全字段）
- */
 export async function listUsers(options?: {
   limit?: number;
   starting_after?: string;
@@ -56,10 +53,12 @@ export async function listUsers(options?: {
 
   const conditions: string[] = [];
   const values: unknown[] = [];
+  let paramIdx = 1;
 
   if (typeof search === 'string' && search.trim() !== '') {
-    conditions.push(`(username ILIKE $${String(values.length + 1)} OR email ILIKE $${String(values.length + 1)})`);
+    conditions.push(`(username ILIKE $${String(paramIdx)} OR email ILIKE $${String(paramIdx)})`);
     values.push(`%${search.trim()}%`);
+    paramIdx++;
   }
 
   const baseWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -69,8 +68,9 @@ export async function listUsers(options?: {
   const total = Number.parseInt((countResult.rows[0] as { total: string } | undefined)?.total ?? '0', 10);
 
   if (typeof startingAfterStr === 'string' && startingAfterStr.trim() !== '') {
-    conditions.push(`created_at < (SELECT created_at FROM users WHERE id = $${String(values.length + 1)})`);
+    conditions.push(`created_at < (SELECT created_at FROM users WHERE id = $${String(paramIdx)})`);
     values.push(startingAfterStr);
+    paramIdx++;
   }
 
   const dataWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
@@ -80,7 +80,7 @@ export async function listUsers(options?: {
     FROM users
     ${dataWhereClause}
     ORDER BY created_at DESC
-    LIMIT $${String(values.length + 1)}
+    LIMIT $${String(paramIdx)}
   `;
 
   values.push(limitNum + 1);
