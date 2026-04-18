@@ -35,7 +35,6 @@ export { runMigrations } from './migrate';
 export type { RequestLogStatus } from './request-logs/index';
 export {
   deleteRequestLogById,
-  deleteRequestLogsBatch,
   getRequestLogById,
   markCompleted,
   markError,

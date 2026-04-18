@@ -3,7 +3,7 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import type { RequestLogStatus } from '@/db';
-import { deleteRequestLogById, deleteRequestLogsBatch, getRequestLogById, queryRequestLogs } from '@/db';
+import { deleteRequestLogById, getRequestLogById, queryRequestLogs } from '@/db';
 import { createLogger, GatewayError, logColors } from '@/utils';
 import { handleAdminError } from './error';
 
@@ -12,25 +12,6 @@ const logger = createLogger('Admin:RequestLogs', logColors.bold + logColors.blue
 const router: Router = Router();
 
 const VALID_STATUSES: RequestLogStatus[] = ['processing', 'completed', 'error'];
-
-// ==================== 批量删除请求日志 ====================
-// POST /admin/request-logs/batch-delete
-router.post('/batch-delete', async (req: Request, res: Response) => {
-  try {
-    const { ids } = req.body as { ids: string[] };
-    if (!Array.isArray(ids) || ids.length === 0) {
-      throw new GatewayError(400, 'invalid_request', 'Missing or invalid "ids" array in request body');
-    }
-
-    logger.debug({ count: ids.length }, 'Batch deleting request logs');
-    const deletedCount = await deleteRequestLogsBatch(ids);
-
-    logger.debug({ deletedCount }, 'Batch request logs deleted');
-    res.json({ object: 'batch_delete', deleted_count: deletedCount, requested_count: ids.length });
-  } catch (error) {
-    handleAdminError(error, res);
-  }
-});
 
 // ==================== 查询请求日志列表 ====================
 // GET /admin/request-logs?status=completed&request_model=deepseek-chat&provider_kind=deepseek&error_type=rate_limit&limit=50&offset=0
