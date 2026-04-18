@@ -24,9 +24,6 @@ export interface ModelHttpContext {
   /** 原始传入的 API Key (通常在日志中需脱敏) */
   apiKey?: string | undefined;
 
-  /** API Key 前缀（前11位，脱敏后用于审计溯源） */
-  apiKeyPrefix?: string | undefined;
-
   /** API Key 分配的名称（若存在） */
   apiKeyName?: string | undefined;
 

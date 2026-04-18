@@ -112,7 +112,6 @@ async function processRequest(
     // 2. 提取 API Key（在 try 内，异常携带 requestId 可被追踪）
     const rawApiKey = getApiKeyExtractor(userFormat)(req);
     ctx.apiKey = rawApiKey;
-    ctx.apiKeyPrefix = rawApiKey !== undefined && rawApiKey !== '' ? rawApiKey.slice(0, 11) : undefined;
 
     // 3. 校验 model（请求体由 express.json() 中间件保证为对象）
     if (ctx.requestModel === '') {

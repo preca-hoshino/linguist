@@ -34,7 +34,6 @@ describe('request-logs/write', () => {
     mockCtx = {
       id: 'req_123',
       ip: '127.0.0.1',
-      apiKeyPrefix: 'sk-abc',
       apiKeyName: 'test-key',
       userFormat: 'openai',
       http: { method: 'POST', body: {} },
@@ -79,12 +78,12 @@ describe('request-logs/write', () => {
     it('should handle undefined route gracefully (though typing requires it)', async () => {
       // @ts-expect-error: intentionally testing undefined fields
       mockCtx.route = { ...mockCtx.route, model: undefined, providerKind: undefined, providerId: undefined };
-      mockCtx.apiKeyPrefix = undefined;
+      mockCtx.appId = undefined;
       mockCtx.stream = undefined;
       (db.query as jest.Mock).mockResolvedValue({});
       // @ts-expect-error: testing invalid payload
       await markProcessing(mockCtx);
-      expect((db.query as jest.Mock).mock.calls[0][1][1]).toBeNull(); // apiKeyPrefix
+      expect((db.query as jest.Mock).mock.calls[0][1][1]).toBeNull(); // appId
     });
   });
 
@@ -198,7 +197,7 @@ describe('request-logs/write', () => {
       const mCtx = {
         ...mockCtx,
         stream: undefined,
-        apiKeyPrefix: undefined,
+        appId: undefined,
         error: undefined,
       } as unknown as ModelHttpContext;
       (db.query as jest.Mock)
@@ -212,7 +211,7 @@ describe('request-logs/write', () => {
       expect((db.query as jest.Mock).mock.calls[2][0]).toContain('INSERT INTO request_logs_details');
 
       const insertArgs = (db.query as jest.Mock).mock.calls[1][1];
-      expect(insertArgs[1]).toBeNull(); // apiKeyPrefix
+      expect(insertArgs[1]).toBeNull(); // appId
       expect(insertArgs[3]).toBeNull(); // is_stream
       expect(insertArgs[8]).toBeNull(); // error_message
     });
