@@ -50,8 +50,6 @@ CREATE TABLE IF NOT EXISTS mcp_logs (
     mcp_provider_id VARCHAR(32),
     app_id          VARCHAR(32)   REFERENCES apps(id) ON DELETE SET NULL,
     session_id      VARCHAR(100)  DEFAULT '',
-    direction       VARCHAR(10)   NOT NULL DEFAULT 'inbound'
-                    CHECK (direction IN ('inbound', 'outbound')),
     method          VARCHAR(100)  NOT NULL DEFAULT '',
     params          JSONB         DEFAULT '{}'::jsonb,
     result          JSONB         DEFAULT '{}'::jsonb,
