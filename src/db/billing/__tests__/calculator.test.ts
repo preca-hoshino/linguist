@@ -3,19 +3,19 @@ import { calculatePostBillingCost } from '../calculator';
 
 describe('calculatePostBillingCost', () => {
   const standardTier: PricingTier = {
-    startTokens: 0,
-    maxTokens: null,
-    inputPrice: 10, // CNY 10 per 1M
-    cachePrice: 5, // CNY 5 per 1M
-    outputPrice: 20, // CNY 20 per 1M
+    start_tokens: 0,
+    max_tokens: null,
+    input_price: 10, // CNY 10 per 1M
+    cache_price: 5, // CNY 5 per 1M
+    output_price: 20, // CNY 20 per 1M
   };
 
   const highTier: PricingTier = {
-    startTokens: 128_000,
-    maxTokens: null,
-    inputPrice: 20, // CNY 20 per 1M
-    cachePrice: 10, // CNY 10 per 1M
-    outputPrice: 40, // CNY 40 per 1M
+    start_tokens: 128_000,
+    max_tokens: null,
+    input_price: 20, // CNY 20 per 1M
+    cache_price: 10, // CNY 10 per 1M
+    output_price: 40, // CNY 40 per 1M
   };
 
   it('should skip computation if no tiers configured', () => {
@@ -95,9 +95,9 @@ describe('calculatePostBillingCost', () => {
   it('should sort dynamically and fallback if required', () => {
     // Even if tiers are passed unsorted, it should find highest matching
     const unsortedTiers = [
-      { startTokens: 200_000, maxTokens: null, inputPrice: 30, outputPrice: 60, cachePrice: 15 },
-      { startTokens: 0, maxTokens: null, inputPrice: 10, outputPrice: 20, cachePrice: 5 },
-      { startTokens: 100_000, maxTokens: null, inputPrice: 20, outputPrice: 40, cachePrice: 10 },
+      { start_tokens: 200_000, max_tokens: null, input_price: 30, output_price: 60, cache_price: 15 },
+      { start_tokens: 0, max_tokens: null, input_price: 10, output_price: 20, cache_price: 5 },
+      { start_tokens: 100_000, max_tokens: null, input_price: 20, output_price: 40, cache_price: 10 },
     ];
 
     const result = calculatePostBillingCost(unsortedTiers, 150_000, 0);
@@ -111,11 +111,11 @@ describe('calculatePostBillingCost', () => {
 
   it('should fallback to smallest tier if input is less than all startTokens', () => {
     const tierFallback: PricingTier = {
-      startTokens: 1000,
-      maxTokens: null,
-      inputPrice: 10,
-      cachePrice: 5,
-      outputPrice: 20,
+      start_tokens: 1000,
+      max_tokens: null,
+      input_price: 10,
+      cache_price: 5,
+      output_price: 20,
     };
 
     // input: 500 < 1000, it should use the only tier available

@@ -1,8 +1,8 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": [
-    "src/providers/**/index.ts",
-    "src/users/**/index.ts",
+    "src/model/http/providers/**/index.ts",
+    "src/model/http/users/**/index.ts",
     "tests/helpers/mock-server.ts"
   ],
   "project": ["src/**/*.ts", "tests/**/*.ts"],

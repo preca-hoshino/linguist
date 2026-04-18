@@ -1,0 +1,3 @@
+# 状态机 + 事件总线（Phase 3 实现）
+# - state-machine.ts: 会话状态机 (connecting → ready → streaming → closed)
+# - event-bus.ts: 客户端 ↔ 引擎 ↔ 提供商三向事件路由

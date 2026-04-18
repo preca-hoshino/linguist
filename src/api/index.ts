@@ -3,9 +3,9 @@
 import type { Request } from 'express';
 import { Router } from 'express';
 import { createCachedLoggerFactory, createLogger, logColors } from '@/utils';
-import { anthropicRouter, extractApiKey as claudeExtractApiKey } from './anthropic';
-import { extractApiKey as geminiExtractApiKey, geminiRouter } from './gemini';
-import { extractApiKey as openaiCompatExtractApiKey, openaiCompatRouter } from './openaicompat';
+import { anthropicRouter, extractApiKey as claudeExtractApiKey } from './http/anthropic';
+import { extractApiKey as geminiExtractApiKey, geminiRouter } from './http/gemini';
+import { extractApiKey as openaiCompatExtractApiKey, openaiCompatRouter } from './http/openaicompat';
 
 const logger = createLogger('API', logColors.bold + logColors.white);
 
@@ -58,9 +58,9 @@ registerApiKeyExtractor('anthropic', claudeExtractApiKey);
 
 const apiRouter: Router = Router();
 
-// 挂载各格式路由（每种格式自行定义路径前缀）
-apiRouter.use(openaiCompatRouter);
-apiRouter.use(geminiRouter);
-apiRouter.use(anthropicRouter);
+// 挂载各格式路由（每种格式分配独立的 /model/<format> 命名空间）
+apiRouter.use('/model/openai-compat', openaiCompatRouter);
+apiRouter.use('/model/gemini', geminiRouter);
+apiRouter.use('/model/anthropic', anthropicRouter);
 
 export { apiRouter };

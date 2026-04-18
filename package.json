@@ -17,7 +17,8 @@
     "check:deps": "knip",
     "check:test": "jest --reporters=summary",
     "check": "run-s check:format check:lint check:types check:deps check:test",
-    "db": "ts-node -r tsconfig-paths/register src/db/migrate.ts"
+    "db": "ts-node -r tsconfig-paths/register src/db/migrate.ts",
+    "db:clear": "ts-node -r tsconfig-paths/register src/db/migrate.ts --clear"
   },
   "keywords": [
     "llm",
@@ -28,6 +29,7 @@
   "license": "ISC",
   "type": "commonjs",
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
     "pg": "^8.19.0",

@@ -1,9 +1,9 @@
 // tests/integration/chat-flow.test.ts — 基于 Mock 的集成聊天链路测试
 
 import { v4 as uuidv4 } from '@/utils/uuid';
-import { OpenAICompatChatRequestAdapter } from '../../src/users/openaicompat/chat/request';
-import { OpenAICompatChatResponseAdapter } from '../../src/users/openaicompat/chat/response';
-import { dispatchChatProvider } from '../../src/providers/engine';
+import { OpenAICompatChatRequestAdapter } from '../../src/model/http/users/openaicompat/chat/request';
+import { OpenAICompatChatResponseAdapter } from '../../src/model/http/users/openaicompat/chat/response';
+import { dispatchChatProvider } from '../../src/model/http/providers/engine';
 import { setupDeepSeekMock, clearAllMocks } from '@/tests/helpers/mock-server';
 import type { GatewayContext } from '../../src/types';
 
@@ -56,7 +56,7 @@ describe('Integration: OpenAICompat -> DeepSeek -> Gateway', () => {
     const ctx: GatewayContext = {
       ...mockContext,
       ip: '127.0.0.1',
-      http: { method: 'POST', path: '/v1/chat/completions' },
+      http: { method: 'POST', path: '/model/openai-compat/v1/chat/completions' },
       userFormat: 'openaicompat',
       requestModel: 'gpt-4',
     };

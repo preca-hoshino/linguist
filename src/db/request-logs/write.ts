@@ -3,7 +3,7 @@
 
 import { calculatePostBillingCost, lookupPricingTiers } from '@/db/billing';
 import { db } from '@/db/client';
-import type { CostBreakdown, GatewayContext, RoutedGatewayContext } from '@/types';
+import type { CostBreakdown, ModelHttpContext, RoutedModelHttpContext } from '@/types';
 import { createLogger, GatewayError, logColors } from '@/utils';
 import type { ErrorType } from './types';
 
@@ -14,18 +14,18 @@ const logger = createLogger('RequestLog', logColors.bold + logColors.blue);
 /**
  * 创建请求日志（状态 = processing）并记录路由信息
  * 在路由完成、即将调用提供商前触发，fire-and-forget
- * 使用 RoutedGatewayContext 确保路由字段已全部填充
+ * 使用 RoutedModelHttpContext 确保路由字段已全部填充
  */
-export async function markProcessing(ctx: RoutedGatewayContext): Promise<void> {
+export async function markProcessing(ctx: RoutedModelHttpContext): Promise<void> {
   try {
     // 写入基础热数据
     await db.query(
       `INSERT INTO request_logs
-         (id, status, api_key_prefix, ip, is_stream, request_model, routed_model, provider_kind, provider_id)
+         (id, status, app_id, ip, is_stream, request_model, routed_model, provider_kind, provider_id)
        VALUES ($1, 'processing', $2, $3, $4, $5, $6, $7, $8)`,
       [
         ctx.id,
-        ctx.apiKeyPrefix ?? null,
+        ctx.appId ?? null,
         ctx.ip,
         ctx.stream ?? null,
         ctx.requestModel,
@@ -52,9 +52,9 @@ export async function markProcessing(ctx: RoutedGatewayContext): Promise<void> {
 
 /**
  * 更新状态为 completed（请求成功完成）
- * 直接从 GatewayContext 提取所有审计数据，一次性写入
+ * 直接从 ModelHttpContext 提取所有审计数据，一次性写入
  */
-export async function markCompleted(ctx: GatewayContext): Promise<void> {
+export async function markCompleted(ctx: ModelHttpContext): Promise<void> {
   const { promptTokens, completionTokens, totalTokens, cachedTokens, reasoningTokens } = extractUsage(ctx);
 
   // 后置计费：查询阶梯配置 → 计算费用
@@ -141,7 +141,7 @@ export async function markCompleted(ctx: GatewayContext): Promise<void> {
  * 因为使用了分区表无法简单的跨两列提供单纯的主键约束 (ON CONFLICT (id))，
  * 故改用先 UPDATE 若不存在再 INSERT 来确保即便路由前崩溃的请求也能被记录到底库中。
  */
-export async function markError(ctx: GatewayContext, err: unknown): Promise<void> {
+export async function markError(ctx: ModelHttpContext, err: unknown): Promise<void> {
   const errorCode = err instanceof GatewayError ? err.errorCode : 'internal_error';
   const errorType = inferErrorType(errorCode);
 
@@ -191,13 +191,13 @@ export async function markError(ctx: GatewayContext, err: unknown): Promise<void
       // 记录尚不存在（路由通过但 markProcessing 写入异常等极端情况），执行 INSERT
       await db.query(
         `INSERT INTO request_logs
-           (id, status, api_key_prefix, ip, is_stream, request_model,
+           (id, status, app_id, ip, is_stream, request_model,
             routed_model, provider_kind, provider_id,
             error_message, error_code, error_type)
          VALUES ($1, 'error', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [
           ctx.id,
-          ctx.apiKeyPrefix ?? null,
+          ctx.appId ?? null,
           ctx.ip,
           ctx.stream ?? null,
           ctx.requestModel,
@@ -227,10 +227,10 @@ export async function markError(ctx: GatewayContext, err: unknown): Promise<void
 // ==================== 私有辅助函数 ====================
 
 /**
- * 从 GatewayContext 提取 usage 信息
+ * 从 ModelHttpContext 提取 usage 信息
  * 兼容 chat（含 completion_tokens）和 embedding（无 completion_tokens）两种响应类型
  */
-function extractUsage(ctx: GatewayContext): {
+function extractUsage(ctx: ModelHttpContext): {
   promptTokens?: number;
   completionTokens?: number;
   totalTokens?: number;
@@ -317,12 +317,12 @@ function inferErrorType(errorCode: string): ErrorType {
 }
 
 /**
- * 构建 GatewayContext 完整快照（唯一审计数据源）
+ * 构建 ModelHttpContext 完整快照（唯一审计数据源）
  *
  * 包含完整生命周期数据：路由、请求/响应、四次交换审计、计时、错误等。
  * 仅排除敏感字段：apiKey（原始密钥）、providerConfig（含厂商 apiKey）。
  */
-function buildCtxSnapshot(ctx: GatewayContext): Record<string, unknown> {
+function buildCtxSnapshot(ctx: ModelHttpContext): Record<string, unknown> {
   return {
     id: ctx.id,
     ip: ctx.ip,

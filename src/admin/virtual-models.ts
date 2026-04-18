@@ -88,8 +88,8 @@ async function loadVirtualModelWithBackends(
     `SELECT vmb.provider_model_id, vmb.weight, vmb.priority,
             pm.name AS provider_model_name, p.name AS provider_name, pm.provider_id
      FROM virtual_model_backends vmb
-     JOIN provider_models pm ON vmb.provider_model_id = pm.id
-     JOIN providers p ON pm.provider_id = p.id
+     JOIN model_provider_models pm ON vmb.provider_model_id = pm.id
+     JOIN model_providers p ON pm.provider_id = p.id
      WHERE vmb.virtual_model_id = $1
      ORDER BY vmb.priority ASC, vmb.weight DESC`,
     [vmId],
@@ -120,7 +120,7 @@ router.get('/', async (req: Request, res: Response) => {
     const { search, limit, starting_after, expand, model_type, routing_strategy, is_active } = req.query;
     const limitNum =
       typeof limit === 'string' && limit !== '' ? Math.min(Math.max(Number.parseInt(limit, 10), 1), 100) : 10;
-    const startingAfter = typeof starting_after === 'string' ? starting_after : undefined;
+    const startingAfterStr = typeof starting_after === 'string' ? starting_after.trim() : undefined;
 
     // 解析按需展开字段
     const expands = Array.isArray(expand) ? expand : typeof expand === 'string' ? [expand] : [];
@@ -130,7 +130,7 @@ router.get('/', async (req: Request, res: Response) => {
       {
         search,
         limit: limitNum,
-        starting_after: startingAfter,
+        starting_after: startingAfterStr,
         expandBackends,
         model_type,
         routing_strategy,
@@ -166,12 +166,6 @@ router.get('/', async (req: Request, res: Response) => {
       paramIdx = stratIn.nextIdx;
     }
 
-    if (typeof startingAfter === 'string' && startingAfter.trim() !== '') {
-      conditions.push(`created_at < (SELECT created_at FROM virtual_models WHERE id = $${String(paramIdx)})`);
-      values.push(startingAfter);
-      paramIdx++;
-    }
-
     if (typeof search === 'string' && search.trim() !== '') {
       conditions.push(
         `(name ILIKE $${String(paramIdx)} OR routing_strategy ILIKE $${String(
@@ -182,32 +176,44 @@ router.get('/', async (req: Request, res: Response) => {
       paramIdx++;
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const fetchLimit = limitNum + 1;
-    values.push(fetchLimit);
+    const baseWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // 单独计算 total
+    const countSql = `SELECT COUNT(*) AS total FROM virtual_models ${baseWhereClause}`;
+    const countResult = await db.query(countSql, values);
+    const total = Number.parseInt((countResult.rows[0] as { total: string } | undefined)?.total ?? '0', 10);
+
+    // 加入游标过滤
+    if (startingAfterStr !== undefined && startingAfterStr !== '') {
+      conditions.push(`created_at < (SELECT created_at FROM virtual_models WHERE id = $${String(paramIdx)})`);
+      values.push(startingAfterStr);
+      paramIdx++;
+    }
+
+    const dataWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const sql = `
       SELECT id, name, description, model_type, routing_strategy, is_active, rpm_limit, tpm_limit,
              created_at, updated_at
       FROM virtual_models
-      ${whereClause}
+      ${dataWhereClause}
       ORDER BY created_at DESC
       LIMIT $${String(paramIdx)}
     `;
+
+    values.push(limitNum + 1);
 
     const vmResult = await db.query<VirtualModelRow>(sql, values);
 
     const hasMore = vmResult.rows.length > limitNum;
     const dataRows = hasMore ? vmResult.rows.slice(0, limitNum) : vmResult.rows;
 
-    const data = dataRows.map((row) => row);
-
-    if (data.length === 0) {
-      res.json({ object: 'list', data: [], has_more: false });
+    if (dataRows.length === 0) {
+      res.json({ object: 'list', url: '/api/virtual-models', data: [], total, has_more: false });
       return;
     }
 
-    const vmIds = data.map((vm) => vm.id);
+    const vmIds = dataRows.map((vm) => vm.id);
 
     // 根据 expand 参数决定是否深度联表查询后端名称
     let backendResult: import('pg').QueryResult<BackendRow & { virtual_model_id: string }>;
@@ -216,8 +222,8 @@ router.get('/', async (req: Request, res: Response) => {
         `SELECT vmb.virtual_model_id, vmb.provider_model_id, vmb.weight, vmb.priority,
                 pm.name AS provider_model_name, p.name AS provider_name, pm.provider_id
          FROM virtual_model_backends vmb
-         JOIN provider_models pm ON vmb.provider_model_id = pm.id
-         JOIN providers p ON pm.provider_id = p.id
+         JOIN model_provider_models pm ON vmb.provider_model_id = pm.id
+         JOIN model_providers p ON pm.provider_id = p.id
          WHERE vmb.virtual_model_id = ANY($1)
          ORDER BY vmb.priority ASC, vmb.weight DESC`,
         [vmIds],
@@ -241,7 +247,6 @@ router.get('/', async (req: Request, res: Response) => {
         provider_model_id: row.provider_model_id,
         weight: row.weight,
         priority: row.priority,
-        // 当 expand 为 false 时，以下字段将自然是 undefined，符合类型设计且不会被序列化输出
         provider_model_name: row.provider_model_name,
         provider_name: row.provider_name,
         provider_id: row.provider_id,
@@ -249,7 +254,7 @@ router.get('/', async (req: Request, res: Response) => {
       backendsByVm.set(row.virtual_model_id, list);
     }
 
-    const finalData = data.map((vm) =>
+    const finalData = dataRows.map((vm) =>
       withThroughput(
         withObjectType({
           ...vm,
@@ -258,8 +263,8 @@ router.get('/', async (req: Request, res: Response) => {
       ),
     );
 
-    logger.debug({ count: finalData.length, has_more: hasMore }, 'Virtual models listed');
-    res.json({ object: 'list', data: finalData, has_more: hasMore });
+    logger.debug({ count: finalData.length, total, has_more: hasMore }, 'Virtual models listed');
+    res.json({ object: 'list', url: '/api/virtual-models', data: finalData, total, has_more: hasMore });
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -332,7 +337,7 @@ router.post('/', async (req: Request, res: Response) => {
     // 校验所有 provider_model_id 存在且 model_type 一致
     const pmIds: string[] = backends.map((b) => b.provider_model_id);
     const pmCheck = await db.query<{ id: string; model_type: string }>(
-      `SELECT id, model_type FROM provider_models WHERE id = ANY($1)`,
+      `SELECT id, model_type FROM model_provider_models WHERE id = ANY($1)`,
       [pmIds],
     );
     if (pmCheck.rowCount !== pmIds.length) {
@@ -426,7 +431,7 @@ router.post('/:id', async (req: Request, res: Response) => {
       // 校验 provider_model_id 存在且 model_type 一致
       const pmIds: string[] = backends.map((b) => b.provider_model_id);
       const pmCheck = await db.query<{ id: string; model_type: string }>(
-        `SELECT id, model_type FROM provider_models WHERE id = ANY($1)`,
+        `SELECT id, model_type FROM model_provider_models WHERE id = ANY($1)`,
         [pmIds],
       );
       if (pmCheck.rowCount !== pmIds.length) {

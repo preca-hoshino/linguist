@@ -6,16 +6,18 @@ import { createLogger } from '@/utils';
 
 const logger = createLogger('Apps');
 
-/** 缓存条目：appId → 应用元数据 */
+/** 缓存条目：应用元数据 */
 export interface AppCacheEntry {
   id: string;
   name: string;
   isActive: boolean;
+  apiKey: string;
   allowedModelIds: string[];
+  allowedMcpIds: string[];
 }
 
-/** appId → AppCacheEntry */
-let appCache: Map<string, AppCacheEntry> | null = null;
+let appCacheById: Map<string, AppCacheEntry> | null = null;
+let appCacheByKey: Map<string, AppCacheEntry> | null = null;
 
 /**
  * 加载所有活跃应用到内存缓存
@@ -25,47 +27,73 @@ async function loadAppCache(): Promise<void> {
     id: string;
     name: string;
     is_active: boolean;
+    api_key: string;
     allowed_model_ids: string[];
+    allowed_mcp_ids: string[];
   }>(`
-    SELECT a.id, a.name, a.is_active,
+    SELECT a.id, a.name, a.is_active, a.api_key,
            COALESCE(
              array_agg(DISTINCT aam.virtual_model_id) FILTER (WHERE aam.virtual_model_id IS NOT NULL),
              '{}'
-           ) AS allowed_model_ids
+           ) AS allowed_model_ids,
+           COALESCE(
+             array_agg(DISTINCT aamcp.virtual_mcp_id) FILTER (WHERE aamcp.virtual_mcp_id IS NOT NULL),
+             '{}'
+           ) AS allowed_mcp_ids
     FROM apps a
     LEFT JOIN app_allowed_models aam ON aam.app_id = a.id
+    LEFT JOIN app_allowed_mcps aamcp ON aamcp.app_id = a.id
     WHERE a.is_active = true
-    GROUP BY a.id
+    GROUP BY a.id, a.name, a.is_active, a.api_key
   `);
 
-  const newCache = new Map<string, AppCacheEntry>();
+  const newCacheById = new Map<string, AppCacheEntry>();
+  const newCacheByKey = new Map<string, AppCacheEntry>();
+
   for (const row of result.rows) {
-    newCache.set(row.id, {
+    const entry = {
       id: row.id,
       name: row.name,
       isActive: row.is_active,
+      apiKey: row.api_key,
       allowedModelIds: row.allowed_model_ids,
-    });
+      allowedMcpIds: row.allowed_mcp_ids,
+    };
+    newCacheById.set(row.id, entry);
+    // 同时也存入以 apiKey 为键的 map 中，用于鉴权极速匹配
+    newCacheByKey.set(row.api_key, entry);
   }
 
-  appCache = newCache;
-  logger.info({ count: newCache.size }, 'App cache loaded');
+  appCacheById = newCacheById;
+  appCacheByKey = newCacheByKey;
+  logger.info({ count: newCacheById.size }, 'App cache loaded');
 }
 
 /**
  * 清除缓存（触发下次查找时重新加载）
  */
 export function invalidateAppCache(): void {
-  appCache = null;
+  appCacheById = null;
+  appCacheByKey = null;
   logger.debug('App cache invalidated');
 }
 
 /**
- * 从缓存中查找应用，懒加载
+ * 从缓存中查找应用 (by id)
  */
 export async function lookupApp(appId: string): Promise<AppCacheEntry | undefined> {
-  if (appCache === null) {
+  if (appCacheById === null) {
     await loadAppCache();
   }
-  return appCache?.get(appId);
+  return appCacheById?.get(appId);
+}
+
+/**
+ * 从缓存中查找应用 (by API Key)
+ */
+export async function lookupAppByKey(apiKey: string): Promise<AppCacheEntry | undefined> {
+  if (appCacheByKey === null) {
+    await loadAppCache();
+  }
+  return appCacheByKey?.get(apiKey);
 }

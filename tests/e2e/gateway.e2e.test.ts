@@ -81,7 +81,7 @@ describe('Gateway E2E Tests', () => {
 
   describe('Gateway Error Handling', () => {
     it('should return 404 for unknown routes', async () => {
-      const response = await request(app).get('/v1/unknown-route');
+      const response = await request(app).get('/model/openai-compat/v1/unknown-route');
 
       expect(response.status).toBe(404);
       expect(response.body).toMatchObject({
@@ -93,7 +93,7 @@ describe('Gateway E2E Tests', () => {
     });
 
     it('should process Gemini format error if in Gemini path', async () => {
-      const response = await request(app).get('/v1beta/unknown-endpoint');
+      const response = await request(app).get('/model/gemini/v1beta/unknown-endpoint');
       
       expect(response.status).toBe(404);
       expect(response.body).toHaveProperty('error');
@@ -103,9 +103,9 @@ describe('Gateway E2E Tests', () => {
   });
 
   describe('Authentication & Authorization', () => {
-    it('should reject unauthorized requests to /v1/chat/completions', async () => {
+    it('should reject unauthorized requests to /model/openai-compat/v1/chat/completions', async () => {
       const response = await request(app)
-        .post('/v1/chat/completions')
+        .post('/model/openai-compat/v1/chat/completions')
         .send({
           model: 'gpt-4',
           messages: [{ role: 'user', content: 'Hello' }],
@@ -118,7 +118,7 @@ describe('Gateway E2E Tests', () => {
 
     it('should reject invalid auth tokens format', async () => {
       const response = await request(app)
-        .post('/v1/chat/completions')
+        .post('/model/openai-compat/v1/chat/completions')
         .set('Authorization', 'InvalidFormat')
         .send({
           model: 'gpt-4',
@@ -133,7 +133,7 @@ describe('Gateway E2E Tests', () => {
   describe('Validation', () => {
     it('should validate request schema and return 400 on failure', async () => {
       const response = await request(app)
-        .post('/v1/chat/completions')
+        .post('/model/openai-compat/v1/chat/completions')
         .set('Authorization', 'Bearer test-token')
         .send({
           // missing 'model' field

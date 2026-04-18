@@ -31,12 +31,12 @@ export function calculatePostBillingCost(
     return { status: 'skipped', reason: 'no_usage' };
   }
 
-  // 按 startTokens 降序排列后匹配第一个 ≤ promptTokens 的阶梯
-  const sorted = [...tiers].toSorted((a, b) => b.startTokens - a.startTokens);
-  const matchedTier = sorted.find((t) => promptTokens >= t.startTokens);
+  // 按 start_tokens 降序排列后匹配第一个 ≤ promptTokens 的阶梯
+  const sorted = [...tiers].toSorted((a, b) => b.start_tokens - a.start_tokens);
+  const matchedTier = sorted.find((t) => promptTokens >= t.start_tokens);
 
-  // 兜底：如果所有阶梯都无法匹配（理论上不会发生，因为 startTokens=0 的阶梯会兜底）
-  // 使用排序后的最后一个（即 startTokens 最小的）
+  // 兜底：如果所有阶梯都无法匹配（理论上不会发生，因为 start_tokens=0 的阶梯会兜底）
+  // 使用排序后的最后一个（即 start_tokens 最小的）
   const tier = matchedTier ?? sorted.at(-1);
   /* istanbul ignore next -- TS type safety fallback, logically unreachable here due to tiers.length check early return */
   if (!tier) {
@@ -49,9 +49,9 @@ export function calculatePostBillingCost(
 
   // 按百万 Token 换算（价格单位：每百万 Token，货币 CNY）
   const UNIT = 1_000_000;
-  const inputCost = (pureInputTokens / UNIT) * tier.inputPrice;
-  const cacheCost = (safeCached / UNIT) * tier.cachePrice;
-  const outputCost = (completionTokens / UNIT) * tier.outputPrice;
+  const inputCost = (pureInputTokens / UNIT) * tier.input_price;
+  const cacheCost = (safeCached / UNIT) * tier.cache_price;
+  const outputCost = (completionTokens / UNIT) * tier.output_price;
 
   const totalCost = inputCost + cacheCost + outputCost;
 
@@ -59,7 +59,7 @@ export function calculatePostBillingCost(
     status: 'success',
     cost: toFixed6(totalCost),
     breakdown: {
-      tierStartTokens: tier.startTokens,
+      tierStartTokens: tier.start_tokens,
       inputCost: toFixed6(inputCost),
       cacheCost: toFixed6(cacheCost),
       outputCost: toFixed6(outputCost),

@@ -3,7 +3,8 @@ import express from 'express';
 import { adminRouter } from './admin';
 import { loginRouter } from './admin/login';
 import { apiRouter } from './api';
-import { handleError } from './users';
+import { mcpRouter } from './api/http/mcp';
+import { handleError } from './model/http/users';
 import { createLogger, GatewayError, logColors } from './utils';
 
 /** HTTP 服务日志器 */
@@ -42,10 +43,20 @@ app.use('/api', adminRouter);
 // ==================== 用户 API 路由（各格式模块自行定义路径） ====================
 app.use(apiRouter);
 
+// ==================== MCP 网关 API 路由 ====================
+app.use(mcpRouter);
+
 // ==================== 404 处理 ====================
 app.use((req: Request, res: Response) => {
   logger.warn({ method: req.method, path: req.path }, 'Route not found');
-  const format = req.path.startsWith('/v1beta/') ? 'gemini' : undefined;
+  let format: string | undefined;
+  if (req.path.startsWith('/model/gemini/')) {
+    format = 'gemini';
+  } else if (req.path.startsWith('/model/openai-compat/')) {
+    format = 'openaicompat';
+  } else if (req.path.startsWith('/model/anthropic/')) {
+    format = 'anthropic';
+  }
   handleError(new GatewayError(404, 'not_found', 'Not Found'), res, format);
 });
 

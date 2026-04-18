@@ -11,17 +11,19 @@ const logger = createLogger('Apps');
 
 // ==================== 内部常量 ====================
 
-/** 带聚合的完整查询片段（key_count + allowed_model_ids） */
 const APP_SELECT = `
   SELECT a.*,
-         COUNT(DISTINCT ak.id)::int AS key_count,
          COALESCE(
            array_agg(DISTINCT aam.virtual_model_id) FILTER (WHERE aam.virtual_model_id IS NOT NULL),
            '{}'
-         ) AS allowed_model_ids
+         ) AS allowed_model_ids,
+         COALESCE(
+           array_agg(DISTINCT aamcp.virtual_mcp_id) FILTER (WHERE aamcp.virtual_mcp_id IS NOT NULL),
+           '{}'
+         ) AS allowed_mcp_ids
   FROM apps a
-  LEFT JOIN api_keys ak ON ak.app_id = a.id
   LEFT JOIN app_allowed_models aam ON aam.app_id = a.id
+  LEFT JOIN app_allowed_mcps aamcp ON aamcp.app_id = a.id
 `;
 
 // ==================== CRUD 函数 ====================
@@ -32,7 +34,7 @@ const APP_SELECT = `
  */
 export async function createApp(input: AppCreateInput): Promise<AppRow> {
   const id = await generateShortId('apps');
-  const { name, allowed_model_ids: allowedModelIds = [] } = input;
+  const { name, allowed_model_ids: allowedModelIds = [], allowed_mcp_ids: allowedMcpIds = [] } = input;
 
   return await withTransaction(async (tx) => {
     await tx.query(`INSERT INTO apps (id, name) VALUES ($1, $2)`, [id, name]);
@@ -43,6 +45,16 @@ export async function createApp(input: AppCreateInput): Promise<AppRow> {
       const batch = buildBatchInsert(rows, 2);
       await tx.query(
         `INSERT INTO app_allowed_models (app_id, virtual_model_id) VALUES ${batch.valuesClause}`,
+        batch.values,
+      );
+    }
+
+    // 批量插入 MCP 白名单
+    if (allowedMcpIds.length > 0) {
+      const rows = allowedMcpIds.map((mcpId) => [id, mcpId]);
+      const batch = buildBatchInsert(rows, 2);
+      await tx.query(
+        `INSERT INTO app_allowed_mcps (app_id, virtual_mcp_id) VALUES ${batch.valuesClause}`,
         batch.values,
       );
     }
@@ -72,7 +84,7 @@ export async function listApps(options?: {
   starting_after?: string;
   search?: string;
   is_active?: boolean;
-}): Promise<{ data: AppRow[]; has_more: boolean }> {
+}): Promise<{ data: AppRow[]; has_more: boolean; total: number }> {
   const limit = Math.min(Math.max(options?.limit ?? 10, 1), 100);
   const startingAfter = options?.starting_after;
   const search = options?.search;
@@ -81,13 +93,6 @@ export async function listApps(options?: {
   const conditions: string[] = [];
   const values: unknown[] = [];
   let paramIdx = 1;
-
-  // 游标分页：starting_after → 查找该 ID 的 created_at，返回比它更早的记录
-  if (typeof startingAfter === 'string' && startingAfter.trim() !== '') {
-    conditions.push(`a.created_at < (SELECT created_at FROM apps WHERE id = $${String(paramIdx)})`);
-    values.push(startingAfter);
-    paramIdx++;
-  }
 
   // 搜索过滤
   if (typeof search === 'string' && search.trim() !== '') {
@@ -100,6 +105,20 @@ export async function listApps(options?: {
   if (typeof isActive === 'boolean') {
     conditions.push(`a.is_active = $${String(paramIdx)}`);
     values.push(isActive);
+    paramIdx++;
+  }
+
+  const baseWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  // 单独计算 total
+  const countSql = `SELECT COUNT(*) AS total FROM apps a ${baseWhereClause}`;
+  const countResult = await db.query(countSql, values);
+  const total = Number.parseInt((countResult.rows[0] as { total: string } | undefined)?.total ?? '0', 10);
+
+  // 追加游标条件
+  if (typeof startingAfter === 'string' && startingAfter.trim() !== '') {
+    conditions.push(`a.created_at < (SELECT created_at FROM apps WHERE id = $${String(paramIdx)})`);
+    values.push(startingAfter);
     paramIdx++;
   }
 
@@ -121,11 +140,11 @@ export async function listApps(options?: {
   const hasMore = result.rows.length > limit;
   const data = hasMore ? result.rows.slice(0, limit) : result.rows;
 
-  return { data, has_more: hasMore };
+  return { data, has_more: hasMore, total };
 }
 
 /**
- * 按 ID 查询应用详情（含 key_count + allowed_model_ids）
+ * 按 ID 查询应用详情（含 allowed_model_ids）
  */
 export async function getAppById(id: string): Promise<AppRow | null> {
   const result = await db.query<AppRow>(`${APP_SELECT} WHERE a.id = $1 GROUP BY a.id`, [id]);
@@ -137,7 +156,7 @@ export async function getAppById(id: string): Promise<AppRow | null> {
  * 支持更新基本字段 + 替换白名单
  */
 export async function updateApp(id: string, updates: AppUpdateInput): Promise<AppRow | null> {
-  const { allowed_model_ids: allowedModelIds, ...fieldUpdates } = updates;
+  const { allowed_model_ids: allowedModelIds, allowed_mcp_ids: allowedMcpIds, ...fieldUpdates } = updates;
 
   return await withTransaction(async (tx) => {
     // 更新基本字段
@@ -170,6 +189,19 @@ export async function updateApp(id: string, updates: AppUpdateInput): Promise<Ap
       }
     }
 
+    // 替换 MCP 白名单
+    if (allowedMcpIds !== undefined) {
+      await tx.query('DELETE FROM app_allowed_mcps WHERE app_id = $1', [id]);
+      if (allowedMcpIds.length > 0) {
+        const rows = allowedMcpIds.map((mcpId) => [id, mcpId]);
+        const batch = buildBatchInsert(rows, 2);
+        await tx.query(
+          `INSERT INTO app_allowed_mcps (app_id, virtual_mcp_id) VALUES ${batch.valuesClause}`,
+          batch.values,
+        );
+      }
+    }
+
     // 查询完整结果返回
     const result = await tx.query<AppRow>(`${APP_SELECT} WHERE a.id = $1 GROUP BY a.id`, [id]);
 
@@ -197,4 +229,27 @@ export async function deleteApp(id: string): Promise<boolean> {
   invalidateAppCache();
   logger.info({ id }, 'App deleted');
   return true;
+}
+
+/**
+ * 轮换应用的 API Key
+ */
+export async function rotateAppKey(id: string): Promise<AppRow | null> {
+  const result = await db.query<AppRow>(
+    `
+    UPDATE apps 
+    SET api_key = 'lk-' || encode(gen_random_bytes(24), 'hex') 
+    WHERE id = $1 
+    RETURNING *
+  `,
+    [id],
+  );
+
+  if (result.rowCount === 0) {
+    return null;
+  }
+
+  invalidateAppCache();
+  logger.info({ id }, 'App API key rotated');
+  return result.rows[0] ?? null;
 }

@@ -18,12 +18,16 @@ usersRouter.get('/', async (req: Request, res: Response) => {
     const { search, limit, starting_after } = req.query;
     const limitNum =
       typeof limit === 'string' && limit !== '' ? Math.min(Math.max(Number.parseInt(limit, 10), 1), 100) : 10;
-    const startingAfter = typeof starting_after === 'string' ? starting_after : undefined;
+    const startingAfterStr = typeof starting_after === 'string' ? starting_after.trim() : undefined;
     const searchStr = typeof search === 'string' ? search : undefined;
 
-    const { data: users, has_more } = await listUsers({
+    const {
+      data: users,
+      total,
+      has_more,
+    } = await listUsers({
       limit: limitNum,
-      ...(startingAfter === undefined ? {} : { starting_after: startingAfter }),
+      ...(startingAfterStr !== undefined ? { starting_after: startingAfterStr } : {}),
       ...(searchStr === undefined ? {} : { search: searchStr }),
     });
 
@@ -39,7 +43,7 @@ usersRouter.get('/', async (req: Request, res: Response) => {
       updated_at: u.updated_at,
     }));
 
-    res.json({ object: 'list', data, has_more });
+    res.json({ object: 'list', url: '/api/users', data, total, has_more });
   } catch (error) {
     handleAdminError(error, res);
   }

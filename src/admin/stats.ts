@@ -20,14 +20,13 @@ const logger = createLogger('Admin:Stats', logColors.bold + logColors.blue);
 const router: Router = Router();
 
 const VALID_RANGES: StatsRange[] = ['15m', '1h', '6h', '24h', '7d', '14d', '30d'];
-const VALID_DIMENSIONS: StatsDimension[] = ['global', 'provider', 'provider_model', 'virtual_model', 'app', 'api_key'];
+const VALID_DIMENSIONS: StatsDimension[] = ['global', 'provider', 'provider_model', 'virtual_model', 'app'];
 const VALID_INTERVALS: StatsInterval[] = ['1m', '5m', '10m', '15m', '1h', '6h', '1d'];
 const VALID_GROUP_BY: StatsBreakdownGroupBy[] = [
   'provider',
   'provider_model',
   'virtual_model',
   'app',
-  'api_key',
   'error_type',
   'user_format',
 ];
@@ -81,7 +80,7 @@ async function parseStatsParams(req: Request): Promise<{
 
   // provider_model: id 是 provider_models.id → 需转换为 provider_models.name (= routed_model)
   if (dimension === 'provider_model' && id !== undefined) {
-    const res = await db.query<{ name: string }>('SELECT name FROM provider_models WHERE id = $1 LIMIT 1', [id]);
+    const res = await db.query<{ name: string }>('SELECT name FROM model_provider_models WHERE id = $1 LIMIT 1', [id]);
     if (res.rowCount === 0) {
       throw new GatewayError(404, 'not_found', `Provider model '${id}' not found`);
     }

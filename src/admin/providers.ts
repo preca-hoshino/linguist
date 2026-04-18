@@ -3,7 +3,7 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { db, generateShortId } from '@/db';
-import { getRegisteredProviderKinds } from '@/providers';
+import { getRegisteredProviderKinds } from '@/model/http/providers';
 import type { ProviderAdvancedConfig } from '@/types';
 import { DEFAULT_PROVIDER_CONFIG } from '@/types';
 import { buildInClause, buildUpdateSet, createLogger, GatewayError, logColors } from '@/utils';
@@ -69,7 +69,7 @@ router.get('/', async (req: Request, res: Response) => {
 
     const sql = `
       SELECT ${SELECT_COLUMNS}
-      FROM providers
+      FROM model_providers
       ${whereClause}
       ORDER BY created_at DESC
       LIMIT $${String(paramIdx)}
@@ -92,7 +92,7 @@ router.get('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     logger.debug({ id }, 'Getting provider by ID');
-    const result = await db.query(`SELECT ${SELECT_COLUMNS} FROM providers WHERE id = $1`, [id]);
+    const result = await db.query(`SELECT ${SELECT_COLUMNS} FROM model_providers WHERE id = $1`, [id]);
 
     if (result.rowCount === 0) {
       throw new GatewayError(404, 'not_found', `Provider ${id} not found`);
@@ -136,11 +136,11 @@ router.post('/', async (req: Request, res: Response) => {
     const finalConfig: ProviderAdvancedConfig = { ...DEFAULT_PROVIDER_CONFIG, ...config };
 
     const result = await db.query(
-      `INSERT INTO providers (id, name, kind, base_url, credential_type, credential, config)
+      `INSERT INTO model_providers (id, name, kind, base_url, credential_type, credential, config)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING ${SELECT_COLUMNS}`,
       [
-        await generateShortId('providers'),
+        await generateShortId('model_providers'),
         name,
         kind,
         base_url,
@@ -166,12 +166,22 @@ router.post('/:id', async (req: Request, res: Response) => {
     const { name, kind, base_url, credential_type, credential, config } = body;
     logger.debug({ id }, 'Updating provider');
 
+    // 凭证防破坏处理：防止前端传回占位符覆盖真实的 credential
+    let finalCredential = credential;
+    if (
+      finalCredential &&
+      typeof finalCredential.accessToken === 'string' &&
+      finalCredential.accessToken === '(saved)'
+    ) {
+      finalCredential = undefined;
+    }
+
     const update = buildUpdateSet({
       name,
       kind,
       base_url,
       credential_type,
-      credential: credential === undefined ? undefined : JSON.stringify(credential),
+      credential: finalCredential === undefined ? undefined : JSON.stringify(finalCredential),
       config: config === undefined ? undefined : JSON.stringify({ ...DEFAULT_PROVIDER_CONFIG, ...config }),
     });
 
@@ -181,7 +191,7 @@ router.post('/:id', async (req: Request, res: Response) => {
 
     update.values.push(id);
     const result = await db.query(
-      `UPDATE providers SET ${update.setClause} WHERE id = $${String(update.nextIdx)}
+      `UPDATE model_providers SET ${update.setClause} WHERE id = $${String(update.nextIdx)}
        RETURNING ${SELECT_COLUMNS}`,
       update.values,
     );
@@ -202,7 +212,7 @@ router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     logger.debug({ id }, 'Deleting provider');
-    const result = await db.query('DELETE FROM providers WHERE id = $1 RETURNING id', [id]);
+    const result = await db.query('DELETE FROM model_providers WHERE id = $1 RETURNING id', [id]);
 
     if (result.rowCount === 0) {
       throw new GatewayError(404, 'not_found', `Provider ${id} not found`);

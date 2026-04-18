@@ -46,20 +46,14 @@ export async function listUsers(options?: {
   limit?: number;
   starting_after?: string;
   search?: string;
-}): Promise<{ data: UserRow[]; has_more: boolean }> {
-  const limit = Math.min(Math.max(options?.limit ?? 10, 1), 100);
-  const startingAfter = options?.starting_after;
+}): Promise<{ data: UserRow[]; has_more: boolean; total: number }> {
+  const limitNum = typeof options?.limit === 'number' ? Math.min(Math.max(options.limit, 1), 100) : 10;
+  const startingAfterStr = options?.starting_after;
   const search = options?.search;
 
   const conditions: string[] = [];
   const values: unknown[] = [];
   let paramIdx = 1;
-
-  if (typeof startingAfter === 'string' && startingAfter.trim() !== '') {
-    conditions.push(`created_at < (SELECT created_at FROM users WHERE id = $${String(paramIdx)})`);
-    values.push(startingAfter);
-    paramIdx++;
-  }
 
   if (typeof search === 'string' && search.trim() !== '') {
     conditions.push(`(username ILIKE $${String(paramIdx)} OR email ILIKE $${String(paramIdx)})`);
@@ -67,23 +61,35 @@ export async function listUsers(options?: {
     paramIdx++;
   }
 
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-  const fetchLimit = limit + 1;
-  values.push(fetchLimit);
+  const baseWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const countSql = `SELECT COUNT(*) AS total FROM users ${baseWhereClause}`;
+  const countResult = await db.query(countSql, values);
+  const total = Number.parseInt((countResult.rows[0] as { total: string } | undefined)?.total ?? '0', 10);
+
+  if (typeof startingAfterStr === 'string' && startingAfterStr.trim() !== '') {
+    conditions.push(`created_at < (SELECT created_at FROM users WHERE id = $${String(paramIdx)})`);
+    values.push(startingAfterStr);
+    paramIdx++;
+  }
+
+  const dataWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   const sql = `
     SELECT ${SAFE_COLUMNS}
     FROM users
-    ${whereClause}
+    ${dataWhereClause}
     ORDER BY created_at DESC
     LIMIT $${String(paramIdx)}
   `;
 
-  const result = await db.query<UserRow>(sql, values);
-  const hasMore = result.rows.length > limit;
-  const data = hasMore ? result.rows.slice(0, limit) : result.rows;
+  values.push(limitNum + 1);
 
-  return { data, has_more: hasMore };
+  const result = await db.query<UserRow>(sql, values);
+  const dataRows = result.rows.length > limitNum ? result.rows.slice(0, limitNum) : result.rows;
+  const hasMore = result.rows.length > limitNum;
+
+  return { data: dataRows, has_more: hasMore, total };
 }
 
 /**

@@ -31,7 +31,7 @@ describe('lookupPricingTiers', () => {
     const result = await lookupPricingTiers('openai', 'gpt-4o');
 
     expect(db.query).toHaveBeenCalledWith(
-      'SELECT pricing_tiers FROM provider_models WHERE provider_id = $1 AND name = $2 LIMIT 1',
+      'SELECT pricing_tiers FROM model_provider_models WHERE provider_id = $1 AND name = $2 LIMIT 1',
       ['openai', 'gpt-4o'],
     );
     expect(result).toEqual(mockTiers);

@@ -1,4 +1,4 @@
-import type { GatewayContext } from '@/types';
+import type { ModelHttpContext } from '@/types';
 import { applyMiddlewares } from '../index';
 
 jest.mock('@/utils', () => ({
@@ -12,7 +12,7 @@ jest.mock('@/utils', () => ({
 }));
 
 describe('applyMiddlewares', () => {
-  const mockCtx = { id: 'req-test' } as unknown as GatewayContext;
+  const mockCtx = { id: 'req-test' } as unknown as ModelHttpContext;
 
   it('should return early with empty middlewares array', async () => {
     await expect(applyMiddlewares(mockCtx, [])).resolves.toBeUndefined();
