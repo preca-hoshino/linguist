@@ -326,7 +326,6 @@ function buildCtxSnapshot(ctx: ModelHttpContext): Record<string, unknown> {
   return {
     id: ctx.id,
     ip: ctx.ip,
-    apiKeyPrefix: ctx.apiKeyPrefix,
     apiKeyName: ctx.apiKeyName,
     appId: ctx.appId,
     appName: ctx.appName,

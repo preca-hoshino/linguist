@@ -36,7 +36,6 @@ describe('Internal Types', () => {
         id: 'req-001',
         ip: '192.168.1.1',
         apiKey: 'sk-test-key',
-        apiKeyPrefix: 'sk-test-key',
         http: { method: 'POST', path: '/model/openai-compat/v1/chat/completions', userAgent: 'test-client' },
         userFormat: 'openaicompat',
         requestModel: 'gpt-4',
