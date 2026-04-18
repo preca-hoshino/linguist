@@ -27,7 +27,7 @@ router.post('/batch-delete', async (req: Request, res: Response) => {
 // ==================== 列出所有 MCP 日志 ====================
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { limit, offset, virtual_mcp_id, mcp_provider_id, method, direction } = req.query;
+    const { limit, offset, virtual_mcp_id, mcp_provider_id, method } = req.query;
 
     const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : 20;
     const offsetNum = typeof offset === 'string' && offset !== '' ? Number.parseInt(offset, 10) : 0;
@@ -41,9 +41,6 @@ router.get('/', async (req: Request, res: Response) => {
     }
     if (typeof method === 'string') {
       opts.method = method;
-    }
-    if (typeof direction === 'string') {
-      opts.direction = direction;
     }
 
     const { data, has_more, total } = await listMcpLogs(opts);
