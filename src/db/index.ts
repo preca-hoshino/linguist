@@ -3,7 +3,7 @@
 export { closePool, createListenClient, db, withTransaction } from './client';
 export { generateShortId } from './id-generator';
 export type { McpLogCreateInput, McpLogRow } from './mcp-logs/index';
-export { getMcpLogById, insertMcpLog, listMcpLogs } from './mcp-logs/index';
+export { deleteMcpLogById, getMcpLogById, insertMcpLog, listMcpLogs } from './mcp-logs/index';
 export type {
   McpProviderConfig,
   McpProviderCreateInput,
@@ -35,7 +35,6 @@ export { runMigrations } from './migrate';
 export type { RequestLogStatus } from './request-logs/index';
 export {
   deleteRequestLogById,
-  deleteRequestLogsBatch,
   getRequestLogById,
   markCompleted,
   markError,

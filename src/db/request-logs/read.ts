@@ -148,21 +148,3 @@ export async function deleteRequestLogById(id: string): Promise<boolean> {
   }
   return deleted;
 }
-
-/**
- * 批量删除请求日志
- */
-export async function deleteRequestLogsBatch(ids: string[]): Promise<number> {
-  if (ids.length === 0) {
-    return 0;
-  }
-  // 使用 ANY 提升批量性能，同时兼顾 details 详情表的清洗
-  const result = await db.query(`DELETE FROM request_logs WHERE id = ANY($1::varchar[])`, [ids]);
-  await db.query(`DELETE FROM request_logs_details WHERE id = ANY($1::varchar[])`, [ids]);
-
-  const deletedCount = result.rowCount ?? 0;
-  if (deletedCount > 0) {
-    logger.info({ count: deletedCount }, 'Batch request logs deleted');
-  }
-  return deletedCount;
-}
