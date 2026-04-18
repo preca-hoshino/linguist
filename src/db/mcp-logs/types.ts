@@ -1,8 +1,5 @@
 // src/db/mcp-logs/types.ts — MCP 日志类型定义
 
-/** 日志方向 */
-export type McpLogDirection = 'inbound' | 'outbound';
-
 /** 数据库行类型 */
 export interface McpLogRow {
   [key: string]: unknown;
@@ -12,7 +9,6 @@ export interface McpLogRow {
   mcp_provider_id: string | null;
   app_id: string | null;
   session_id: string;
-  direction: McpLogDirection;
   method: string;
   params: Record<string, unknown>;
   result: Record<string, unknown>;
@@ -28,7 +24,6 @@ export interface McpLogCreateInput {
   mcp_provider_id?: string | undefined;
   app_id?: string | undefined;
   session_id?: string | undefined;
-  direction: McpLogDirection;
   method: string;
   params?: Record<string, unknown> | undefined;
   result?: Record<string, unknown> | undefined;
