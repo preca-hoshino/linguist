@@ -63,7 +63,6 @@ async function logMcp(
     mcp_provider_id: providerId,
     app_id: appId,
     session_id: sessionId,
-    direction: 'inbound',
     method,
     params,
     result,

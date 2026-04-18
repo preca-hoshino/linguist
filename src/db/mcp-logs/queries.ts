@@ -14,15 +14,14 @@ const logger = createLogger('McpLogs');
  */
 export async function insertMcpLog(input: McpLogCreateInput): Promise<void> {
   await db.query(
-    `INSERT INTO mcp_logs (id, virtual_mcp_id, mcp_provider_id, app_id, session_id, direction, method, params, result, error, duration_ms)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11)`,
+    `INSERT INTO mcp_logs (id, virtual_mcp_id, mcp_provider_id, app_id, session_id, method, params, result, error, duration_ms)
+     VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9::jsonb, $10)`,
     [
       input.id,
       input.virtual_mcp_id ?? null,
       input.mcp_provider_id ?? null,
       input.app_id ?? null,
       input.session_id ?? '',
-      input.direction,
       input.method,
       JSON.stringify(input.params ?? {}),
       JSON.stringify(input.result ?? {}),
@@ -31,7 +30,7 @@ export async function insertMcpLog(input: McpLogCreateInput): Promise<void> {
     ],
   );
 
-  logger.debug({ id: input.id, method: input.method, direction: input.direction }, 'MCP log recorded');
+  logger.debug({ id: input.id, method: input.method }, 'MCP log recorded');
 }
 
 // ==================== 读取 ====================
@@ -46,7 +45,6 @@ export async function listMcpLogs(options?: {
   mcp_provider_id?: string;
   app_id?: string;
   method?: string;
-  direction?: string;
 }): Promise<{ data: McpLogRow[]; has_more: boolean; total: number }> {
   const limit = Math.min(Math.max(options?.limit ?? 20, 1), 100);
   const offset = typeof options?.offset === 'number' ? Math.max(options.offset, 0) : 0;
@@ -76,12 +74,6 @@ export async function listMcpLogs(options?: {
   if (typeof options?.method === 'string' && options.method.trim() !== '') {
     conditions.push(`method = $${String(paramIdx)}`);
     values.push(options.method);
-    paramIdx++;
-  }
-
-  if (typeof options?.direction === 'string' && options.direction.trim() !== '') {
-    conditions.push(`direction = $${String(paramIdx)}`);
-    values.push(options.direction);
     paramIdx++;
   }
 
