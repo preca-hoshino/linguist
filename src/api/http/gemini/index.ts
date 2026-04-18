@@ -75,13 +75,16 @@ router.post(String.raw`/v1beta/models/:model\:embedContent`, async (req: Request
 router.get('/v1beta/models', async (req: Request, res: Response): Promise<void> => {
   logger.debug({ ip: req.ip ?? req.socket.remoteAddress }, 'GET /v1beta/models');
   try {
-    await validateApiKeyFromRequest(
+    const appInfo = await validateApiKeyFromRequest(
       req,
       extractApiKey,
       'API key is required. Provide it via x-goog-api-key header or key query parameter.',
     );
 
-    const modelNames = configManager.getAllVirtualModels();
+    let modelNames = configManager.getAllVirtualModels();
+    if (appInfo && appInfo.allowedModelIds.length > 0) {
+      modelNames = modelNames.filter((name) => appInfo.allowedModelIds.includes(name));
+    }
 
     const models = modelNames.map((name) => {
       return {
