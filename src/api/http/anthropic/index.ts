@@ -46,9 +46,16 @@ router.post('/v1/messages', async (req: Request, res: Response): Promise<void> =
 router.get('/v1/models', async (req: Request, res: Response): Promise<void> => {
   logger.debug({ ip: req.ip ?? req.socket.remoteAddress }, 'GET /v1/models');
   try {
-    await validateApiKeyFromRequest(req, extractApiKey, 'API key is required. Provide it via x-api-key header.');
+    const appInfo = await validateApiKeyFromRequest(
+      req,
+      extractApiKey,
+      'API key is required. Provide it via x-api-key header.',
+    );
 
-    const modelNames = configManager.getAllVirtualModels();
+    let modelNames = configManager.getAllVirtualModels();
+    if (appInfo && appInfo.allowedModelIds.length > 0) {
+      modelNames = modelNames.filter((name) => appInfo.allowedModelIds.includes(name));
+    }
 
     const data = modelNames.map((name) => {
       const vmConfig = configManager.getVirtualModelConfig(name);
