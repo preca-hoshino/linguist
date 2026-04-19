@@ -37,7 +37,11 @@ router.get('/v1/models', async (req: Request, res: Response): Promise<void> => {
 
     let modelNames = configManager.getAllVirtualModels();
     if (appInfo && appInfo.allowedModelIds.length > 0) {
-      modelNames = modelNames.filter((name) => appInfo.allowedModelIds.includes(name));
+      // 白名单存的是内部 ID（model_v_xxxxxxxx），需通过 name → vmConfig.id 转换后比对
+      modelNames = modelNames.filter((name) => {
+        const vmConfig = configManager.getVirtualModelConfig(name);
+        return vmConfig !== undefined && appInfo.allowedModelIds.includes(vmConfig.id);
+      });
     }
 
     const data = modelNames.map((name) => {
