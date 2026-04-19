@@ -67,6 +67,12 @@ export async function markCompleted(ctx: ModelHttpContext): Promise<void> {
     if (billingResult.status === 'success') {
       calculatedCost = billingResult.cost;
       costBreakdown = billingResult.breakdown;
+
+      // 附加到网关上下文
+      ctx.billing = {
+        calculatedCost,
+        costBreakdown,
+      };
     }
   }
 
@@ -353,6 +359,7 @@ function buildCtxSnapshot(ctx: ModelHttpContext): Record<string, unknown> {
       userResponse: ctx.audit.userResponse,
     },
     timing: ctx.timing,
+    billing: ctx.billing,
     error: ctx.error,
     providerError: ctx.providerError,
   };
