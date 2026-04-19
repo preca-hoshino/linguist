@@ -24,7 +24,7 @@ export async function parseProviderResponse(
   providerLogger: Logger,
   meta: { duration: number; model?: string },
   mapError: (status: number, body: string) => ProviderErrorInfo,
-): Promise<{ body: unknown; responseHeaders: Record<string, string> }> {
+): Promise<{ body: unknown; statusCode: number; responseHeaders: Record<string, string> }> {
   providerLogger.debug({ status: response.status, ok: response.ok, ...meta }, `${providerName} API response received`);
   if (!response.ok) {
     const errorBody = await response.text();
@@ -45,6 +45,7 @@ export async function parseProviderResponse(
   }
   providerLogger.debug({ status: response.status, ...meta }, `${providerName} API call succeeded`);
   const body = await response.json();
+  const statusCode = response.status;
   const responseHeaders = fetchHeadersToRecord(response.headers);
-  return { body, responseHeaders };
+  return { body, statusCode, responseHeaders };
 }
