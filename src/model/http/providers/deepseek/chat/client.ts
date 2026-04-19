@@ -47,7 +47,7 @@ export class DeepSeekChatClient implements ProviderChatClient {
     });
 
     const duration = Date.now() - start;
-    const { body, responseHeaders } = await parseProviderResponse(
+    const { body, statusCode, responseHeaders } = await parseProviderResponse(
       response,
       'DeepSeek',
       logger,
@@ -57,7 +57,7 @@ export class DeepSeekChatClient implements ProviderChatClient {
       },
       mapDeepSeekError,
     );
-    return { body, requestHeaders, responseHeaders };
+    return { body, statusCode, requestHeaders, responseHeaders };
   }
 
   public async callStream(providerReq: Record<string, unknown>, model: string): Promise<ProviderStreamResult> {
@@ -89,6 +89,6 @@ export class DeepSeekChatClient implements ProviderChatClient {
     }
 
     logger.debug({ status: response.status, model }, 'DeepSeek API stream connected');
-    return { response, requestHeaders };
+    return { response, statusCode: response.status, requestHeaders };
   }
 }

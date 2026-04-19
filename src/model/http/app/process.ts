@@ -161,6 +161,7 @@ async function processRequest(
       res.json(userResBody);
       // 记录用户响应审计数据（响应头 + 响应体）
       ctx.audit.userResponse = {
+        statusCode: res.statusCode,
         headers: expressHeadersToRecord(res.getHeaders()),
         body: userResBody,
       };
@@ -178,6 +179,7 @@ async function processRequest(
     // 记录错误响应审计数据（与 handleError 构建完全一致的响应体）
     const errorPayload = buildErrorResponseBody(error, userFormat);
     ctx.audit.userResponse = {
+      statusCode: res.statusCode,
       headers: expressHeadersToRecord(res.getHeaders()),
       body: errorPayload.body,
     };

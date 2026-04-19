@@ -53,7 +53,7 @@ export class GeminiChatClient implements ProviderChatClient {
     });
 
     const duration = Date.now() - start;
-    const { body, responseHeaders } = await parseProviderResponse(
+    const { body, statusCode, responseHeaders } = await parseProviderResponse(
       response,
       'Gemini',
       logger,
@@ -63,7 +63,7 @@ export class GeminiChatClient implements ProviderChatClient {
       },
       mapGeminiError,
     );
-    return { body, requestHeaders, responseHeaders };
+    return { body, statusCode, requestHeaders, responseHeaders };
   }
 
   public async callStream(providerReq: Record<string, unknown>, model: string): Promise<ProviderStreamResult> {
@@ -95,6 +95,6 @@ export class GeminiChatClient implements ProviderChatClient {
     }
 
     logger.debug({ status: response.status, model }, 'Gemini API stream connected');
-    return { response, requestHeaders };
+    return { response, statusCode: response.status, requestHeaders };
   }
 }

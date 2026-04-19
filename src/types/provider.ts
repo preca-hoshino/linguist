@@ -19,6 +19,8 @@ export interface ProviderErrorDetail {
  */
 export interface ProviderCallResult {
   body: unknown;
+  /** 提供商返回的 HTTP 状态码（如 200, 400, 429 等） */
+  statusCode: number;
   requestHeaders: Record<string, string>;
   responseHeaders: Record<string, string>;
 }
@@ -29,5 +31,7 @@ export interface ProviderCallResult {
  */
 export interface ProviderStreamResult {
   response: globalThis.Response;
+  /** 提供商返回的 HTTP 状态码（流式连接建立成功时通常为 200） */
+  statusCode: number;
   requestHeaders: Record<string, string>;
 }

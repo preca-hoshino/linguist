@@ -95,7 +95,7 @@ export class CopilotChatClient implements ProviderChatClient {
     });
 
     const duration = Date.now() - start;
-    const { body, responseHeaders } = await parseProviderResponse(
+    const { body, statusCode, responseHeaders } = await parseProviderResponse(
       response,
       'Copilot',
       logger,
@@ -111,7 +111,7 @@ export class CopilotChatClient implements ProviderChatClient {
       configurable: false,
     });
 
-    return { body, requestHeaders, responseHeaders };
+    return { body, statusCode, requestHeaders, responseHeaders };
   }
 
   public async callStream(providerReq: Record<string, unknown>, model: string): Promise<ProviderStreamResult> {
@@ -159,7 +159,7 @@ export class CopilotChatClient implements ProviderChatClient {
       },
     });
 
-    return { response: wrappedResponse, requestHeaders };
+    return { response: wrappedResponse, statusCode: response.status, requestHeaders };
   }
 
   /**

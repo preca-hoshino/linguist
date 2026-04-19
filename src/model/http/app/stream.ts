@@ -101,6 +101,7 @@ export async function processStreamSend(
   // userResponse.body = 用户格式非流式响应（与非流式路径完全一致）
   const userNonStreamAdapter = getUserChatAdapter(ctx.userFormat);
   ctx.audit.userResponse = {
+    statusCode: 200, // 流式响应头在 res.writeHead(200, ...) 时已发送
     headers: expressHeadersToRecord(res.getHeaders()),
     body: userNonStreamAdapter.response.fromInternal(ctx),
   };

@@ -70,7 +70,11 @@ export async function callProvider<TReq, TRes extends InternalResponse>(
   ctx.timing.providerEnd = Date.now();
 
   ctx.audit.providerRequest.headers = result.requestHeaders;
-  ctx.audit.providerResponse = { headers: result.responseHeaders, body: result.body };
+  ctx.audit.providerResponse = {
+    statusCode: result.statusCode,
+    headers: result.responseHeaders,
+    body: result.body,
+  };
 
   const providerDuration = ctx.timing.providerEnd - ctx.timing.providerStart;
   providerLogger.debug(
@@ -210,7 +214,10 @@ async function tryStreamConnect(
   const { response, requestHeaders: providerReqHeaders } = await client.callStream(providerReqBody, ctx.route.model);
 
   ctx.audit.providerRequest.headers = providerReqHeaders;
-  ctx.audit.providerResponse = { headers: fetchHeadersToRecord(response.headers) };
+  ctx.audit.providerResponse = {
+    statusCode: response.status,
+    headers: fetchHeadersToRecord(response.headers),
+  };
 
   providerLogger.debug({ requestId: ctx.id, model: ctx.route.model }, '[dispatch] upstream stream connected');
 
