@@ -5,7 +5,7 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { Request, Response } from 'express';
-import { getVirtualMcpById } from '@/db/mcp-virtual-servers';
+import type { VirtualMcpRow } from '@/db/mcp-virtual-servers';
 import { getMcpProviderById } from '@/db/mcp-providers';
 import { insertMcpLog } from '@/db/mcp-logs';
 import { mcpConnectionManager } from '../providers/connection-manager';
@@ -77,26 +77,9 @@ interface AuthenticatedRequest extends Request {
 
 /**
  * 处理客户端通过 SSE 建立连接请求
+ * virtualMcp 由路由层预先解析并校验（含存活性检查），此处直接使用
  */
-export async function handleMcpSseConnect(req: Request, res: Response): Promise<void> {
-  const virtualMcpId = req.params.virtualMcpId as string | undefined;
-
-  if (virtualMcpId === undefined || virtualMcpId === '') {
-    res.status(400).json({ error: 'virtualMcpId path parameter is required' });
-    return;
-  }
-
-  // 1. 获取并验证虚拟 MCP 配置
-  const virtualMcp = await getVirtualMcpById(virtualMcpId);
-  if (!virtualMcp) {
-    res.status(404).json({ error: `Virtual MCP not found: ${virtualMcpId}` });
-    return;
-  }
-  if (!virtualMcp.is_active) {
-    res.status(403).json({ error: `Virtual MCP is disabled: ${virtualMcpId}` });
-    return;
-  }
-
+export async function handleMcpSseConnect(req: Request, res: Response, virtualMcp: VirtualMcpRow): Promise<void> {
   // 验证关联的 Provider 是否有效
   const provider = await getMcpProviderById(virtualMcp.mcp_provider_id);
   if (!provider) {
@@ -208,7 +191,7 @@ export async function handleMcpSseConnect(req: Request, res: Response): Promise<
   // Store in cache BEFORE connecting so that if client connects quickly, it doesn't 404
   activeSessions.set(sessionId, {
     sessionId,
-    virtualMcpId,
+    virtualMcpId: virtualMcp.id,
     transport,
     server,
     createdAt: Date.now(),
@@ -216,7 +199,7 @@ export async function handleMcpSseConnect(req: Request, res: Response): Promise<
 
   await server.connect(transport);
 
-  logger.info({ virtualMcpId, sessionId }, 'Virtual MCP SSE session established');
+  logger.info({ virtualMcpId: virtualMcp.id, sessionId }, 'Virtual MCP SSE session established');
 }
 
 /**
