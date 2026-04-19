@@ -121,11 +121,15 @@ export interface ModelHttpContext {
     };
     /** 提供商 → 网关：上游响应（caller 填充） */
     providerResponse?: {
+      /** 提供商返回的 HTTP 状态码（如 200, 429 等） */
+      statusCode?: number;
       headers?: Record<string, string>;
       body?: unknown;
     };
     /** 网关 → 用户：最终响应（包含实际发送的响应头） */
     userResponse?: {
+      /** 网关返回给用户的 HTTP 状态码（如 200, 4xx, 5xx 等） */
+      statusCode?: number;
       headers?: HttpHeaders;
       body?: unknown;
     };
