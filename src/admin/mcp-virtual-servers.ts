@@ -15,6 +15,11 @@ import { handleAdminError } from './error';
 
 const router: Router = Router();
 
+/** 虚拟 MCP 名字只允许字母、数字、连字符、下划线、点，不允许空格 */
+const MCP_NAME_REGEX = /^[a-zA-Z0-9._-]+$/;
+const MCP_NAME_FORMAT_ERROR =
+  'Name must not contain spaces. Only letters, numbers, hyphens (-), underscores (_), and dots (.) are allowed.';
+
 // ==================== 列出所有虚拟 MCP ====================
 router.get('/', async (req: Request, res: Response) => {
   try {
@@ -72,6 +77,10 @@ router.post('/', async (req: Request, res: Response) => {
       throw new GatewayError(400, 'invalid_request', 'Fields name, mcp_provider_id are required');
     }
 
+    if (!MCP_NAME_REGEX.test(body.name)) {
+      throw new GatewayError(400, 'invalid_request', MCP_NAME_FORMAT_ERROR);
+    }
+
     const created = await createVirtualMcp(body);
     res.status(201).json({ object: 'virtual_mcp', ...created });
   } catch (error) {
@@ -84,6 +93,11 @@ router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const body = req.body as VirtualMcpUpdateInput;
+
+    // 若包含 name 字段，校验格式（不允许空格）
+    if (typeof body.name === 'string' && body.name !== '' && !MCP_NAME_REGEX.test(body.name)) {
+      throw new GatewayError(400, 'invalid_request', MCP_NAME_FORMAT_ERROR);
+    }
 
     const updated = await updateVirtualMcp(id, body);
     if (!updated) {
