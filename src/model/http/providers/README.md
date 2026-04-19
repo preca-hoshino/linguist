@@ -1,8 +1,8 @@
-# src/providers — 提供商适配器
+# src/model/http/providers — 提供商适配器
 
-> 项目总览：参见 [README.md](../README.md)
+> 项目总览：参见 [README.md](../../../../README.md)
 > 
-> 核心概念：[`src/types/README.md`](../types/README.md)（内部类型定义）、[`src/app/README.md`](../app/README.md)（调用方）
+> 核心概念：[`src/types/README.md`](../../../types/README.md)（内部类型定义）、[`src/model/http/app/README.md`](../app/README.md)（调用方）
 
 ## 简介
 
@@ -17,6 +17,26 @@ providers/
 ├── types.ts                   # 提供商侧基础类型（适配器接口定义）
 ├── http-utils.ts              # 通用 HTTP 工具和常量
 ├── errors.ts                  # 通用错误处理工具
+├── copilot/                   # GitHub Copilot 适配器
+│   ├── index.ts               # 统一导出入口（copilotPlugin：ProviderPlugin）
+│   ├── error-mapping.ts       # Copilot 错误映射
+│   ├── token-manager.ts       # Copilot Token 动态获取与缓存（OAuth 令牌刷新）
+│   ├── constants.ts           # 常量（端点、请求头等）
+│   ├── chat/                  # Chat 适配器
+│   │   ├── client.ts          # HTTP 客户端（需通过 token-manager 动态获取 Bearer）
+│   │   ├── index.ts
+│   │   ├── request/           # 请求适配层
+│   │   │   └── index.ts
+│   │   ├── response/          # 响应适配层
+│   │   │   ├── index.ts
+│   │   │   └── stream.ts      # 流式响应处理（含 fallback 机制）
+│   │   └── fallback/          # Copilot 特有的备用路径
+│   └── embedding/             # Embedding 适配器
+│       ├── client.ts
+│       ├── request/
+│       │   └── index.ts
+│       └── response/
+│           └── index.ts
 ├── deepseek/                  # DeepSeek 适配器
 │   ├── index.ts               # 统一导出入口
 │   ├── error-mapping.ts       # DeepSeek 错误映射
@@ -196,11 +216,12 @@ const validKinds: Set<string> = getRegisteredProviderKinds();
 
 ## 已实现提供商
 
-| 目录          | 提供商        | kind         | 类型         |
-| ------------- | ------------- | ------------ | ------------ |
-| `deepseek/`   | DeepSeek      | `deepseek`   | Chat         |
-| `gemini/`     | Google Gemini | `gemini`     | Chat / Embed |
-| `volcengine/` | 火山引擎      | `volcengine` | Chat / Embed |
+| 目录          | 提供商           | kind         | 类型                   |
+| ------------- | ---------------- | ------------ | ---------------------- |
+| `copilot/`    | GitHub Copilot   | `copilot`    | Chat / Embed           |
+| `deepseek/`   | DeepSeek         | `deepseek`   | Chat                   |
+| `gemini/`     | Google Gemini    | `gemini`     | Chat / Embed           |
+| `volcengine/` | 火山引擎         | `volcengine` | Chat / Embed           |
 
 ## 新增 / 重构 / 删除向导
 
