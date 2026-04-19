@@ -98,6 +98,17 @@ export async function getVirtualMcpById(id: string): Promise<VirtualMcpRow | nul
 }
 
 /**
+ * 按用户自定义名字查询虚拟 MCP（仅活跃记录）
+ * 供外部网关路由使用：X-Mcp-Name header → 内部 VirtualMcpRow
+ */
+export async function getVirtualMcpByName(name: string): Promise<VirtualMcpRow | null> {
+  const result = await db.query<VirtualMcpRow>('SELECT * FROM virtual_mcps WHERE name = $1 AND is_active = true', [
+    name,
+  ]);
+  return result.rows[0] ?? null;
+}
+
+/**
  * 更新虚拟 MCP
  */
 export async function updateVirtualMcp(id: string, updates: VirtualMcpUpdateInput): Promise<VirtualMcpRow | null> {

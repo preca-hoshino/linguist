@@ -6,6 +6,7 @@ import { markCompleted, markError, markProcessing } from '@/db';
 import type { Middleware } from '@/middleware';
 import {
   apiKeyAuth,
+  allowedModelCheck,
   applyMiddlewares,
   normalizeChatToolCallIds,
   normalizeResponseChatToolCallIds,
@@ -22,7 +23,7 @@ import { expressHeadersToRecord, finalizeError, finalizeSuccess, sanitizeHeaders
 import { processStreamSend } from './stream';
 
 // 中间件列表
-const requestMiddlewares: Middleware[] = [apiKeyAuth, normalizeChatToolCallIds];
+const requestMiddlewares: Middleware[] = [apiKeyAuth, allowedModelCheck, normalizeChatToolCallIds];
 const postRouteMiddlewares: Middleware[] = [rateLimit];
 const responseMiddlewares: Middleware[] = [normalizeResponseChatToolCallIds, tokenAccounting];
 
