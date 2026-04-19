@@ -16,9 +16,12 @@ types/
 ├── billing.ts    # PricingTier、CostBreakdown、BillingResult（阶梯计费类型）
 ├── chat.ts       # InternalMessage、InternalChatRequest、InternalChatResponse、ThinkingConfig、ChatUsage 等
 ├── config.ts     # ProviderConfig、VirtualModelBackend、VirtualModelConfig、ResolvedRoute
-├── context.ts    # GatewayContext、RoutedGatewayContext
+├── context.ts    # GatewayContext、RoutedGatewayContext、ModelHttpContext
 ├── embedding.ts  # InternalEmbeddingRequest、InternalEmbeddingResponse
+├── mcp.ts        # McpToolDefinition、McpCallRequest、McpCallResponse、McpContent（MCP 协议映射类型）
 ├── provider.ts   # HttpHeaders、ProviderCallResult、ProviderStreamResult、ProviderErrorDetail
+├── realtime.ts   # 实时模式相关类型
+├── session.ts    # 会话相关类型
 └── index.ts      # 统一 export type * 再导出
 ```
 
