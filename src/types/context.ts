@@ -3,6 +3,7 @@
 import type { InternalChatRequest, InternalChatResponse } from './chat';
 import type { ProviderConfig } from './config';
 import type { InternalEmbeddingRequest, InternalEmbeddingResponse } from './embedding';
+import type { CostBreakdown } from './billing';
 import type { HttpHeaders, ProviderErrorDetail } from './provider';
 
 /**
@@ -129,6 +130,18 @@ export interface ModelHttpContext {
       body?: unknown;
     };
   };
+
+  // --- 后置计费 ---
+
+  /** 请求维度的费用快照（如果产生了费用） */
+  billing?:
+    | {
+        /** 最终结算的金额 */
+        calculatedCost: number;
+        /** 费用构成明细 */
+        costBreakdown: CostBreakdown;
+      }
+    | undefined;
 
   // --- 扩展信息 ---
 
