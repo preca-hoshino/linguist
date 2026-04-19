@@ -51,7 +51,7 @@ export class VolcEngineEmbeddingClient implements ProviderEmbeddingClient {
     });
 
     const duration = Date.now() - start;
-    const { body, responseHeaders } = await parseProviderResponse(
+    const { body, statusCode, responseHeaders } = await parseProviderResponse(
       response,
       'VolcEngine Embedding',
       logger,
@@ -61,6 +61,6 @@ export class VolcEngineEmbeddingClient implements ProviderEmbeddingClient {
       },
       mapVolcEngineError,
     );
-    return { body, requestHeaders, responseHeaders };
+    return { body, statusCode, requestHeaders, responseHeaders };
   }
 }
