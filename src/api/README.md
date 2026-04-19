@@ -2,24 +2,27 @@
 
 > 项目总览：参见 [README.md](../README.md)
 >
-> 相关模块：[`src/app/README.md`](../app/README.md)（核心流程）、[`src/users/README.md`](../users/README.md)（用户适配器）
+> 相关模块：[`src/model/http/app/README.md`](../model/http/app/README.md)（核心流程）、[`src/model/http/users/README.md`](../model/http/users/README.md)（用户适配器）
 
 ## 简介
 
-负责将各种用户 API 格式（OpenAI 兼容格式、Anthropic 格式、Gemini 原生格式等）的 HTTP 端点注册到 Express，提取请求中的 `model` 字段和 API Key，然后将处理委托给 `src/app/` 中格式无关的核心流程（`processChatCompletion` / `processEmbedding`）。每种格式是独立的子目录，互不干扰。
+负责将各种用户 API 格式（OpenAI 兼容格式、Anthropic 格式、Gemini 原生格式）和 MCP 接入点的 HTTP 端点注册到 Express，提取请求中的 `model` 字段和 API Key，然后将处理委托给 `src/model/http/app/` 中格式无关的核心流程（`processChatCompletion` / `processEmbedding`）。MCP 请求则直接转发至 `src/mcp/` 中的处理函数。每种格式是独立的子目录，互不干扰。
 
 ## 目录结构
 
 ```
 api/
 ├── index.ts              # 聚合所有格式路由，注册 API Key 提取器，导出 apiRouter
-├── auth-helper.ts        # 共享 API Key 验证逻辑（供非核心流程端点使用，如 /v1/models）
-├── openaicompat/
-│   └── index.ts          # OpenAI 兼容格式端点
-├── anthropic/
-│   └── index.ts          # Anthropic Messages API 端点
-└── gemini/
-    └── index.ts          # Gemini 原生格式端点
+└── http/
+    ├── auth-helper.ts    # 共享 API Key 验证逻辑（validateApiKeyFromRequest）
+    ├── openaicompat/
+    │   └── index.ts      # OpenAI 兼容格式端点
+    ├── anthropic/
+    │   └── index.ts      # Anthropic Messages API 端点
+    ├── gemini/
+    │   └── index.ts      # Gemini 原生格式端点
+    └── mcp/
+        └── index.ts      # MCP SSE 长连接接入端点
 ```
 
 ## 已支持的 API 格式
@@ -34,8 +37,8 @@ api/
 
 ### Anthropic 格式 (`anthropic`)
 
-| 端点                       | 方法 | model 来源   | API Key 来源       |
-| -------------------------- | ---- | ------------ | ------------------ |
+| 端点                           | 方法 | model 来源   | API Key 来源       |
+| ------------------------------ | ---- | ------------ | ------------------ |
 | `/model/anthropic/v1/models`   | GET  | —            | `x-api-key` header |
 | `/model/anthropic/v1/messages` | POST | `body.model` | `x-api-key` header |
 
@@ -47,6 +50,20 @@ api/
 | `/model/gemini/v1beta/models/:model:generateContent`          | POST | URL 路径 `:model` | `x-goog-api-key` header 或 `?key=` 查询参数 |
 | `/model/gemini/v1beta/models/:model:streamGenerateContent`    | POST | URL 路径 `:model` | `x-goog-api-key` header 或 `?key=` 查询参数 |
 | `/model/gemini/v1beta/models/:model:embedContent`             | POST | URL 路径 `:model` | `x-goog-api-key` header 或 `?key=` 查询参数 |
+
+### MCP 接入端点
+
+MCP 端点使用固定路径，通过 `X-Mcp-Name` 请求头区分虚拟 MCP，与模型 API 使用 `body.model` 的心智模型保持一致。
+
+| 端点                          | 方法 | 虚拟 MCP 标识               | API Key 来源                              |
+| ----------------------------- | ---- | --------------------------- | ----------------------------------------- |
+| `/mcp/sse`                    | GET  | `X-Mcp-Name` header（名字） | `Authorization: Bearer <key>` 或 `?key=` |
+| `/mcp/messages?sessionId=...` | POST | Session 已在 SSE 时绑定     | 无需再次鉴权（Session 绑定）              |
+
+**MCP 鉴权流程**：
+1. 读取 `X-Mcp-Name` header，名字 → 内部 ID 反查（`getVirtualMcpByName`）
+2. 验证 API Key 并获取 App 信息（`validateApiKeyFromRequest`）
+3. 白名单校验：验证 App 的 `allowedMcpIds` 是否包含该虚拟 MCP 的内部 ID
 
 ## 核心组件
 
@@ -71,13 +88,15 @@ const apiRouter: Router = Router();
 apiRouter.use('/model/openai-compat', openaiCompatRouter);
 apiRouter.use('/model/gemini', geminiRouter);
 apiRouter.use('/model/anthropic', anthropicRouter);
+// MCP 路由直接挂载到根路径（无 /model/ 前缀）
+apiRouter.use(mcpRouter);
 ```
 
 ## 新增 / 重构 / 删除向导
 
 ### 新增用户 API 格式
 
-1. 在 `src/api/<format>/` 下创建 `index.ts`，实现：
+1. 在 `src/api/http/<format>/` 下创建 `index.ts`，实现：
    - **Express 路由**：定义端点，从请求中提取 `rawModel`（字符串），调用 `processChatCompletion(req, res, '<format>', rawModel)` 或 `processEmbedding(...)`
    - **`extractApiKey(req)`**：从请求头或查询参数中提取 API Key（返回 `string | undefined`），并导出
 
@@ -86,7 +105,7 @@ apiRouter.use('/model/anthropic', anthropicRouter);
    - 调用 `registerApiKeyExtractor('<format>', newExtractApiKey)` 注册提取器
    - `apiRouter.use(newFormatRouter)` 挂载路由
 
-3. 在 `src/users/` 下同步创建对应的用户格式适配器（请求/响应转换）—— 参见 [`src/users/README.md`](../users/README.md)
+3. 在 `src/model/http/users/` 下同步创建对应的用户格式适配器（请求/响应转换）—— 参见 [`src/model/http/users/README.md`](../model/http/users/README.md)
 
 ### 重构
 
@@ -96,6 +115,6 @@ apiRouter.use('/model/anthropic', anthropicRouter);
 
 ### 删除用户 API 格式
 
-1. 删除 `src/api/<format>/` 目录
+1. 删除 `src/api/http/<format>/` 目录
 2. 在 `api/index.ts` 中移除对应的 `import`、`registerApiKeyExtractor` 调用和 `apiRouter.use(...)` 行
-3. 同步删除 `src/users/<category>/<format>/` 中的用户适配器 —— 参见 [`src/users/README.md`](../users/README.md)
+3. 同步删除 `src/model/http/users/<format>/` 中的用户适配器 —— 参见 [`src/model/http/users/README.md`](../model/http/users/README.md)
