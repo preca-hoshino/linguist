@@ -3,6 +3,7 @@ export {
   createVirtualMcp,
   deleteVirtualMcp,
   getVirtualMcpById,
+  getVirtualMcpByName,
   listVirtualMcps,
   updateVirtualMcp,
 } from './queries';
