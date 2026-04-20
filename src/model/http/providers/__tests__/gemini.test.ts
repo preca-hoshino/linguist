@@ -6,8 +6,12 @@ import { geminiPlugin } from '../../providers/gemini';
 
 describe('Provider Plugin: Gemini', () => {
   const config = {
-    apiKey: 'AIza...',
+    id: 'gm-1',
+    kind: 'gemini',
+    name: 'Gemini',
+    credential: { type: 'api_key' as const, key: 'AIza...' },
     baseUrl: 'https://generativelanguage.googleapis.com',
+    config: { custom_headers: {}, http_proxy: '' },
   };
 
   beforeEach(() => {

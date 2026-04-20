@@ -118,7 +118,11 @@ describe('ConfigManager', () => {
       expect(backend?.actualModel).toBe('deepseek-chat');
       expect(backend?.modelType).toBe('chat');
       expect(backend?.provider.kind).toBe('deepseek');
-      expect(backend?.provider.apiKey).toBe('sk-ds-123');
+      const cred = backend?.provider.credential;
+      expect(cred?.type).toBe('api_key');
+      if (cred?.type === 'api_key') {
+        expect(cred.key).toBe('sk-ds-123');
+      }
       expect(backend?.provider.baseUrl).toBe('https://api.deepseek.com');
     });
 

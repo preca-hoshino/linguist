@@ -17,7 +17,14 @@ describe('Core: Plugin Registry', () => {
   });
 
   it('should assemble adapter sets for known plugins', () => {
-    const config = { id: 'p1', kind: 'deepseek', name: 'DS', apiKey: 'k', baseUrl: 'b', config: {} };
+    const config = {
+      id: 'p1',
+      kind: 'deepseek',
+      name: 'DS',
+      credential: { type: 'api_key' as const, key: 'k' },
+      baseUrl: 'b',
+      config: { custom_headers: {}, http_proxy: '' },
+    };
     const set = getProviderChatAdapterSet('deepseek', config as unknown as import('@/types').ProviderConfig);
 
     expect(set.client).toBeDefined();

@@ -38,7 +38,12 @@ describe('Integration: OpenAICompat -> DeepSeek -> Gateway', () => {
         providerKind: 'deepseek',
         model: 'deepseek-chat',
         capabilities: { chat: true, embedding: false },
-        providerConfig: { apiKey: 'sk-123', baseUrl: 'https://api.deepseek.com' }
+        providerConfig: {
+          id: 'ds-1', kind: 'deepseek', name: 'DeepSeek',
+          credential: { type: 'api_key' as const, key: 'sk-123' },
+          baseUrl: 'https://api.deepseek.com',
+          config: { custom_headers: {}, http_proxy: '' },
+        }
       },
       audit: {},
       timing: { start: Date.now() },

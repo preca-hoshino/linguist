@@ -6,8 +6,12 @@ import { volcenginePlugin } from '../../providers/volcengine';
 
 describe('Provider Plugin: VolcEngine', () => {
   const config = {
-    apiKey: 'volc-abc',
+    id: 'vc-1',
+    kind: 'volcengine',
+    name: 'VolcEngine',
+    credential: { type: 'api_key' as const, key: 'volc-abc' },
     baseUrl: 'https://ark.cn-beijing.volces.com',
+    config: { custom_headers: {}, http_proxy: '' },
   };
 
   beforeEach(() => {

@@ -50,7 +50,6 @@ describe('Internal Types', () => {
             name: 'DeepSeek',
 
             credential: { type: 'api_key', key: 'sk-test' },
-            apiKey: 'sk-test',
             baseUrl: 'https://api.deepseek.com',
 
             config: {

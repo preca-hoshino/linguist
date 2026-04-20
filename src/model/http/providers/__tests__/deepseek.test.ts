@@ -6,8 +6,12 @@ import { deepseekPlugin } from '../../providers/deepseek';
 
 describe('Provider Plugin: DeepSeek', () => {
   const config = {
-    apiKey: 'sk-test-key',
+    id: 'ds-1',
+    kind: 'deepseek',
+    name: 'DeepSeek',
+    credential: { type: 'api_key' as const, key: 'sk-test-key' },
     baseUrl: 'https://api.deepseek.com',
+    config: { custom_headers: {}, http_proxy: '' },
   };
 
   describe('Adapter Set Assembly', () => {
