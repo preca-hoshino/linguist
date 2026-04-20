@@ -1,9 +1,7 @@
-// src/providers/chat/deepseek/client.ts
-
 import { mapDeepSeekError } from '@/model/http/providers/deepseek/error-mapping';
 import { parseProviderResponse } from '@/model/http/providers/http-utils';
 import type { ProviderChatClient } from '@/model/http/providers/types';
-import type { ProviderCallResult, ProviderStreamResult } from '@/types';
+import type { ProviderCallResult, ProviderConfig, ProviderStreamResult } from '@/types';
 import { createLogger, DEFAULT_PROVIDER_TIMEOUT, GatewayError, logColors } from '@/utils';
 
 const logger = createLogger('Provider:DeepSeek', logColors.bold + logColors.green);
@@ -18,9 +16,13 @@ export class DeepSeekChatClient implements ProviderChatClient {
   private readonly apiKey: string;
   private readonly baseUrl: string;
 
-  public constructor(apiKey: string, baseUrl?: string) {
-    this.apiKey = apiKey;
-    let resolvedUrl = baseUrl ?? DEFAULT_BASE_URL;
+  public constructor(config: ProviderConfig) {
+    const cred = config.credential;
+    if (cred.type !== 'api_key') {
+      throw new GatewayError(500, 'config_error', `DeepSeek requires api_key credential, got: ${cred.type}`);
+    }
+    this.apiKey = cred.key;
+    let resolvedUrl = config.baseUrl.length > 0 ? config.baseUrl : DEFAULT_BASE_URL;
     while (resolvedUrl.endsWith('/')) {
       resolvedUrl = resolvedUrl.slice(0, -1);
     }

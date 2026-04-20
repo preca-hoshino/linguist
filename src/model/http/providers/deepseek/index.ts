@@ -14,7 +14,7 @@ export const deepseekPlugin: ProviderPlugin = {
     requestAdapter: new DeepSeekChatRequestAdapter(),
     responseAdapter: new DeepSeekChatResponseAdapter(),
     streamResponseAdapter: new DeepSeekChatStreamResponseAdapter(),
-    client: new DeepSeekChatClient(config.apiKey, config.baseUrl),
+    client: new DeepSeekChatClient(config),
   }),
 
   mapError: (status, body) => mapDeepSeekError(status, body),
