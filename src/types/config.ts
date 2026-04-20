@@ -64,34 +64,10 @@ export interface ProviderConfig {
   name: string;
   /** 凭证对象（判别联合） */
   credential: ProviderCredential;
-  /** API 密钥快捷访问（从 credential 中自动解析，兼容现有 client） */
-  apiKey: string;
   /** API 基地址 */
   baseUrl: string;
   /** 高级配置 */
   config: ProviderAdvancedConfig;
-}
-
-/**
- * 从 ProviderCredential 中解析出 API Key 字符串
- * 用于兼容现有每个提供商的 client 构造函数
- */
-export function resolveApiKey(credential: ProviderCredential): string {
-  switch (credential.type) {
-    case 'api_key': {
-      return credential.key;
-    }
-    case 'oauth2': {
-      return credential.accessToken;
-    }
-    case 'copilot': {
-      // Copilot 不使用静态 API Key，短效 Token 由 CopilotTokenManager 动态获取
-      return '';
-    }
-    case 'none': {
-      return '';
-    }
-  }
 }
 
 // ==================== 虚拟模型配置 ====================
