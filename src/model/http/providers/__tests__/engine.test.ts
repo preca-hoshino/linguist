@@ -38,46 +38,17 @@ describe('Core Engine: dispatch', () => {
     mockExecutor.mockClear();
   });
 
-  it('should correctly dispatch chat request and resolve backend', async () => {
-    (configManager.resolveAllBackends as jest.Mock).mockReturnValue([
-      {
-        actualModel: 'ds-chat',
-        providerKind: 'deepseek',
-        providerId: 'ds-1',
-        provider: { apiKey: 'key' },
-      },
-    ]);
-
-    const mockContext = {
-      id: 'test-req-id',
-      requestModel: 'deepseek-chat',
-      route: {}, // 初始为空
-      audit: {},
-      timing: {},
-      response: {},
-    } as unknown as import('@/types').RoutedModelHttpContext;
-
-    await dispatchChatProvider(
-      mockContext,
-      { messages: [] } as unknown as import('@/types').InternalChatRequest,
-      mockExecutor,
-    );
-
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    expect(mockContext.route?.model).toBe('ds-chat');
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-    expect(mockContext.route?.providerKind).toBe('deepseek');
-    expect(mockExecutor).toHaveBeenCalled();
-  });
-
-  it('should skip backend resolution if route is already populated', async () => {
+  it('should correctly dispatch chat request with provided route', async () => {
     const mockContext = {
       id: 'test-req-id',
       requestModel: 'deepseek-chat',
       route: {
-        providerKind: 'gemini',
-        model: 'gemini-1.5',
-        capabilities: { chat: true },
+        providerKind: 'deepseek',
+        model: 'ds-chat',
+        providerId: 'ds-1',
+        providerConfig: { apiKey: 'key' },
+        strategy: 'load_balance',
+        capabilities: [],
       },
       audit: {},
       timing: {},
@@ -90,21 +61,27 @@ describe('Core Engine: dispatch', () => {
       mockExecutor,
     );
 
-    expect(configManager.resolveAllBackends).not.toHaveBeenCalled();
+    expect(mockContext.route.model).toBe('ds-chat');
+    expect(mockContext.route.providerKind).toBe('deepseek');
     expect(mockExecutor).toHaveBeenCalled();
   });
 
-  it('should throw GatewayError when no backends are available', async () => {
-    (configManager.resolveAllBackends as jest.Mock).mockReturnValue([]);
-
+  it('should propagate error thrown by executor', async () => {
     const mockContext = {
       id: 'no-backend-id',
       requestModel: 'unknown-model',
-      route: {},
+      route: {
+        providerKind: 'deepseek',
+        model: 'ds-chat',
+        strategy: 'load_balance',
+        capabilities: [],
+      },
       audit: {},
       timing: {},
       response: {},
     } as unknown as import('@/types').RoutedModelHttpContext;
+
+    mockExecutor.mockRejectedValue(new GatewayError(503, 'no_available_backend', 'No backends'));
 
     await expect(
       dispatchChatProvider(
@@ -235,7 +212,7 @@ describe('Core Engine: dispatchStream', () => {
     });
 
     const mockCtx = {
-      id: '', // Empty ID should fall back to 'test-id'
+      id: 'stream-req-id',
       requestModel: 'foo',
       route: { capabilities: [] },
       audit: {},
@@ -248,7 +225,7 @@ describe('Core Engine: dispatchStream', () => {
       chunks.push(ch);
     }
     expect(chunks.length).toBe(2); // The valid JSON elements from the parseSSEStream mock
-    expect(mockCtx.id).toBe('test-id');
+    expect(mockCtx.id).toBe('stream-req-id');
   });
 
   it('should throw immediately if no available candidates', async () => {
