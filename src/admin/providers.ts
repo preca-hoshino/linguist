@@ -52,7 +52,7 @@ router.get('/', async (req: Request, res: Response) => {
     }
 
     if (typeof startingAfter === 'string' && startingAfter.trim() !== '') {
-      conditions.push(`created_at < (SELECT created_at FROM providers WHERE id = $${String(paramIdx)})`);
+      conditions.push(`created_at < (SELECT created_at FROM model_providers WHERE id = $${String(paramIdx)})`);
       values.push(startingAfter);
       paramIdx++;
     }
