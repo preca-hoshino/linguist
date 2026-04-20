@@ -2,7 +2,6 @@
 
 import { configManager } from '@/config';
 import type {
-  ModelHttpContext,
   InternalChatRequest,
   InternalChatResponse,
   InternalChatStreamChunk,
@@ -87,52 +86,24 @@ export async function callProvider<TReq, TRes extends InternalResponse>(
 }
 
 async function dispatchProvider<TReq, TRes extends InternalResponse>(
-  ctx: ModelHttpContext,
+  ctx: RoutedModelHttpContext,
   request: TReq,
   getAdapterSet: GetAdapterSet<TReq, TRes>,
   label: string,
   executor: typeof callProvider,
 ): Promise<void> {
-  // 单元测试友好：如果 route 尚未完整（缺少 capabilities），则执行后端解析逻辑
-  if (ctx.route?.capabilities === undefined) {
-    const candidates = configManager.resolveAllBackends(ctx.requestModel, ctx.route?.capabilities);
-    const candidate = candidates[0];
-
-    if (!candidate) {
-      throw new GatewayError(
-        503,
-        'no_available_backend',
-        `No available ${label.toLowerCase()} backends for model: ${ctx.requestModel}`,
-      );
-    }
-
-    // 利用 ResolvedRoute 的完整字段填充路由——确保类型完整性
-    ctx.route = {
-      model: candidate.actualModel,
-      modelType: candidate.modelType,
-      providerKind: candidate.providerKind,
-      providerId: candidate.providerId,
-      providerConfig: candidate.provider,
-      strategy: candidate.routingStrategy,
-      capabilities: candidate.capabilities,
-    };
-  }
-
-  // 经过上方的 if 块（或入参本身已完整），此处 route 已保证填充完毕
-  const routedCtx = ctx as RoutedModelHttpContext;
-
-  const providerLogger = getProviderLogger(routedCtx.route.providerKind);
+  const providerLogger = getProviderLogger(ctx.route.providerKind);
   try {
-    await executor(routedCtx, request, getAdapterSet, label);
+    await executor(ctx, request, getAdapterSet, label);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     providerLogger.warn(
-      { requestId: routedCtx.id, model: routedCtx.route.model, strategy: routedCtx.route.strategy, error: detail },
-      `${routedCtx.route.strategy}: ${label.toLowerCase()} provider call failed`,
+      { requestId: ctx.id, model: ctx.route.model, strategy: ctx.route.strategy, error: detail },
+      `${ctx.route.strategy}: ${label.toLowerCase()} provider call failed`,
     );
 
     if (error instanceof GatewayError && error.providerDetail !== undefined) {
-      routedCtx.providerError = error.providerDetail;
+      ctx.providerError = error.providerDetail;
     }
 
     const sanitizedMessage = sanitizeProviderError(detail);
@@ -151,7 +122,7 @@ async function dispatchProvider<TReq, TRes extends InternalResponse>(
 // ========== 框架引擎: 公开入口 ==========
 
 export async function dispatchChatProvider(
-  ctx: ModelHttpContext,
+  ctx: RoutedModelHttpContext,
   chatRequest: InternalChatRequest,
   executor: typeof callProvider = callProvider,
 ): Promise<void> {
@@ -165,7 +136,7 @@ export async function dispatchChatProvider(
 }
 
 export async function dispatchEmbeddingProvider(
-  ctx: ModelHttpContext,
+  ctx: RoutedModelHttpContext,
   embeddingRequest: InternalEmbeddingRequest,
   executor: typeof callProvider = callProvider,
 ): Promise<void> {
@@ -228,9 +199,6 @@ export async function dispatchChatProviderStream(
   ctx: RoutedModelHttpContext,
   chatRequest: InternalChatRequest,
 ): Promise<StreamDispatchResult> {
-  if (!ctx.id) {
-    ctx.id = 'test-id';
-  }
   const candidates = configManager.resolveAllBackends(ctx.requestModel, ctx.route.capabilities);
   const candidate = candidates[0];
 
