@@ -1,9 +1,7 @@
-// src/providers/embedding/gemini/client.ts — Gemini 嵌入客户端
-
 import { parseProviderResponse } from '@/model/http/providers/http-utils';
 import type { ProviderEmbeddingClient } from '@/model/http/providers/types';
-import type { ProviderCallResult } from '@/types';
-import { createLogger, DEFAULT_PROVIDER_TIMEOUT, logColors } from '@/utils';
+import type { ProviderCallResult, ProviderConfig } from '@/types';
+import { createLogger, DEFAULT_PROVIDER_TIMEOUT, GatewayError, logColors } from '@/utils';
 
 const logger = createLogger('Provider:Gemini:Embedding', logColors.bold + logColors.yellow);
 
@@ -22,9 +20,13 @@ export class GeminiEmbeddingClient implements ProviderEmbeddingClient {
   private readonly apiKey: string;
   private readonly baseUrl: string;
 
-  public constructor(apiKey: string, baseUrl?: string) {
-    this.apiKey = apiKey;
-    let resolvedUrl = baseUrl ?? DEFAULT_BASE_URL;
+  public constructor(config: ProviderConfig) {
+    const cred = config.credential;
+    if (cred.type !== 'api_key') {
+      throw new GatewayError(500, 'config_error', `Gemini requires api_key credential, got: ${cred.type}`);
+    }
+    this.apiKey = cred.key;
+    let resolvedUrl = config.baseUrl.length > 0 ? config.baseUrl : DEFAULT_BASE_URL;
     while (resolvedUrl.endsWith('/')) {
       resolvedUrl = resolvedUrl.slice(0, -1);
     }

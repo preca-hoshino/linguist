@@ -18,13 +18,13 @@ export const geminiPlugin: ProviderPlugin = {
     requestAdapter: new GeminiChatRequestAdapter(),
     responseAdapter: new GeminiChatResponseAdapter(),
     streamResponseAdapter: new GeminiChatStreamResponseAdapter(),
-    client: new GeminiChatClient(config.apiKey, config.baseUrl),
+    client: new GeminiChatClient(config),
   }),
 
   getEmbeddingAdapterSet: (config) => ({
     requestAdapter: new GeminiEmbeddingRequestAdapter(),
     responseAdapter: new GeminiEmbeddingResponseAdapter(),
-    client: new GeminiEmbeddingClient(config.apiKey, config.baseUrl),
+    client: new GeminiEmbeddingClient(config),
   }),
 
   mapError: (status, body) => mapGeminiError(status, body),
