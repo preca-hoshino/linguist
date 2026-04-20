@@ -306,19 +306,6 @@ function inferErrorType(errorCode: string): ErrorType {
     return errorMap[code];
   }
 
-  // 关键词回退匹配（兼容旧错误码）
-  if (code.includes('rate_limit') || code.includes('quota') || code.includes('throttl')) {
-    return 'rate_limit';
-  }
-  if (code.includes('timeout') || code.includes('timed_out') || code.includes('deadline')) {
-    return 'timeout';
-  }
-  if (code.includes('auth') || code.includes('api_key') || code.includes('permission') || code.includes('forbidden')) {
-    return 'auth_error';
-  }
-  if (code.includes('invalid_request') || code.includes('bad_request') || code.includes('validation')) {
-    return 'invalid_request';
-  }
   return 'provider_error';
 }
 

@@ -121,7 +121,7 @@ export class CopilotTokenManager {
    * 1. 从缓存中查找模型列表（TTL 1小时）
    * 2. 缓存未命中 → 使用已有 token 调用 GET /models → 缓存结果
    * 3. 委托 endpoint-resolver 解析 supported_endpoints → CopilotEndpointType
-   * 4. 查询失败时静默回退 'chat-completions'（向后兼容）
+   * 4. 查询失败时静默回退 'chat-completions'（故障安全：避免短暂的 GET /models 失败阻断请求）
    *
    * @param providerId - 提供商 ID（用于隔离模型缓存）
    * @param accessToken - 已获取的短效 Copilot Token

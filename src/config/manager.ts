@@ -51,7 +51,7 @@ export class ConfigManager {
     const newProviders = new Map<string, ProviderConfig>();
     const newVirtualModels = new Map<string, VirtualModelConfig>();
 
-    // 1. 加载所有提供商（is_active 已废弃，不再过滤）
+    // 1. 加载所有提供商（Provider 层无启停设计，启停粒度在 model_provider_models / virtual_models 层）
     const providersRes = await db.query<{
       id: string;
       kind: string;
