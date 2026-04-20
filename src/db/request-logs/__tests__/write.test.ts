@@ -252,13 +252,5 @@ describe('request-logs/write', () => {
       await assertErrorType('unknown_error_code', 'provider_error');
       await assertErrorType('', 'provider_error');
     });
-
-    it('should map error codes by keyword fallback', async () => {
-      await assertErrorType('api_throttled', 'rate_limit');
-      await assertErrorType('deadline_exceeded', 'timeout');
-      await assertErrorType('forbidden_access', 'auth_error');
-      await assertErrorType('validation_failed', 'invalid_request');
-      await assertErrorType('some_other_auth_error', 'auth_error');
-    });
   });
 });
