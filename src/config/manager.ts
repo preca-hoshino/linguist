@@ -9,7 +9,7 @@ import type {
   VirtualModelBackend,
   VirtualModelConfig,
 } from '@/types';
-import { DEFAULT_PROVIDER_CONFIG, resolveApiKey } from '@/types';
+import { DEFAULT_PROVIDER_CONFIG } from '@/types';
 import { createLogger, logColors, rateLimiter } from '@/utils';
 
 const logger = createLogger('Config', logColors.bold + logColors.yellow);
@@ -70,7 +70,6 @@ export class ConfigManager {
         kind: row.kind,
         name: row.name,
         credential: cred,
-        apiKey: resolveApiKey(cred),
         baseUrl: row.base_url,
         config: advancedConfig,
       });
@@ -166,7 +165,6 @@ export class ConfigManager {
           kind: row.provider_kind,
           name: row.provider_name,
           credential: fallbackCred,
-          apiKey: resolveApiKey(fallbackCred),
           baseUrl: row.base_url,
           config: fallbackConfig,
         },
