@@ -18,13 +18,13 @@ export const volcenginePlugin: ProviderPlugin = {
     requestAdapter: new VolcEngineChatRequestAdapter(),
     responseAdapter: new VolcEngineChatResponseAdapter(),
     streamResponseAdapter: new VolcEngineChatStreamResponseAdapter(),
-    client: new VolcEngineChatClient(config.apiKey, config.baseUrl),
+    client: new VolcEngineChatClient(config),
   }),
 
   getEmbeddingAdapterSet: (config) => ({
     requestAdapter: new VolcEngineEmbeddingRequestAdapter(),
     responseAdapter: new VolcEngineEmbeddingResponseAdapter(),
-    client: new VolcEngineEmbeddingClient(config.apiKey, config.baseUrl),
+    client: new VolcEngineEmbeddingClient(config),
   }),
 
   mapError: (status, body) => mapVolcEngineError(status, body),
