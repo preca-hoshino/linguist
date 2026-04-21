@@ -8,6 +8,7 @@ import type {
   ResolvedRoute,
   VirtualModelBackend,
   VirtualModelConfig,
+  ModelType,
 } from '@/types';
 import { DEFAULT_PROVIDER_CONFIG } from '@/types';
 import { createLogger, logColors, rateLimiter } from '@/utils';
@@ -88,6 +89,7 @@ export class ConfigManager {
       pm_name: string;
       model_type: string;
       pm_capabilities: string[];
+      pm_supported_parameters: string[];
       pm_rpm_limit: number | null;
       pm_tpm_limit: number | null;
       pm_model_config: Record<string, unknown> | null;
@@ -113,6 +115,7 @@ export class ConfigManager {
         pm.name            AS pm_name,
         pm.model_type,
         pm.capabilities    AS pm_capabilities,
+        pm.supported_parameters AS pm_supported_parameters,
         pm.rpm_limit       AS pm_rpm_limit,
         pm.tpm_limit       AS pm_tpm_limit,
         pm.model_config    AS pm_model_config,
@@ -139,7 +142,7 @@ export class ConfigManager {
         // model_type 和 routing_strategy 由管理 API 创建时严格校验，直接使用类型断言
         config = {
           id: row.vm_id,
-          modelType: row.vm_model_type as 'chat' | 'embedding',
+          modelType: row.vm_model_type as ModelType,
           routingStrategy: row.routing_strategy as VirtualModelConfig['routingStrategy'],
           backends: [],
           rpmLimit: row.vm_rpm_limit ?? undefined,
@@ -156,8 +159,9 @@ export class ConfigManager {
       config.backends.push({
         providerModelId: row.pm_id,
         actualModel: row.pm_name,
-        modelType: row.model_type as 'chat' | 'embedding',
+        modelType: row.model_type as ModelType,
         capabilities: row.pm_capabilities,
+        supportedParameters: row.pm_supported_parameters,
         weight: row.weight,
         priority: row.priority,
         provider: existingProvider ?? {
@@ -227,8 +231,9 @@ export class ConfigManager {
    * 所有策略均只返回单个后端，调用失败即返回错误。
    *
    * @param requiredCapabilities 请求所需能力标识，用于过滤不满足的后端
+   * @param requiredParameters 请求所需的参数，用于优先匹配更兼容的后端
    */
-  public resolveAllBackends(virtualModelId: string, requiredCapabilities: string[] = []): ResolvedRoute[] {
+  public resolveAllBackends(virtualModelId: string, requiredCapabilities: string[] = [], requiredParameters: string[] = []): ResolvedRoute[] {
     const config = this.virtualModels.get(virtualModelId);
     if (!config || config.backends.length === 0) {
       return [];
@@ -236,8 +241,10 @@ export class ConfigManager {
 
     const eligible = this.filterByCapabilities(config.backends, requiredCapabilities);
 
+    const scored = this.scoreByParameters(eligible, requiredParameters);
+
     // 流控感知过滤：剔除 RPM 或 TPM 任一已满载的后端
-    const available = this.filterByRateLimit(eligible);
+    const available = this.filterByRateLimit(scored);
 
     if (available.length === 0 && eligible.length > 0) {
       // 所有后端因流控耗尽而不可用时，记录日志供诊断
@@ -248,6 +255,7 @@ export class ConfigManager {
       actualModel: backend.actualModel,
       modelType: config.modelType,
       capabilities: backend.capabilities,
+      supportedParameters: backend.supportedParameters,
       providerKind: backend.provider.kind,
       providerId: backend.provider.id,
       provider: backend.provider,
@@ -274,6 +282,22 @@ export class ConfigManager {
       return backends;
     }
     return backends.filter((b) => requiredCapabilities.every((cap) => b.capabilities.includes(cap)));
+  }
+
+  /**
+   * 软排序：按后端声明的 supported_parameters 与请求所需参数的匹配度排序
+   * 全部满足的后端排在前面；无法完全满足的后端降级但不淘汰。
+   */
+  private scoreByParameters(
+    backends: VirtualModelBackend[],
+    requiredParams: string[],
+  ): VirtualModelBackend[] {
+    if (requiredParams.length === 0) return backends;
+    return [...backends].sort((a, b) => {
+      const scoreA = requiredParams.filter(p => a.supportedParameters.includes(p)).length;
+      const scoreB = requiredParams.filter(p => b.supportedParameters.includes(p)).length;
+      return scoreB - scoreA;  // 降序，满足更多的排前面
+    });
   }
 
   /**

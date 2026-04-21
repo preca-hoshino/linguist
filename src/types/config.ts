@@ -1,5 +1,7 @@
 // src/types/config.ts — 配置与路由相关类型定义
 
+export type ModelType = 'chat' | 'embedding' | 'rerank' | 'image' | 'audio';
+
 // ==================== 凭证系统（判别联合） ====================
 
 /** API Key 认证方式 */
@@ -81,9 +83,11 @@ export interface VirtualModelBackend {
   /** 提供商侧真实模型名 */
   actualModel: string;
   /** 模型类型 */
-  modelType: 'chat' | 'embedding';
+  modelType: ModelType;
   /** 模型能力标识列表 (chat: vision/tools/thinking/web_search; embedding: multimodal/sparse_vector) */
   capabilities: string[];
+  /** 支持的可调优参数列表 */
+  supportedParameters: string[];
   /** 权重（用于 load_balance） */
   weight: number;
   /** 优先级（用于 failover，数值越小优先级越高） */
@@ -105,7 +109,7 @@ export interface VirtualModelConfig {
   /** 虚拟模型 ID（用户请求的 model 字段） */
   id: string;
   /** 模型类型（与关联的提供商模型保持一致） */
-  modelType: 'chat' | 'embedding';
+  modelType: ModelType;
   /** 路由策略 */
   routingStrategy: 'load_balance' | 'failover';
   /** 后端列表 */
@@ -127,9 +131,11 @@ export interface ResolvedRoute {
   /** 提供商侧的实际模型 ID */
   actualModel: string;
   /** 模型类型 */
-  modelType: 'chat' | 'embedding';
+  modelType: ModelType;
   /** 模型能力标识列表 */
   capabilities: string[];
+  /** 支持的可调优参数列表 */
+  supportedParameters: string[];
   /** 提供商协议类型 */
   providerKind: string;
   /** 提供商 ID */
