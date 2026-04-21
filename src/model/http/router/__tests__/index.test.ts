@@ -103,6 +103,24 @@ describe('Router', () => {
       expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', ['vision', 'tools', 'thinking'], []);
     });
 
+    it('should infer stream capability and required parameters', () => {
+      (configManager.getVirtualModelConfig as jest.Mock).mockReturnValue({
+        modelType: 'chat',
+        backends: [],
+      });
+      (configManager.resolveAllBackends as jest.Mock).mockReturnValue([{ actualModel: 'am', providerKind: 'pk' }]);
+
+      const req: InternalChatRequest = {
+        messages: [{ role: 'user', content: 'hello' }],
+        stream: true,
+        temperature: 0.8,
+        top_p: 0.9,
+      };
+      mockCtx.request = req as unknown as any;
+      route(mockCtx);
+      expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', ['stream'], ['temperature', 'top_p']);
+    });
+
     it('should not infer vision if message content is string or text parts', () => {
       (configManager.getVirtualModelConfig as jest.Mock).mockReturnValue({
         modelType: 'chat',
