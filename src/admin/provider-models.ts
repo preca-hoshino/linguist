@@ -8,8 +8,8 @@ import { handleAdminError } from './error';
 
 const logger = createLogger('Admin:ProviderModels', logColors.bold + logColors.blue);
 
-/** Chat 模型允许的能力标识（视觉 / 联网 / 思考 / 工具） */
-const CHAT_CAPABILITIES = ['vision', 'web_search', 'thinking', 'tools'] as const;
+/** Chat 模型允许的能力标识（视觉 / 联网 / 思考 / 工具 / 缓存） */
+const CHAT_CAPABILITIES = ['vision', 'web_search', 'thinking', 'tools', 'cache'] as const;
 
 /** Embedding 模型允许的能力标识（多模态 / 稀疏向量） */
 const EMBEDDING_CAPABILITIES = ['multimodal', 'sparse_vector'] as const;
