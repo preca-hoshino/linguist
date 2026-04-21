@@ -1,7 +1,7 @@
 // src/users/openaicompat/chat/response/stream.ts — OpenAI 兼容流式响应适配器
 
-import type { ChatStreamDelta, ModelHttpContext, InternalChatStreamChunk } from '@/types';
 import type { UserChatStreamResponseAdapter } from '@/model/http/users/types';
+import type { ChatStreamDelta, InternalChatStreamChunk, ModelHttpContext } from '@/types';
 import { convertUsage } from './usage-converter';
 
 /**

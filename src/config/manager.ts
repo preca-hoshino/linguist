@@ -2,13 +2,13 @@ import type { Client } from 'pg';
 import { createListenClient, db } from '@/db';
 import { invalidateAppCache } from '@/db/apps';
 import type {
+  ModelType,
   ProviderAdvancedConfig,
   ProviderConfig,
   ProviderCredential,
   ResolvedRoute,
   VirtualModelBackend,
   VirtualModelConfig,
-  ModelType,
 } from '@/types';
 import { DEFAULT_PROVIDER_CONFIG } from '@/types';
 import { createLogger, logColors, rateLimiter } from '@/utils';
@@ -233,7 +233,11 @@ export class ConfigManager {
    * @param requiredCapabilities 请求所需能力标识，用于过滤不满足的后端
    * @param requiredParameters 请求所需的参数，用于优先匹配更兼容的后端
    */
-  public resolveAllBackends(virtualModelId: string, requiredCapabilities: string[] = [], requiredParameters: string[] = []): ResolvedRoute[] {
+  public resolveAllBackends(
+    virtualModelId: string,
+    requiredCapabilities: string[] = [],
+    requiredParameters: string[] = [],
+  ): ResolvedRoute[] {
     const config = this.virtualModels.get(virtualModelId);
     if (!config || config.backends.length === 0) {
       return [];
@@ -288,15 +292,14 @@ export class ConfigManager {
    * 软排序：按后端声明的 supported_parameters 与请求所需参数的匹配度排序
    * 全部满足的后端排在前面；无法完全满足的后端降级但不淘汰。
    */
-  private scoreByParameters(
-    backends: VirtualModelBackend[],
-    requiredParams: string[],
-  ): VirtualModelBackend[] {
-    if (requiredParams.length === 0) return backends;
+  private scoreByParameters(backends: VirtualModelBackend[], requiredParams: string[]): VirtualModelBackend[] {
+    if (requiredParams.length === 0) {
+      return backends;
+    }
     return [...backends].sort((a, b) => {
-      const scoreA = requiredParams.filter(p => a.supportedParameters.includes(p)).length;
-      const scoreB = requiredParams.filter(p => b.supportedParameters.includes(p)).length;
-      return scoreB - scoreA;  // 降序，满足更多的排前面
+      const scoreA = requiredParams.filter((p) => a.supportedParameters.includes(p)).length;
+      const scoreB = requiredParams.filter((p) => b.supportedParameters.includes(p)).length;
+      return scoreB - scoreA; // 降序，满足更多的排前面
     });
   }
 

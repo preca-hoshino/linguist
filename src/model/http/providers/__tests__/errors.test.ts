@@ -1,4 +1,4 @@
-import { fallbackByStatus, extractString, extractErrorObj, tryParseJson } from '../errors';
+import { extractErrorObj, extractString, fallbackByStatus, tryParseJson } from '../errors';
 
 describe('Providers Base Errors Utilities', () => {
   describe('fallbackByStatus', () => {

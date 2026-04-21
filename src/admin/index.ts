@@ -5,6 +5,10 @@ import { appsRouter } from './apps';
 import { adminAuth } from './auth';
 import { copilotOAuthRouter } from './copilot-oauth';
 import { loginRouter } from './login';
+import { mcpLogsRouter } from './mcp-logs';
+import { mcpProvidersRouter } from './mcp-providers';
+import { mcpStatsRouter } from './mcp-stats';
+import { mcpVirtualServersRouter } from './mcp-virtual-servers';
 import { meRouter } from './me';
 import { providerModelsRouter } from './provider-models';
 import { providersRouter } from './providers';
@@ -12,10 +16,6 @@ import { requestLogsRouter } from './request-logs';
 import { statsRouter } from './stats';
 import { publicUsersRouter, usersRouter } from './users';
 import { virtualModelsRouter } from './virtual-models';
-import { mcpProvidersRouter } from './mcp-providers';
-import { mcpVirtualServersRouter } from './mcp-virtual-servers';
-import { mcpLogsRouter } from './mcp-logs';
-import { mcpStatsRouter } from './mcp-stats';
 
 const adminRouter: Router = Router();
 
@@ -28,6 +28,7 @@ adminRouter.use(adminAuth);
 
 // 挂载 Stripe 哲学的幂等性捕捉层 (用于处理所有 POST 并捕获 Idempotency-Key)
 import { idempotencyMiddleware } from './idempotency';
+
 adminRouter.use(idempotencyMiddleware);
 
 // 挂载子路由

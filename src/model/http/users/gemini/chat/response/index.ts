@@ -1,7 +1,7 @@
 // src/users/gemini/chat/response/index.ts — Gemini 响应适配器（精简编排层）
 
-import type { ModelHttpContext, InternalChatResponse } from '@/types';
 import type { UserChatResponseAdapter } from '@/model/http/users/types';
+import type { InternalChatResponse, ModelHttpContext } from '@/types';
 import { createLogger, logColors } from '@/utils';
 import { convertCandidate } from './candidate-converter';
 import { convertUsage } from './usage-converter';

@@ -10,10 +10,10 @@ import {
   updateMcpProvider,
 } from '@/db/mcp-providers/queries';
 import type { McpProviderCreateInput, McpProviderUpdateInput } from '@/db/mcp-providers/types';
+import type { McpToolInfo } from '@/mcp/providers/base-client';
+import { mcpConnectionManager } from '@/mcp/providers/connection-manager';
 import { GatewayError } from '@/utils';
 import { handleAdminError } from './error';
-import { mcpConnectionManager } from '@/mcp/providers/connection-manager';
-import type { McpToolInfo } from '@/mcp/providers/base-client';
 
 const router: Router = Router();
 

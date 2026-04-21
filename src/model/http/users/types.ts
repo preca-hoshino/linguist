@@ -1,6 +1,6 @@
 // src/users/types.ts — 用户适配器接口定义
 
-import type { ModelHttpContext, InternalChatRequest, InternalChatStreamChunk, InternalEmbeddingRequest } from '@/types';
+import type { InternalChatRequest, InternalChatStreamChunk, InternalEmbeddingRequest, ModelHttpContext } from '@/types';
 
 /** 错误响应载荷（HTTP 状态码 + JSON 响应体） */
 export interface ErrorResponsePayload {

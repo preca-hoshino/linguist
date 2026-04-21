@@ -8,8 +8,8 @@ import 'dotenv/config';
 import { configManager } from './config';
 import { closePool, countUsers, createUser, runMigrations } from './db';
 import { initMcpGateway, shutdownMcpGateway } from './mcp';
-import { setupWebSocket } from './socket';
 import { app } from './server';
+import { setupWebSocket } from './socket';
 import { createLogger, logColors, rateLimiter } from './utils';
 
 const logger = createLogger('Startup', logColors.bold + logColors.green);

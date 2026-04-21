@@ -1,7 +1,7 @@
 // src/users/gemini/chat/request/index.ts — Gemini 请求适配器（精简编排层）
 
-import type { InternalChatRequest } from '@/types';
 import type { UserChatRequestAdapter } from '@/model/http/users/types';
+import type { InternalChatRequest } from '@/types';
 import { createLogger, GatewayError, logColors } from '@/utils';
 import { convertToMessages } from './message-converter';
 import { convertThinkingConfig } from './thinking-converter';

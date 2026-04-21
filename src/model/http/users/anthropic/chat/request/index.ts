@@ -1,7 +1,7 @@
 // src/users/claude/chat/request/index.ts — Anthropic 请求适配器（编排层）
 
-import type { InternalChatRequest, ThinkingConfig, ToolChoice, ToolDefinition } from '@/types';
 import type { UserChatRequestAdapter } from '@/model/http/users/types';
+import type { InternalChatRequest, ThinkingConfig, ToolChoice, ToolDefinition } from '@/types';
 import { createLogger, GatewayError, logColors } from '@/utils';
 import { convertMessages, convertSystemPrompt } from './message-converter';
 import type { AnthropicRequestBody, AnthropicTool, AnthropicToolChoice } from './types';

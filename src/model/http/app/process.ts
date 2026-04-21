@@ -5,8 +5,8 @@ import { getApiKeyExtractor, getFormatLogger } from '@/api';
 import { markCompleted, markError, markProcessing } from '@/db';
 import type { Middleware } from '@/middleware';
 import {
-  apiKeyAuth,
   allowedModelCheck,
+  apiKeyAuth,
   applyMiddlewares,
   normalizeChatToolCallIds,
   normalizeResponseChatToolCallIds,
@@ -15,8 +15,8 @@ import {
 } from '@/middleware';
 import { dispatchChatProvider, dispatchEmbeddingProvider } from '@/model/http/providers/engine';
 import { assertRouted, route } from '@/model/http/router';
-import type { ModelHttpContext, HttpHeaders, InternalChatRequest, InternalEmbeddingRequest } from '@/types';
 import { buildErrorResponseBody, getUserChatAdapter, getUserEmbeddingAdapter, handleError } from '@/model/http/users';
+import type { HttpHeaders, InternalChatRequest, InternalEmbeddingRequest, ModelHttpContext } from '@/types';
 import { GatewayError } from '@/utils';
 import { v4 as uuidv4 } from '@/utils/uuid';
 import { expressHeadersToRecord, finalizeError, finalizeSuccess, sanitizeHeaders } from './helpers';

@@ -1,6 +1,6 @@
-import { fetchHeadersToRecord, parseProviderResponse } from '../http-utils';
 import { GatewayError } from '@/utils';
 import type { Logger } from '@/utils/logger';
+import { fetchHeadersToRecord, parseProviderResponse } from '../http-utils';
 
 describe('Providers HTTP Utils', () => {
   describe('fetchHeadersToRecord', () => {

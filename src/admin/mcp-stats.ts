@@ -2,8 +2,8 @@
 
 import type { Request, Response } from 'express';
 import { Router } from 'express';
-import { getMcpMethodBreakdown, getMcpStatsOverview, getMcpStatsTimeSeries } from '@/db/mcp-logs';
 import type { McpStatsDimension, McpStatsInterval, McpStatsQueryParams, McpStatsRange } from '@/db/mcp-logs';
+import { getMcpMethodBreakdown, getMcpStatsOverview, getMcpStatsTimeSeries } from '@/db/mcp-logs';
 import { GatewayError } from '@/utils';
 import { handleAdminError } from './error';
 

@@ -1,7 +1,7 @@
 // src/users/openaicompat/chat/request/index.ts — OpenAI 兼容请求适配器（精简编排层）
 
-import type { InternalChatRequest, ThinkingConfig } from '@/types';
 import type { UserChatRequestAdapter } from '@/model/http/users/types';
+import type { InternalChatRequest, ThinkingConfig } from '@/types';
 import { GatewayError } from '@/utils/errors';
 import { createLogger, logColors } from '@/utils/logger';
 import { convertMessages } from './message-converter';

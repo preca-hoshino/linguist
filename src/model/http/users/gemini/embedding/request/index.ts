@@ -1,7 +1,7 @@
 // src/users/gemini/embedding/request/index.ts — Gemini 嵌入请求适配器
 
-import type { EmbeddingTaskType, EmbeddingTextInput, InternalEmbeddingRequest } from '@/types';
 import type { UserEmbeddingRequestAdapter } from '@/model/http/users/types';
+import type { EmbeddingTaskType, EmbeddingTextInput, InternalEmbeddingRequest } from '@/types';
 import { createLogger, GatewayError, logColors } from '@/utils';
 import type { GeminiEmbedContentBody } from './types';
 

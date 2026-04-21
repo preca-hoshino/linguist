@@ -1,7 +1,7 @@
 // tests/providers/gemini.test.ts — Gemini 插件单元测试
 
-import type { GatewayError } from '@/utils/errors';
 import { clearAllMocks, setupGeminiMock } from '@/tests/helpers/mock-server';
+import type { GatewayError } from '@/utils/errors';
 import { geminiPlugin } from '../../providers/gemini';
 
 describe('Provider Plugin: Gemini', () => {
