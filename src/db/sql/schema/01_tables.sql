@@ -33,8 +33,9 @@ CREATE TABLE IF NOT EXISTS model_provider_models (
     id              VARCHAR(32)   PRIMARY KEY,
     provider_id     VARCHAR(32)   NOT NULL REFERENCES model_providers(id) ON DELETE CASCADE,
     name            VARCHAR(200) NOT NULL,
-    model_type      VARCHAR(20)  NOT NULL CHECK (model_type IN ('chat', 'embedding')),
+    model_type      VARCHAR(20)  NOT NULL CHECK (model_type IN ('chat', 'embedding', 'rerank', 'image', 'audio')),
     capabilities    TEXT[]       DEFAULT '{}',
+    supported_parameters TEXT[]  DEFAULT '{}',
     parameters      JSONB        DEFAULT '{}'::jsonb,
     max_tokens      INTEGER      DEFAULT 128,
     pricing_tiers   JSONB        DEFAULT '[]'::jsonb,
@@ -52,7 +53,7 @@ CREATE TABLE IF NOT EXISTS virtual_models (
     name                VARCHAR(200) NOT NULL,
     description         TEXT         DEFAULT '',
     model_type          VARCHAR(20)  NOT NULL DEFAULT 'chat'
-                        CHECK (model_type IN ('chat', 'embedding')),
+                        CHECK (model_type IN ('chat', 'embedding', 'rerank', 'image', 'audio')),
     routing_strategy    VARCHAR(20)  NOT NULL DEFAULT 'load_balance'
                         CHECK (routing_strategy IN ('load_balance', 'failover')),
     rpm_limit           INT          DEFAULT NULL,
