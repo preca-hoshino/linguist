@@ -1,8 +1,9 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { route, assertRouted } from '../index';
+
 import { configManager } from '@/config';
+import type { InternalChatRequest, InternalEmbeddingRequest, ModelHttpContext } from '@/types';
 import { GatewayError } from '@/utils';
-import type { ModelHttpContext, InternalChatRequest, InternalEmbeddingRequest } from '@/types';
+import { assertRouted, route } from '../index';
 
 jest.mock('@/config', () => ({
   configManager: {
@@ -99,7 +100,7 @@ describe('Router', () => {
       };
       mockCtx.request = req as unknown as any;
       route(mockCtx);
-      expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', ['vision', 'tools', 'thinking']);
+      expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', ['vision', 'tools', 'thinking'], []);
     });
 
     it('should not infer vision if message content is string or text parts', () => {
@@ -118,7 +119,7 @@ describe('Router', () => {
       };
       mockCtx.request = req as unknown as any;
       route(mockCtx);
-      expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', []);
+      expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', [], []);
     });
 
     it('should infer embedding capabilities (multimodal, sparse_vector)', () => {
@@ -134,7 +135,7 @@ describe('Router', () => {
       };
       mockCtx.request = req as unknown as any;
       route(mockCtx, 'embedding');
-      expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', ['multimodal', 'sparse_vector']);
+      expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', ['multimodal', 'sparse_vector'], []);
     });
 
     it('should not infer embedding capabilities for normal text inputs', () => {
@@ -150,7 +151,7 @@ describe('Router', () => {
       };
       mockCtx.request = req as unknown as any;
       route(mockCtx, 'embedding');
-      expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', []);
+      expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', [], []);
     });
   });
 

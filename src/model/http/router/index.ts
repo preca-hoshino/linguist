@@ -1,7 +1,13 @@
 // src/router/index.ts — 路由与虚拟模型映射
 
 import { configManager } from '@/config';
-import type { ModelHttpContext, InternalChatRequest, InternalEmbeddingRequest, RoutedModelHttpContext } from '@/types';
+import type {
+  InternalChatRequest,
+  InternalEmbeddingRequest,
+  ModelHttpContext,
+  ModelType,
+  RoutedModelHttpContext,
+} from '@/types';
 import { createLogger, GatewayError, logColors } from '@/utils';
 
 const logger = createLogger('Router', logColors.bold + logColors.cyan);
@@ -38,6 +44,11 @@ function inferChatCapabilities(req: InternalChatRequest): string[] {
   // 检查是否启用深度思考
   if (req.thinking?.type !== undefined && req.thinking.type !== 'disabled') {
     caps.push('thinking');
+  }
+
+  // 检查是否为流式请求
+  if (req.stream) {
+    caps.push('stream');
   }
 
   return caps;
@@ -87,6 +98,35 @@ function inferRequiredCapabilities(ctx: ModelHttpContext): string[] {
   return [];
 }
 
+// ==================== 参数推断 ====================
+
+/**
+ * 从 Chat 请求中推断用户实际传入的调优参数集合（用于软排序后端选择）
+ * 只推断用户明确传入的参数，而非全量可能参数。
+ */
+function inferChatRequiredParameters(req: InternalChatRequest): string[] {
+  const params: string[] = [];
+  if (req.temperature !== undefined) {
+    params.push('temperature');
+  }
+  if (req.top_p !== undefined) {
+    params.push('top_p');
+  }
+  if (req.top_k !== undefined) {
+    params.push('top_k');
+  }
+  if (req.frequency_penalty !== undefined) {
+    params.push('frequency_penalty');
+  }
+  if (req.presence_penalty !== undefined) {
+    params.push('presence_penalty');
+  }
+  if (req.stop !== undefined) {
+    params.push('stop');
+  }
+  return params;
+}
+
 // ==================== 路由 ====================
 
 /**
@@ -102,7 +142,7 @@ function inferRequiredCapabilities(ctx: ModelHttpContext): string[] {
  * 本方法仅做虚拟模型校验 + 能力推断 + 首个后端填充 ctx.route，
  * 实际的路由策略选择（加权随机/failover）由 caller 调用 resolveAllBackends 时完成。
  */
-export function route(ctx: ModelHttpContext, expectedModelType?: 'chat' | 'embedding'): void {
+export function route(ctx: ModelHttpContext, expectedModelType?: ModelType): void {
   logger.debug({ requestModel: ctx.requestModel, requestId: ctx.id }, '[route] resolving...');
 
   // 提前校验虚拟模型类型（利用 virtual_models.model_type），
@@ -121,15 +161,17 @@ export function route(ctx: ModelHttpContext, expectedModelType?: 'chat' | 'embed
   }
 
   const requiredCaps = inferRequiredCapabilities(ctx);
+  const requiredParams = ctx.request && 'messages' in ctx.request ? inferChatRequiredParameters(ctx.request) : [];
+
   if (requiredCaps.length > 0) {
     logger.debug(
-      { requestId: ctx.id, requiredCapabilities: requiredCaps },
-      'Inferred required capabilities from request',
+      { requestId: ctx.id, requiredCapabilities: requiredCaps, requiredParams },
+      'Inferred required capabilities and parameters from request',
     );
   }
 
   // 直接使用 resolveAllBackends 完成路由（避免 resolveRoute + resolveAllBackends 双重解析）
-  const candidates = configManager.resolveAllBackends(ctx.requestModel, requiredCaps);
+  const candidates = configManager.resolveAllBackends(ctx.requestModel, requiredCaps, requiredParams);
   if (candidates.length === 0) {
     // 虚拟模型存在但无后端满足能力要求
     if (vmConfig.backends.length > 0 && requiredCaps.length > 0) {
@@ -157,6 +199,7 @@ export function route(ctx: ModelHttpContext, expectedModelType?: 'chat' | 'embed
     providerConfig: selected.provider,
     strategy: selected.routingStrategy,
     capabilities: requiredCaps,
+    supportedParameters: selected.supportedParameters,
   };
   ctx.timing.routed = Date.now();
 
