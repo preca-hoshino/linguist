@@ -32,6 +32,8 @@ export interface ProviderChatStreamResponseAdapter {
 export interface ProviderCallOptions {
   /** API 调用超时时间（毫秒）。不传则使用 DEFAULT_PROVIDER_TIMEOUT 常量 */
   timeoutMs?: number | undefined;
+  /** 模型请求级别的自定义请求头覆盖 */
+  headers?: Record<string, string | null> | undefined;
 }
 
 export interface ProviderChatClient {

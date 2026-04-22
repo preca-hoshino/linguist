@@ -11,7 +11,7 @@ describe('Provider Plugin: Gemini', () => {
     name: 'Gemini',
     credential: { type: 'api_key' as const, key: 'AIza...' },
     baseUrl: 'https://generativelanguage.googleapis.com',
-    config: { custom_headers: {}, http_proxy: '' },
+    config: { http_proxy: '' },
   };
 
   beforeEach(() => {

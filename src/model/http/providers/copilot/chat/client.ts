@@ -3,7 +3,7 @@
 import { mapCopilotError } from '@/model/http/providers/copilot/error-mapping';
 import { copilotTokenManager } from '@/model/http/providers/copilot/token-manager';
 import { parseProviderResponse } from '@/model/http/providers/http-utils';
-import type { ProviderChatClient } from '@/model/http/providers/types';
+import type { ProviderCallOptions, ProviderChatClient } from '@/model/http/providers/types';
 import type { CopilotCredential, ProviderCallResult, ProviderConfig, ProviderStreamResult } from '@/types';
 import { createLogger, DEFAULT_PROVIDER_TIMEOUT, GatewayError, logColors } from '@/utils';
 import { COPILOT_CHAT_HEADERS } from '../constants';
@@ -72,7 +72,11 @@ export class CopilotChatClient implements ProviderChatClient {
     logger.debug({ providerId: config.id }, 'Copilot chat client initialized');
   }
 
-  public async call(providerReq: Record<string, unknown>, model: string): Promise<ProviderCallResult> {
+  public async call(
+    providerReq: Record<string, unknown>,
+    model: string,
+    options?: ProviderCallOptions,
+  ): Promise<ProviderCallResult> {
     const { token, apiEndpoint } = await this.resolveToken();
     const endpointType = await copilotTokenManager.getEndpointType(this.config.id, token, apiEndpoint, model);
     const url = resolveRequestUrl(apiEndpoint, endpointType);
@@ -86,14 +90,13 @@ export class CopilotChatClient implements ProviderChatClient {
       ...COPILOT_CHAT_HEADERS,
     };
 
-    const customHeaders = this.config.config.custom_headers as Record<string, unknown> | undefined;
-    if (customHeaders !== undefined) {
-      for (const [key, val] of Object.entries(customHeaders)) {
+    if (options?.headers !== undefined) {
+      for (const [key, val] of Object.entries(options.headers)) {
         if (val === null || val === '') {
           // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
           delete requestHeaders[key];
         } else {
-          requestHeaders[key] = val as string;
+          requestHeaders[key] = val;
         }
       }
     }
@@ -126,7 +129,11 @@ export class CopilotChatClient implements ProviderChatClient {
     return { body, statusCode, requestHeaders, responseHeaders };
   }
 
-  public async callStream(providerReq: Record<string, unknown>, model: string): Promise<ProviderStreamResult> {
+  public async callStream(
+    providerReq: Record<string, unknown>,
+    model: string,
+    options?: ProviderCallOptions,
+  ): Promise<ProviderStreamResult> {
     const { token, apiEndpoint } = await this.resolveToken();
     const endpointType = await copilotTokenManager.getEndpointType(this.config.id, token, apiEndpoint, model);
     const url = resolveRequestUrl(apiEndpoint, endpointType);
@@ -140,14 +147,13 @@ export class CopilotChatClient implements ProviderChatClient {
       ...COPILOT_CHAT_HEADERS,
     };
 
-    const customHeaders = this.config.config.custom_headers as Record<string, unknown> | undefined;
-    if (customHeaders !== undefined) {
-      for (const [key, val] of Object.entries(customHeaders)) {
+    if (options?.headers !== undefined) {
+      for (const [key, val] of Object.entries(options.headers)) {
         if (val === null || val === '') {
           // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
           delete requestHeaders[key];
         } else {
-          requestHeaders[key] = val as string;
+          requestHeaders[key] = val;
         }
       }
     }

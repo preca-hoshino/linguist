@@ -53,8 +53,7 @@ describe('Internal Types', () => {
             baseUrl: 'https://api.deepseek.com',
 
             config: {
-              custom_headers: {},
-              http_proxy: undefined,
+              http_proxy: '',
             } as unknown as import('../index').ProviderAdvancedConfig,
           },
           strategy: 'load_balance',

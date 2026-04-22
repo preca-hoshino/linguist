@@ -39,8 +39,6 @@ export type ProviderCredential = ApiKeyCredential | OAuth2Credential | CopilotCr
 
 /** 提供商高级配置（存储在 config JSONB 列） */
 export interface ProviderAdvancedConfig {
-  /** 自定义请求头（有则覆盖，无则新加） */
-  custom_headers: Record<string, string>;
   /** HTTP 代理地址（空字符串表示不使用） */
   http_proxy: string;
   /** 提供商特有的扩展配置 */
@@ -49,7 +47,6 @@ export interface ProviderAdvancedConfig {
 
 /** 高级配置默认值 */
 export const DEFAULT_PROVIDER_CONFIG: ProviderAdvancedConfig = {
-  custom_headers: {},
   http_proxy: '',
 };
 

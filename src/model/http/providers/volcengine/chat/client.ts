@@ -16,10 +16,7 @@ const logger = createLogger('Provider:VolcEngine', logColors.bold + logColors.ma
 export class VolcEngineChatClient implements ProviderChatClient {
   private readonly apiKey: string;
   private readonly baseUrl: string;
-  private readonly providerConfig: ProviderConfig;
-
   public constructor(config: ProviderConfig) {
-    this.providerConfig = config;
     const cred = config.credential;
     if (cred.type !== 'api_key') {
       throw new GatewayError(500, 'config_error', `VolcEngine requires api_key credential, got: ${cred.type}`);
@@ -49,14 +46,13 @@ export class VolcEngineChatClient implements ProviderChatClient {
       'Content-Type': 'application/json',
     };
 
-    const customHeaders = this.providerConfig.config.custom_headers as Record<string, unknown> | undefined;
-    if (customHeaders !== undefined) {
-      for (const [key, val] of Object.entries(customHeaders)) {
+    if (options?.headers !== undefined) {
+      for (const [key, val] of Object.entries(options.headers)) {
         if (val === null || val === '') {
           // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
           delete requestHeaders[key];
         } else {
-          requestHeaders[key] = val as string;
+          requestHeaders[key] = val;
         }
       }
     }
@@ -97,14 +93,13 @@ export class VolcEngineChatClient implements ProviderChatClient {
       'Content-Type': 'application/json',
     };
 
-    const customHeaders = this.providerConfig.config.custom_headers as Record<string, unknown> | undefined;
-    if (customHeaders !== undefined) {
-      for (const [key, val] of Object.entries(customHeaders)) {
+    if (options?.headers !== undefined) {
+      for (const [key, val] of Object.entries(options.headers)) {
         if (val === null || val === '') {
           // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
           delete requestHeaders[key];
         } else {
-          requestHeaders[key] = val as string;
+          requestHeaders[key] = val;
         }
       }
     }
