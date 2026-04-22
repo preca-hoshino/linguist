@@ -1,0 +1,510 @@
+### ============================================================
+### Linguist LLM Gateway — Admin API Reference
+### ============================================================
+###
+### 使用：安装 VSCode 扩展 "REST Client"，修改下方变量后点击 "Send Request"
+### 这个文件严格遵循全局 DRY 规范（一个端点字面量仅声明一次）。
+###
+### 架构三层模型：
+###   Provider → ProviderModel → VirtualModel
+###
+### ============================================================
+
+@baseUrl = http://127.0.0.1:3622
+@adminEmail = admin@example.com
+@adminPassword = changeme123
+
+# === 全局端点定义 (DRY规范: 一个端点只写一次) ===
+@api = {{baseUrl}}/api
+@loginEp          = {{api}}/login
+@meEp             = {{api}}/me
+@usersEp          = {{api}}/users
+@providersEp      = {{api}}/providers
+@providerModelsEp = {{api}}/provider-models
+@virtualModelsEp  = {{api}}/virtual-models
+@requestLogsEp    = {{api}}/request-logs
+@appsEp           = {{api}}/apps
+@oauthCopilotEp   = {{api}}/oauth/copilot
+@statsEp          = {{api}}/stats
+
+# === 请求变量链 (自动注入后续请求) ===
+# 运行相关 POST 请求后，生成的 ID 将自动注入下方变量
+@adminToken      = {{login.response.body.access_token}}
+@providerId      = {{create_provider.response.body.id}}
+@providerModelId = {{create_provider_model.response.body.id}}
+@virtualModelId  = {{create_virtual_model.response.body.id}}
+@appId           = {{create_app.response.body.id}}
+@apiKeyId        = {{create_api_key.response.body.id}}
+@userId          = {{create_user.response.body.id}}
+
+# === 测试用的预设 ID ===
+@fixedProviderId      = a3b4c5d6
+@fixedProviderModelId = 00000001
+@fixedVirtualModelId  = vm000001
+@fixedAppId           = app_a1b2c3d4
+@fixedApiKeyId        = key00001
+@fixedRequestLogId    = c9f5c1c7-1da2-4e8d-9c1a-ffd20c967bda
+@deviceCode           = TEST_DEVICE_CODE
+@fixedUserId          = abcdef12
+
+### ============================================================
+### 0. Auth & Users（认证与用户）
+### ============================================================
+
+### 0.1 获取管理员 Token (登录)
+# @name login
+POST {{loginEp}} HTTP/1.1
+Content-Type: application/json
+
+{
+    "email": "{{adminEmail}}",
+    "password": "{{adminPassword}}"
+}
+
+###
+
+### 0.2 获取当前登录用户
+GET {{meEp}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 0.3 列出所有用户
+# 参数示例: ?limit=10&starting_after=abc...&search=admin
+GET {{usersEp}}?limit=10 HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 0.4 创建新用户
+# @name create_user
+POST {{usersEp}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+    "username": "newuser",
+    "email": "user@example.com",
+    "password": "strongpassword",
+    "avatar_data": ""
+}
+
+###
+
+### 0.5 更新用户 (支持所有字段可选修改)
+POST {{usersEp}}/{{fixedUserId}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+    "username": "updated_name",
+    "is_active": false
+}
+
+###
+
+### 0.6 获取用户头像 (公开接口，无需 Token)
+GET {{usersEp}}/{{fixedUserId}}/avatar HTTP/1.1
+
+###
+
+### 0.7 删除用户
+DELETE {{usersEp}}/{{fixedUserId}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+
+### ============================================================
+### 1. Provider（提供商）
+### ============================================================
+
+### 1.1 创建提供商
+# @name create_provider
+POST {{providersEp}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+    "name": "深度求索",
+    "kind": "deepseek",
+    "base_url": "https://api.deepseek.com/v1",
+    "api_key": "sk-xxxxxxxxxxxxxxxx"
+}
+
+###
+
+### 1.2 列出所有提供商
+GET {{providersEp}}?limit=10 HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 1.3 查询单个提供商
+GET {{providersEp}}/{{fixedProviderId}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 1.4 更新提供商
+POST {{providersEp}}/{{fixedProviderId}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+    "name": "DeepSeek (Updated)",
+    "is_active": true
+}
+
+###
+
+### 1.5 删除提供商
+DELETE {{providersEp}}/{{fixedProviderId}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+
+### ============================================================
+### 2. ProviderModel（提供商模型）
+### ============================================================
+
+### 2.1 创建提供商模型
+# @name create_provider_model
+POST {{providerModelsEp}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+    "provider_id": "{{fixedProviderId}}",
+    "name": "deepseek-reasoner",
+    "model_type": "chat",
+    "capabilities": ["tools", "thinking"],
+    "supported_parameters": ["temperature", "top_p", "stop"],
+    "parameters": {
+        "max_tokens": 16000,
+        "context_window": 128000
+    },
+    "pricing_tiers": [
+        { "startTokens": 0, "maxTokens": 32000, "inputPrice": 0.001, "outputPrice": 0.002, "cachePrice": 0.0001 }
+    ]
+}
+
+###
+
+### 2.1.1 Create chat model with supported_parameters
+POST {{providerModelsEp}} HTTP/1.1
+Content-Type: application/json
+Authorization: Bearer {{adminToken}}
+
+{
+  "provider_id": "{{fixedProviderId}}",
+  "name": "deepseek-chat",
+  "model_type": "chat",
+  "capabilities": ["stream", "tools", "vision"],
+  "supported_parameters": ["temperature", "top_p", "frequency_penalty", "presence_penalty", "stop"],
+  "parameters": {
+      "max_tokens": 8192
+  }
+}
+
+###
+
+### 2.1.2 Create embedding model with supported_parameters
+POST {{providerModelsEp}} HTTP/1.1
+Content-Type: application/json
+Authorization: Bearer {{adminToken}}
+
+{
+  "provider_id": "{{fixedProviderId}}",
+  "name": "text-embedding-3-small",
+  "model_type": "embedding",
+  "capabilities": ["sparse_vector"],
+  "supported_parameters": ["dimensions", "encoding_format"],
+  "parameters": {
+      "max_tokens": 8192
+  }
+}
+
+###
+
+### 2.2 列出所有提供商模型
+GET {{providerModelsEp}}?limit=10 HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 2.3 查询单个提供商模型
+GET {{providerModelsEp}}/{{fixedProviderModelId}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 2.4 更新提供商模型
+POST {{providerModelsEp}}/{{fixedProviderModelId}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+    "capabilities": ["vision", "tools"],
+    "is_active": true
+}
+
+###
+
+### 2.5 删除提供商模型
+DELETE {{providerModelsEp}}/{{fixedProviderModelId}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+
+### ============================================================
+### 3. VirtualModel（虚拟模型）
+### ============================================================
+
+### 3.1 创建虚拟模型
+# @name create_virtual_model
+POST {{virtualModelsEp}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+    "name": "global-chat",
+    "description": "多后端加权负载均衡，主 DeepSeek 80% + 备 Gemini 20%",
+    "model_type": "chat",
+    "routing_strategy": "load_balance",
+    "backends": [
+        { "provider_model_id": "{{fixedProviderModelId}}", "weight": 80, "priority": 0 }
+    ]
+}
+
+###
+
+### 3.2 列出所有虚拟模型（含后端详情）
+GET {{virtualModelsEp}}?limit=10 HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 3.3 查询单个虚拟模型
+GET {{virtualModelsEp}}/{{fixedVirtualModelId}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 3.4 更新虚拟模型
+POST {{virtualModelsEp}}/{{fixedVirtualModelId}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+    "name": "global-chat (Updated)"
+}
+
+###
+
+### 3.5 删除虚拟模型
+DELETE {{virtualModelsEp}}/{{fixedVirtualModelId}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+
+### ============================================================
+### 4. RequestLog（请求日志 & 审计）
+### ============================================================
+
+### 4.1 查询请求日志
+# 可用参数: ?status=completed&request_model=global-chat&limit=20&starting_after=abc...
+GET {{requestLogsEp}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 4.2 查询日志详情（含完整 GatewayContext 审计快照）
+GET {{requestLogsEp}}/{{fixedRequestLogId}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 4.3 删除日志记录
+DELETE {{requestLogsEp}}/{{fixedRequestLogId}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+
+### ============================================================
+### 5. Apps & Keys（应用与鉴权密钥）
+### ============================================================
+
+# === 应用 (App) 操作 ===
+
+### 5.1 创建应用
+# @name create_app
+POST {{appsEp}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+    "name": "Production App",
+    "allowed_model_ids": ["{{fixedVirtualModelId}}"]
+}
+
+###
+
+### 5.2 列出所有应用
+GET {{appsEp}}?limit=10 HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 5.3 查询单个应用
+GET {{appsEp}}/{{fixedAppId}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 5.4 更新应用
+POST {{appsEp}}/{{fixedAppId}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+    "name": "Production App (Updated)",
+    "is_active": true
+}
+
+###
+
+### 5.5 删除应用
+DELETE {{appsEp}}/{{fixedAppId}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+# === 密钥 (API Key) 操作 ===
+
+### 5.6 创建 API Key
+# @name create_api_key
+POST {{appsEp}}/{{fixedAppId}}/keys HTTP/1.1
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+    "name": "PROD Server Key",
+    "expires_at": "2026-12-31T23:59:59Z"
+}
+
+###
+
+### 5.7 列出某应用下的所有 API Key
+GET {{appsEp}}/{{fixedAppId}}/keys?limit=10 HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 5.8 获取某个具体 Key
+GET {{appsEp}}/{{fixedAppId}}/keys/{{fixedApiKeyId}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 5.9 更新 API Key
+POST {{appsEp}}/{{fixedAppId}}/keys/{{fixedApiKeyId}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+    "is_active": false
+}
+
+###
+
+### 5.10 轮换 API Key（重新生成明文，旧的立即失效覆盖）
+POST {{appsEp}}/{{fixedAppId}}/keys/{{fixedApiKeyId}}/rotate HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 5.11 删除 API Key
+DELETE {{appsEp}}/{{fixedAppId}}/keys/{{fixedApiKeyId}} HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+
+### ============================================================
+### 6. Copilot OAuth（设备流授权扩展）
+### ============================================================
+
+### 6.1 生成设备验证码 (Device Code)
+# @name create_device_code
+POST {{oauthCopilotEp}}/device-codes HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 6.2 轮询设备验证状态 (Poll)
+POST {{oauthCopilotEp}}/device-codes/{{deviceCode}}/poll HTTP/1.1
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+    "provider_id": "{{fixedProviderId}}"
+}
+
+###
+
+### 6.3 验证凭据有效性 (Verify)
+POST {{oauthCopilotEp}}/verify HTTP/1.1
+Authorization: Bearer {{adminToken}}
+Content-Type: application/json
+
+{
+    "provider_id": "{{fixedProviderId}}"
+}
+
+###
+
+
+### ============================================================
+### 7. Stats（统计分析）
+### ============================================================
+
+### 7.1 概览统计
+GET {{statsEp}}/overview?range=1h HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 7.2 时序数据
+GET {{statsEp}}/time-series?range=24h&interval=10m HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 7.3 错误分析
+GET {{statsEp}}/errors?range=24h HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 7.4 Token 用量分析
+GET {{statsEp}}/tokens?range=24h HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 7.5 今日实时统计（大数字卡片）
+GET {{statsEp}}/today HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
+
+### 7.6 分组占比
+GET {{statsEp}}/breakdown?range=24h&group_by=provider_model HTTP/1.1
+Authorization: Bearer {{adminToken}}
+
+###
