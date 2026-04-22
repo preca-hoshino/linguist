@@ -11,7 +11,7 @@ describe('Provider Plugin: VolcEngine', () => {
     name: 'VolcEngine',
     credential: { type: 'api_key' as const, key: 'volc-abc' },
     baseUrl: 'https://ark.cn-beijing.volces.com',
-    config: { custom_headers: {}, http_proxy: '' },
+    config: { http_proxy: '' },
   };
 
   beforeEach(() => {

@@ -91,36 +91,18 @@ function applyBodyOverrides(
   return result;
 }
 
-/**
- * 应用 Header 重写规则到 ProviderConfig 的副本中
- */
-function applyHeaderOverridesToConfig(
-  baseConfig: ProviderConfig,
-  overrides?: Record<string, string | null>,
-): ProviderConfig {
-  if (!overrides || Object.keys(overrides).length === 0) {
-    return baseConfig;
-  }
-  const customHeaders: Record<string, string | null> = { ...baseConfig.config.custom_headers };
-  for (const [k, v] of Object.entries(overrides)) {
-    customHeaders[k] = v;
-  }
-  return {
-    ...baseConfig,
-    config: {
-      ...baseConfig.config,
-      // Temporarily cast to bypass strict string typing for the client's loop
-      custom_headers: customHeaders as unknown as Record<string, string>,
-    },
-  };
-}
-
 // ========== 框架引擎: 泛型内部实现 ==========
 
 interface AdapterSet<TReq, TRes> {
   requestAdapter: { toProviderRequest: (req: TReq, model: string) => Record<string, unknown> };
   responseAdapter: { fromProviderResponse: (res: unknown) => TRes };
-  client: { call: (req: Record<string, unknown>, model: string) => Promise<ProviderCallResult> };
+  client: {
+    call: (
+      req: Record<string, unknown>,
+      model: string,
+      options?: import('./types').ProviderCallOptions,
+    ) => Promise<ProviderCallResult>;
+  };
 }
 
 type GetAdapterSet<TReq, TRes> = (providerKind: string, providerConfig: ProviderConfig) => AdapterSet<TReq, TRes>;
@@ -133,8 +115,7 @@ export async function callProvider<TReq, TRes extends InternalResponse>(
   label: string,
 ): Promise<void> {
   const providerLogger = getProviderLogger(ctx.route.providerKind);
-  const providerConfig = applyHeaderOverridesToConfig(ctx.route.providerConfig, ctx.route.requestOverrides?.headers);
-  const { requestAdapter, responseAdapter, client } = getAdapterSet(ctx.route.providerKind, providerConfig);
+  const { requestAdapter, responseAdapter, client } = getAdapterSet(ctx.route.providerKind, ctx.route.providerConfig);
   providerLogger.debug({ requestId: ctx.id }, `[dispatch] ${label.toLowerCase()} adapter initialized`);
 
   const rawProviderReqBody = requestAdapter.toProviderRequest(request, ctx.route.model);
@@ -144,7 +125,11 @@ export async function callProvider<TReq, TRes extends InternalResponse>(
 
   ctx.timing.providerStart = Date.now();
   providerLogger.debug({ requestId: ctx.id, model: ctx.route.model }, '[dispatch] forwarding to upstream');
-  const result = await client.call(providerReqBody, ctx.route.model);
+  const callOptions =
+    ctx.route.timeoutMs !== undefined || ctx.route.requestOverrides?.headers !== undefined
+      ? { timeoutMs: ctx.route.timeoutMs, headers: ctx.route.requestOverrides?.headers }
+      : undefined;
+  const result = await client.call(providerReqBody, ctx.route.model, callOptions);
   ctx.timing.providerEnd = Date.now();
 
   ctx.audit.providerRequest.headers = result.requestHeaders;
@@ -249,10 +234,9 @@ async function tryStreamConnect(
   };
 
   const providerLogger = getProviderLogger(ctx.route.providerKind);
-  const providerConfig = applyHeaderOverridesToConfig(ctx.route.providerConfig, candidate.requestOverrides?.headers);
   const { requestAdapter, streamResponseAdapter, client } = getProviderChatAdapterSet(
     ctx.route.providerKind,
-    providerConfig,
+    ctx.route.providerConfig,
   );
   providerLogger.debug({ requestId: ctx.id }, '[dispatch] stream adapter initialized');
 
@@ -265,7 +249,15 @@ async function tryStreamConnect(
   ctx.timing.providerStart = Date.now();
   providerLogger.debug({ requestId: ctx.id, model: ctx.route.model }, '[dispatch] forwarding to upstream (stream)');
 
-  const { response, requestHeaders: providerReqHeaders } = await client.callStream(providerReqBody, ctx.route.model);
+  const streamOptions =
+    candidate.timeoutMs !== undefined || candidate.requestOverrides?.headers !== undefined
+      ? { timeoutMs: candidate.timeoutMs, headers: candidate.requestOverrides?.headers }
+      : undefined;
+  const { response, requestHeaders: providerReqHeaders } = await client.callStream(
+    providerReqBody,
+    ctx.route.model,
+    streamOptions,
+  );
 
   ctx.audit.providerRequest.headers = providerReqHeaders;
   ctx.audit.providerResponse = {

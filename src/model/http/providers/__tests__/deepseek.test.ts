@@ -11,7 +11,7 @@ describe('Provider Plugin: DeepSeek', () => {
     name: 'DeepSeek',
     credential: { type: 'api_key' as const, key: 'sk-test-key' },
     baseUrl: 'https://api.deepseek.com',
-    config: { custom_headers: {}, http_proxy: '' },
+    config: { http_proxy: '' },
   };
 
   describe('Adapter Set Assembly', () => {

@@ -1,12 +1,10 @@
 import { mapDeepSeekError } from '@/model/http/providers/deepseek/error-mapping';
 import { parseProviderResponse } from '@/model/http/providers/http-utils';
-import type { ProviderChatClient } from '@/model/http/providers/types';
+import type { ProviderCallOptions, ProviderChatClient } from '@/model/http/providers/types';
 import type { ProviderCallResult, ProviderConfig, ProviderStreamResult } from '@/types';
 import { createLogger, DEFAULT_PROVIDER_TIMEOUT, GatewayError, logColors } from '@/utils';
 
 const logger = createLogger('Provider:DeepSeek', logColors.bold + logColors.green);
-
-const DEFAULT_BASE_URL = 'https://api.deepseek.com';
 
 /**
  * DeepSeek 聊天客户端
@@ -15,16 +13,16 @@ const DEFAULT_BASE_URL = 'https://api.deepseek.com';
 export class DeepSeekChatClient implements ProviderChatClient {
   private readonly apiKey: string;
   private readonly baseUrl: string;
-  private readonly providerConfig: ProviderConfig;
-
   public constructor(config: ProviderConfig) {
-    this.providerConfig = config;
     const cred = config.credential;
     if (cred.type !== 'api_key') {
       throw new GatewayError(500, 'config_error', `DeepSeek requires api_key credential, got: ${cred.type}`);
     }
     this.apiKey = cred.key;
-    let resolvedUrl = config.baseUrl.length > 0 ? config.baseUrl : DEFAULT_BASE_URL;
+    if (config.baseUrl.length === 0) {
+      throw new GatewayError(500, 'config_error', 'DeepSeek requires a non-empty base_url');
+    }
+    let resolvedUrl = config.baseUrl;
     while (resolvedUrl.endsWith('/')) {
       resolvedUrl = resolvedUrl.slice(0, -1);
     }
@@ -32,7 +30,11 @@ export class DeepSeekChatClient implements ProviderChatClient {
     logger.debug({ baseUrl: this.baseUrl }, 'DeepSeek chat client initialized');
   }
 
-  public async call(providerReq: Record<string, unknown>, model: string): Promise<ProviderCallResult> {
+  public async call(
+    providerReq: Record<string, unknown>,
+    model: string,
+    options?: ProviderCallOptions,
+  ): Promise<ProviderCallResult> {
     const url = `${this.baseUrl}/chat/completions`;
     logger.debug({ url, model }, 'Calling DeepSeek API');
 
@@ -41,19 +43,18 @@ export class DeepSeekChatClient implements ProviderChatClient {
       'Content-Type': 'application/json',
     };
 
-    const customHeaders = this.providerConfig.config.custom_headers as Record<string, unknown> | undefined;
-    if (customHeaders !== undefined) {
-      for (const [key, val] of Object.entries(customHeaders)) {
+    if (options?.headers !== undefined) {
+      for (const [key, val] of Object.entries(options.headers)) {
         if (val === null || val === '') {
           // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
           delete requestHeaders[key];
         } else {
-          requestHeaders[key] = val as string;
+          requestHeaders[key] = val;
         }
       }
     }
 
-    const timeout = DEFAULT_PROVIDER_TIMEOUT;
+    const timeout = options?.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT;
     const start = Date.now();
     const response = await fetch(url, {
       method: 'POST',
@@ -76,7 +77,11 @@ export class DeepSeekChatClient implements ProviderChatClient {
     return { body, statusCode, requestHeaders, responseHeaders };
   }
 
-  public async callStream(providerReq: Record<string, unknown>, model: string): Promise<ProviderStreamResult> {
+  public async callStream(
+    providerReq: Record<string, unknown>,
+    model: string,
+    options?: ProviderCallOptions,
+  ): Promise<ProviderStreamResult> {
     const url = `${this.baseUrl}/chat/completions`;
     logger.debug({ url, model }, 'Calling DeepSeek API (stream)');
 
@@ -85,14 +90,13 @@ export class DeepSeekChatClient implements ProviderChatClient {
       'Content-Type': 'application/json',
     };
 
-    const customHeaders = this.providerConfig.config.custom_headers as Record<string, unknown> | undefined;
-    if (customHeaders !== undefined) {
-      for (const [key, val] of Object.entries(customHeaders)) {
+    if (options?.headers !== undefined) {
+      for (const [key, val] of Object.entries(options.headers)) {
         if (val === null || val === '') {
           // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
           delete requestHeaders[key];
         } else {
-          requestHeaders[key] = val as string;
+          requestHeaders[key] = val;
         }
       }
     }
@@ -101,7 +105,7 @@ export class DeepSeekChatClient implements ProviderChatClient {
       method: 'POST',
       headers: requestHeaders,
       body: JSON.stringify(providerReq),
-      signal: AbortSignal.timeout(DEFAULT_PROVIDER_TIMEOUT),
+      signal: AbortSignal.timeout(options?.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT),
     });
 
     if (!response.ok) {

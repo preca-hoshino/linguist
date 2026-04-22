@@ -22,10 +22,15 @@ interface ProviderBody {
   credential?: Record<string, unknown> | undefined;
   /** 高级配置 */
   config?: Partial<ProviderAdvancedConfig> | undefined;
+  /** 提供商级别全局 RPM 限制（null = 不限制） */
+  rpm_limit?: number | null | undefined;
+  /** 提供商级别全局 TPM 限制（null = 不限制） */
+  tpm_limit?: number | null | undefined;
 }
 
 /** SELECT 列常量（不含 is_active） */
-const SELECT_COLUMNS = 'id, name, kind, base_url, credential_type, credential, config, created_at, updated_at';
+const SELECT_COLUMNS =
+  'id, name, kind, base_url, credential_type, credential, config, rpm_limit, tpm_limit, created_at, updated_at';
 
 /**
  * 向 provider 行数据注入插件声明的 supported_model_types（即时计算，不入库）。
@@ -116,7 +121,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 router.post('/', async (req: Request, res: Response) => {
   try {
     const body = req.body as ProviderBody;
-    const { name, kind, base_url, credential_type, credential, config } = body;
+    const { name, kind, base_url, credential_type, credential, config, rpm_limit, tpm_limit } = body;
     logger.debug({ name, kind }, 'Creating provider');
 
     if (typeof name !== 'string' || name === '' || typeof kind !== 'string' || kind === '') {
@@ -144,8 +149,8 @@ router.post('/', async (req: Request, res: Response) => {
     const finalConfig: ProviderAdvancedConfig = { ...DEFAULT_PROVIDER_CONFIG, ...config };
 
     const result = await db.query(
-      `INSERT INTO model_providers (id, name, kind, base_url, credential_type, credential, config)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO model_providers (id, name, kind, base_url, credential_type, credential, config, rpm_limit, tpm_limit)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING ${SELECT_COLUMNS}`,
       [
         await generateShortId('model_providers'),
@@ -155,6 +160,8 @@ router.post('/', async (req: Request, res: Response) => {
         finalCredentialType,
         JSON.stringify(finalCredential),
         JSON.stringify(finalConfig),
+        rpm_limit ?? null,
+        tpm_limit ?? null,
       ],
     );
 
@@ -173,7 +180,7 @@ router.post('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const body = req.body as ProviderBody;
-    const { name, kind, base_url, credential_type, credential, config } = body;
+    const { name, kind, base_url, credential_type, credential, config, rpm_limit, tpm_limit } = body;
     logger.debug({ id }, 'Updating provider');
 
     // 凭证防破坏处理：防止前端传回占位符覆盖真实的 credential
@@ -193,6 +200,8 @@ router.post('/:id', async (req: Request, res: Response) => {
       credential_type,
       credential: finalCredential === undefined ? undefined : JSON.stringify(finalCredential),
       config: config === undefined ? undefined : JSON.stringify({ ...DEFAULT_PROVIDER_CONFIG, ...config }),
+      rpm_limit: rpm_limit === undefined ? undefined : rpm_limit,
+      tpm_limit: tpm_limit === undefined ? undefined : tpm_limit,
     });
 
     if (!update) {

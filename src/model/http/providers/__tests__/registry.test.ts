@@ -23,7 +23,7 @@ describe('Core: Plugin Registry', () => {
       name: 'DS',
       credential: { type: 'api_key' as const, key: 'k' },
       baseUrl: 'b',
-      config: { custom_headers: {}, http_proxy: '' },
+      config: { http_proxy: '' },
     };
     const set = getProviderChatAdapterSet('deepseek', config as unknown as import('@/types').ProviderConfig);
 

@@ -39,8 +39,6 @@ export type ProviderCredential = ApiKeyCredential | OAuth2Credential | CopilotCr
 
 /** 提供商高级配置（存储在 config JSONB 列） */
 export interface ProviderAdvancedConfig {
-  /** 自定义请求头（有则覆盖，无则新加） */
-  custom_headers: Record<string, string>;
   /** HTTP 代理地址（空字符串表示不使用） */
   http_proxy: string;
   /** 提供商特有的扩展配置 */
@@ -49,7 +47,6 @@ export interface ProviderAdvancedConfig {
 
 /** 高级配置默认值 */
 export const DEFAULT_PROVIDER_CONFIG: ProviderAdvancedConfig = {
-  custom_headers: {},
   http_proxy: '',
 };
 
@@ -70,6 +67,10 @@ export interface ProviderConfig {
   baseUrl: string;
   /** 高级配置 */
   config: ProviderAdvancedConfig;
+  /** 提供商级别全局 RPM 限制（undefined = 不限制） */
+  rpmLimit?: number | undefined;
+  /** 提供商级别全局 TPM 限制（undefined = 不限制） */
+  tpmLimit?: number | undefined;
 }
 
 // ==================== 虚拟模型配置 ====================
@@ -107,6 +108,8 @@ export interface VirtualModelBackend {
         body?: Record<string, string | null>;
       }
     | undefined;
+  /** API 调用超时时间（毫秒）。undefined = 使用系统默认常量 */
+  timeoutMs?: number | undefined;
 }
 
 /**
@@ -158,4 +161,6 @@ export interface ResolvedRoute {
     | undefined;
   /** 路由策略 */
   routingStrategy: 'load_balance' | 'failover';
+  /** API 调用超时时间（毫秒）。undefined = 使用系统默认常量 */
+  timeoutMs?: number | undefined;
 }

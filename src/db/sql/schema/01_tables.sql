@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS model_providers (
     base_url        TEXT         NOT NULL,
     credential_type VARCHAR(20)  NOT NULL DEFAULT 'api_key',
     credential      JSONB        DEFAULT '{}'::jsonb,
-    config          JSONB        DEFAULT '{"enable_retry": false, "max_retries": 1, "timeout_ms": 30000, "custom_headers": {}, "http_proxy": ""}'::jsonb,
+    config          JSONB        DEFAULT '{"http_proxy": ""}'::jsonb,
     created_at      TIMESTAMPTZ  DEFAULT NOW(),
     updated_at      TIMESTAMPTZ  DEFAULT NOW()
 );

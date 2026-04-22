@@ -86,6 +86,8 @@ export interface ModelHttpContext {
           body?: Record<string, string | null>;
         }
       | undefined;
+    /** API 调用超时时间（毫秒）。undefined = 使用系统默认常量 */
+    timeoutMs?: number | undefined;
   };
 
   // --- 核心载荷 (Payload) ---
@@ -220,5 +222,7 @@ export type RoutedModelHttpContext = ModelHttpContext & {
           body?: Record<string, string | null>;
         }
       | undefined;
+    /** API 调用超时时间（毫秒）。undefined = 使用系统默认常量 */
+    timeoutMs?: number | undefined;
   };
 };

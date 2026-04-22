@@ -61,7 +61,11 @@ export class ConfigManager {
       credential: Record<string, unknown>;
       base_url: string;
       config: Record<string, unknown>;
-    }>('SELECT id, kind, name, credential_type, credential, base_url, config FROM model_providers');
+      rpm_limit: number | null;
+      tpm_limit: number | null;
+    }>(
+      'SELECT id, kind, name, credential_type, credential, base_url, config, rpm_limit, tpm_limit FROM model_providers',
+    );
 
     for (const row of providersRes.rows) {
       const cred = this.parseCredential(row.credential_type, row.credential);
@@ -73,6 +77,8 @@ export class ConfigManager {
         credential: cred,
         baseUrl: row.base_url,
         config: advancedConfig,
+        rpmLimit: row.rpm_limit ?? undefined,
+        tpmLimit: row.tpm_limit ?? undefined,
       });
     }
 
@@ -92,6 +98,7 @@ export class ConfigManager {
       pm_supported_parameters: string[];
       pm_rpm_limit: number | null;
       pm_tpm_limit: number | null;
+      pm_timeout_ms: number | null;
       pm_model_config: Record<string, unknown> | null;
       pm_request_overrides: {
         headers?: Record<string, string | null>;
@@ -122,6 +129,7 @@ export class ConfigManager {
         pm.supported_parameters AS pm_supported_parameters,
         pm.rpm_limit       AS pm_rpm_limit,
         pm.tpm_limit       AS pm_tpm_limit,
+        pm.timeout_ms      AS pm_timeout_ms,
         pm.model_config    AS pm_model_config,
         pm.request_overrides AS pm_request_overrides,
         vmb.weight,
@@ -179,6 +187,7 @@ export class ConfigManager {
         },
         rpmLimit: row.pm_rpm_limit ?? undefined,
         tpmLimit: row.pm_tpm_limit ?? undefined,
+        timeoutMs: row.pm_timeout_ms ?? undefined,
         modelConfig: row.pm_model_config ?? {},
         requestOverrides: row.pm_request_overrides ?? {},
       });
@@ -271,6 +280,7 @@ export class ConfigManager {
       provider: backend.provider,
       requestOverrides: backend.requestOverrides,
       routingStrategy: config.routingStrategy,
+      timeoutMs: backend.timeoutMs,
     });
 
     if (config.routingStrategy === 'load_balance') {
@@ -313,15 +323,29 @@ export class ConfigManager {
   /**
    * 按实时流控状态过滤后端列表
    * 剔除 RPM 或 TPM 任一已达到上限的后端（通过 rateLimiter 实时检测）
+   * 包含模型级和提供商级两层限制：
+   * - 模型级（pm）：针对单个 providerModelId 的独立限制
+   * - 提供商级（p）：共享同一 provider.id 的全局并发限制
    */
   private filterByRateLimit(backends: VirtualModelBackend[]): VirtualModelBackend[] {
     return backends.filter((b) => {
-      const rpmFull = rateLimiter.isRpmFull('pm', b.providerModelId, b.rpmLimit);
-      const tpmFull = rateLimiter.isTpmFull('pm', b.providerModelId, b.tpmLimit);
-      if (rpmFull || tpmFull) {
+      // 模型级限流
+      const pmRpmFull = rateLimiter.isRpmFull('pm', b.providerModelId, b.rpmLimit);
+      const pmTpmFull = rateLimiter.isTpmFull('pm', b.providerModelId, b.tpmLimit);
+      if (pmRpmFull || pmTpmFull) {
         logger.debug(
-          { providerModelId: b.providerModelId, actualModel: b.actualModel, rpmFull, tpmFull },
-          'Backend excluded by rate limit',
+          { providerModelId: b.providerModelId, actualModel: b.actualModel, pmRpmFull, pmTpmFull },
+          'Backend excluded by model-level rate limit',
+        );
+        return false;
+      }
+      // 提供商级限流
+      const pRpmFull = rateLimiter.isRpmFull('p', b.provider.id, b.provider.rpmLimit);
+      const pTpmFull = rateLimiter.isTpmFull('p', b.provider.id, b.provider.tpmLimit);
+      if (pRpmFull || pTpmFull) {
+        logger.debug(
+          { providerId: b.provider.id, providerModelId: b.providerModelId, pRpmFull, pTpmFull },
+          'Backend excluded by provider-level rate limit',
         );
         return false;
       }
