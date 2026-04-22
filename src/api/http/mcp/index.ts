@@ -1,11 +1,11 @@
 // src/api/http/mcp/index.ts — MCP 网关 HTTP 路由处理
 
+import type { NextFunction, Request, Response } from 'express';
 import { Router } from 'express';
-import type { Request, Response, NextFunction } from 'express';
-import { handleMcpMessage, handleMcpSseConnect } from '@/mcp';
-import { validateApiKeyFromRequest } from '../auth-helper';
 import { getVirtualMcpByName } from '@/db/mcp-virtual-servers';
+import { handleMcpMessage, handleMcpSseConnect } from '@/mcp';
 import { GatewayError } from '@/utils';
+import { validateApiKeyFromRequest } from '../auth-helper';
 
 export const mcpRouter: Router = Router();
 

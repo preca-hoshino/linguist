@@ -1,17 +1,16 @@
 // src/mcp/virtual/server.ts — 虚拟 MCP Server 聚合层
 
+import * as crypto from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-
 import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { Request, Response } from 'express';
-import type { VirtualMcpRow } from '@/db/mcp-virtual-servers';
-import { getMcpProviderById } from '@/db/mcp-providers';
 import { insertMcpLog } from '@/db/mcp-logs';
+import { getMcpProviderById } from '@/db/mcp-providers';
+import type { VirtualMcpRow } from '@/db/mcp-virtual-servers';
+import { createLogger, logColors } from '@/utils';
 import { mcpConnectionManager } from '../providers/connection-manager';
 import { filterTools, isToolAllowed } from './tool-registry';
-import { createLogger, logColors } from '@/utils';
-import * as crypto from 'node:crypto';
 
 const logger = createLogger('VirtualMcpServer', logColors.blue);
 

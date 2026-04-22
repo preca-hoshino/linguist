@@ -1,10 +1,10 @@
 import type {
-  ModelHttpContext,
   InternalChatRequest,
   InternalChatResponse,
   InternalEmbeddingRequest,
   InternalEmbeddingResponse,
   InternalMessage,
+  ModelHttpContext,
   ToolCall,
   ToolDefinition,
 } from '../index';

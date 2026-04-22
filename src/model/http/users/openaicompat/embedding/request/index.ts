@@ -1,7 +1,7 @@
 // src/users/openaicompat/embedding/request/index.ts — OpenAI 兼容嵌入请求适配器
 
-import type { EmbeddingTextInput, InternalEmbeddingRequest } from '@/types';
 import type { UserEmbeddingRequestAdapter } from '@/model/http/users/types';
+import type { EmbeddingTextInput, InternalEmbeddingRequest } from '@/types';
 import { createLogger, GatewayError, logColors } from '@/utils';
 import type { OpenAICompatEmbeddingRequestBody } from './types';
 

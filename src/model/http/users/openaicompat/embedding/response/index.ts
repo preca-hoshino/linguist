@@ -1,7 +1,7 @@
 // src/users/openaicompat/embedding/response/index.ts — OpenAI 兼容嵌入响应适配器
 
-import type { ModelHttpContext, InternalEmbeddingResponse } from '@/types';
 import type { UserEmbeddingResponseAdapter } from '@/model/http/users/types';
+import type { InternalEmbeddingResponse, ModelHttpContext } from '@/types';
 import { createLogger, logColors } from '@/utils';
 
 const logger = createLogger('User:OpenAICompat:Embedding', logColors.bold + logColors.cyan);

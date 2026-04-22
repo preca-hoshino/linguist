@@ -1,8 +1,9 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { route, assertRouted } from '../index';
+
 import { configManager } from '@/config';
+import type { InternalChatRequest, InternalEmbeddingRequest, ModelHttpContext } from '@/types';
 import { GatewayError } from '@/utils';
-import type { ModelHttpContext, InternalChatRequest, InternalEmbeddingRequest } from '@/types';
+import { assertRouted, route } from '../index';
 
 jest.mock('@/config', () => ({
   configManager: {
@@ -99,7 +100,25 @@ describe('Router', () => {
       };
       mockCtx.request = req as unknown as any;
       route(mockCtx);
-      expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', ['vision', 'tools', 'thinking']);
+      expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', ['vision', 'tools', 'thinking'], []);
+    });
+
+    it('should infer stream capability and required parameters', () => {
+      (configManager.getVirtualModelConfig as jest.Mock).mockReturnValue({
+        modelType: 'chat',
+        backends: [],
+      });
+      (configManager.resolveAllBackends as jest.Mock).mockReturnValue([{ actualModel: 'am', providerKind: 'pk' }]);
+
+      const req: InternalChatRequest = {
+        messages: [{ role: 'user', content: 'hello' }],
+        stream: true,
+        temperature: 0.8,
+        top_p: 0.9,
+      };
+      mockCtx.request = req as unknown as any;
+      route(mockCtx);
+      expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', ['stream'], ['temperature', 'top_p']);
     });
 
     it('should not infer vision if message content is string or text parts', () => {
@@ -118,7 +137,7 @@ describe('Router', () => {
       };
       mockCtx.request = req as unknown as any;
       route(mockCtx);
-      expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', []);
+      expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', [], []);
     });
 
     it('should infer embedding capabilities (multimodal, sparse_vector)', () => {
@@ -134,7 +153,7 @@ describe('Router', () => {
       };
       mockCtx.request = req as unknown as any;
       route(mockCtx, 'embedding');
-      expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', ['multimodal', 'sparse_vector']);
+      expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', ['multimodal', 'sparse_vector'], []);
     });
 
     it('should not infer embedding capabilities for normal text inputs', () => {
@@ -150,7 +169,7 @@ describe('Router', () => {
       };
       mockCtx.request = req as unknown as any;
       route(mockCtx, 'embedding');
-      expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', []);
+      expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', [], []);
     });
   });
 

@@ -1,9 +1,10 @@
 /* eslint-disable @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/explicit-function-return-type */
-import { markProcessing, markCompleted, markError } from '../write';
-import type { ModelHttpContext } from '@/types';
+
+import { calculatePostBillingCost, lookupPricingTiers } from '@/db/billing';
 import { db } from '@/db/client';
-import { lookupPricingTiers, calculatePostBillingCost } from '@/db/billing';
+import type { ModelHttpContext } from '@/types';
 import { GatewayError } from '@/utils';
+import { markCompleted, markError, markProcessing } from '../write';
 
 jest.mock('@/db/client', () => ({
   db: {

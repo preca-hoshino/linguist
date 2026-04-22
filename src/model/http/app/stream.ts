@@ -5,17 +5,17 @@ import type { Middleware } from '@/middleware';
 import { applyMiddlewares } from '@/middleware';
 import { dispatchChatProviderStream } from '@/model/http/providers/engine';
 import { assertRouted } from '@/model/http/router';
+import { getUserChatAdapter } from '@/model/http/users';
 import type {
   ChatChoice,
   ChatUsage,
   FinishReason,
-  ModelHttpContext,
   InternalChatRequest,
   InternalChatResponse,
   InternalChatStreamChunk,
+  ModelHttpContext,
   ToolCall,
 } from '@/types';
-import { getUserChatAdapter } from '@/model/http/users';
 import { normalizeStreamChunkToolCallIds } from '@/utils';
 import { expressHeadersToRecord } from './helpers';
 

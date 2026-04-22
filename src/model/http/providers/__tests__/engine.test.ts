@@ -1,10 +1,10 @@
 /* eslint-disable @typescript-eslint/no-unsafe-return, @typescript-eslint/explicit-function-return-type, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-call, @typescript-eslint/only-throw-error, @typescript-eslint/no-unsafe-argument, @typescript-eslint/no-unsafe-member-access */
 // tests/core/engine.test.ts — 核心调度引擎单元测试
 
+import { configManager } from '@/config';
 import { clearAllMocks } from '@/tests/helpers/mock-server';
 import { GatewayError } from '@/utils/errors';
-import { configManager } from '@/config';
-import { dispatchChatProvider, dispatchEmbeddingProvider, dispatchChatProviderStream } from '../engine';
+import { dispatchChatProvider, dispatchChatProviderStream, dispatchEmbeddingProvider } from '../engine';
 import { getProviderChatAdapterSet, getProviderEmbeddingAdapterSet } from '../index';
 
 // 模拟 configManager

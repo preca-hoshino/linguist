@@ -2,8 +2,8 @@ import type { Response } from 'express';
 import { applyMiddlewares } from '@/middleware';
 import { dispatchChatProviderStream } from '@/model/http/providers/engine';
 import { assertRouted } from '@/model/http/router';
-import type { ModelHttpContext, InternalChatStreamChunk } from '@/types';
 import { getUserChatAdapter } from '@/model/http/users';
+import type { InternalChatStreamChunk, ModelHttpContext } from '@/types';
 import { normalizeStreamChunkToolCallIds } from '@/utils';
 import { mergeStreamChunks, processStreamSend } from '../stream';
 

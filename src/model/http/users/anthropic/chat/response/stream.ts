@@ -1,7 +1,7 @@
 // src/users/claude/chat/response/stream.ts — Anthropic 流式响应适配器（per-request 状态机）
 
-import type { ChatUsage, ModelHttpContext, InternalChatStreamChunk } from '@/types';
 import type { UserChatStreamResponseAdapter } from '@/model/http/users/types';
+import type { ChatUsage, InternalChatStreamChunk, ModelHttpContext } from '@/types';
 import { v4 as uuidv4 } from '@/utils/uuid';
 import { convertUsage } from './usage-converter';
 

@@ -1,7 +1,7 @@
 // src/users/claude/chat/response/index.ts — Anthropic 非流式响应适配器
 
-import type { FinishReason, ModelHttpContext, InternalChatResponse } from '@/types';
 import type { UserChatResponseAdapter } from '@/model/http/users/types';
+import type { FinishReason, InternalChatResponse, ModelHttpContext } from '@/types';
 import { createLogger, logColors } from '@/utils';
 import { v4 as uuidv4 } from '@/utils/uuid';
 import { convertUsage } from './usage-converter';

@@ -1,7 +1,7 @@
 // src/app/helpers.ts — 请求处理辅助函数
 
 import type { Response } from 'express';
-import type { ModelHttpContext, HttpHeaders } from '@/types';
+import type { HttpHeaders, ModelHttpContext } from '@/types';
 import type { Logger } from '@/utils';
 
 // ========== 生命周期收尾 Helpers ==========

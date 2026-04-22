@@ -8,16 +8,51 @@ import { handleAdminError } from './error';
 
 const logger = createLogger('Admin:ProviderModels', logColors.bold + logColors.blue);
 
-/** Chat 模型允许的能力标识（视觉 / 联网 / 思考 / 工具 / 缓存） */
-const CHAT_CAPABILITIES = ['vision', 'web_search', 'thinking', 'tools', 'cache'] as const;
-
-/** Embedding 模型允许的能力标识（多模态 / 稀疏向量） */
-const EMBEDDING_CAPABILITIES = ['multimodal', 'sparse_vector'] as const;
+/** Chat 模型允许的能力标识 */
+const CHAT_CAPABILITIES = [
+  'vision',
+  'tools',
+  'thinking',
+  'web_search',
+  'cache',
+  'structured_output',
+  'stream',
+] as const;
+const EMBEDDING_CAPABILITIES = ['multimodal', 'sparse_vector', 'dynamic_dim'] as const;
+const RERANK_CAPABILITIES = ['multilingual', 'cross_lingual'] as const;
+const IMAGE_CAPABILITIES = ['inpaint', 'upscale', 'style_transfer'] as const;
+const AUDIO_CAPABILITIES = ['asr', 'tts', 'voice_clone'] as const;
 
 /** 按 model_type 索引的能力标识白名单 */
 const CAPABILITIES_BY_TYPE: Record<string, readonly string[]> = {
   chat: CHAT_CAPABILITIES,
   embedding: EMBEDDING_CAPABILITIES,
+  rerank: RERANK_CAPABILITIES,
+  image: IMAGE_CAPABILITIES,
+  audio: AUDIO_CAPABILITIES,
+};
+
+const CHAT_PARAMETERS = [
+  'temperature',
+  'top_p',
+  'top_k',
+  'frequency_penalty',
+  'presence_penalty',
+  'stop',
+  'logprobs',
+] as const;
+const EMBEDDING_PARAMETERS = ['dimensions', 'encoding_format', 'truncation'] as const;
+const RERANK_PARAMETERS = ['top_n', 'return_documents'] as const;
+const IMAGE_PARAMETERS = ['steps', 'guidance_scale', 'width', 'height', 'seed'] as const;
+const AUDIO_PARAMETERS = ['speed', 'pitch', 'sample_rate'] as const;
+
+/** 按 model_type 索引的支持参数白名单 */
+const PARAMETERS_BY_TYPE: Record<string, readonly string[]> = {
+  chat: CHAT_PARAMETERS,
+  embedding: EMBEDDING_PARAMETERS,
+  rerank: RERANK_PARAMETERS,
+  image: IMAGE_PARAMETERS,
+  audio: AUDIO_PARAMETERS,
 };
 
 /** 提供商模型请求体类型 */
@@ -26,6 +61,7 @@ interface ProviderModelBody {
   name?: string | undefined;
   model_type?: string | undefined;
   capabilities?: string[] | undefined;
+  supported_parameters?: string[] | undefined;
   parameters?: Record<string, unknown> | undefined;
   /** 提供商模型级专属配置（如 Copilot 端点覆盖、特殊 Header 等，无深层校验） */
   model_config?: Record<string, unknown> | undefined;
@@ -134,6 +170,25 @@ function validateCapabilities(modelType: string, capabilities: string[]): void {
   }
 }
 
+/**
+ * 校验模型支持的调优参数列表
+ * 根据 modelType 选择对应白名单进行校验
+ */
+function validateSupportedParameters(modelType: string, parameters: string[]): void {
+  const allowed = PARAMETERS_BY_TYPE[modelType];
+  if (!allowed) {
+    return;
+  }
+  const invalid = parameters.filter((p) => !allowed.includes(p));
+  if (invalid.length > 0) {
+    throw new GatewayError(
+      400,
+      'invalid_request',
+      `Invalid ${modelType} supported parameters: ${invalid.join(', ')}. Allowed: ${allowed.join(', ')}`,
+    );
+  }
+}
+
 const router: Router = Router();
 
 // ==================== 列出所有提供商模型 ====================
@@ -206,7 +261,7 @@ router.get('/', async (req: Request, res: Response) => {
     const dataWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const sql = `
-      SELECT pm.id, pm.provider_id, pm.name, pm.model_type, pm.capabilities, pm.parameters,
+      SELECT pm.id, pm.provider_id, pm.name, pm.model_type, pm.capabilities, pm.supported_parameters, pm.parameters,
              pm.model_config, pm.max_tokens, pm.is_active, pm.pricing_tiers, pm.rpm_limit, pm.tpm_limit,
              pm.created_at, pm.updated_at,
              p.name AS provider_name, p.kind AS provider_kind
@@ -246,7 +301,7 @@ router.get('/:id', async (req: Request, res: Response) => {
     logger.debug({ id }, 'Getting provider model by ID');
 
     const result = await db.query(
-      `SELECT pm.id, pm.provider_id, pm.name, pm.model_type, pm.capabilities, pm.parameters,
+      `SELECT pm.id, pm.provider_id, pm.name, pm.model_type, pm.capabilities, pm.supported_parameters, pm.parameters,
               pm.model_config, pm.max_tokens, pm.is_active, pm.pricing_tiers, pm.rpm_limit, pm.tpm_limit,
               pm.created_at, pm.updated_at,
               p.name AS provider_name, p.kind AS provider_kind
@@ -282,6 +337,7 @@ router.post('/', async (req: Request, res: Response) => {
       name,
       model_type,
       capabilities,
+      supported_parameters,
       parameters,
       model_config,
       max_tokens,
@@ -302,13 +358,18 @@ router.post('/', async (req: Request, res: Response) => {
       throw new GatewayError(400, 'invalid_request', 'Fields provider_id, name, model_type are required');
     }
 
-    if (!['chat', 'embedding'].includes(model_type)) {
-      throw new GatewayError(400, 'invalid_request', 'model_type must be "chat" or "embedding"');
+    if (!['chat', 'embedding', 'rerank', 'image', 'audio'].includes(model_type)) {
+      throw new GatewayError(400, 'invalid_request', 'model_type must be one of chat, embedding, rerank, image, audio');
     }
 
     // 校验模型能力标识
     if (Array.isArray(capabilities) && capabilities.length > 0) {
       validateCapabilities(model_type, capabilities);
+    }
+
+    // 校验支持参数
+    if (Array.isArray(supported_parameters) && supported_parameters.length > 0) {
+      validateSupportedParameters(model_type, supported_parameters);
     }
 
     // 校验阶梯计费配置
@@ -324,15 +385,16 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     const result = await db.query(
-      `INSERT INTO model_provider_models (id, provider_id, name, model_type, capabilities, parameters, model_config, max_tokens, pricing_tiers, rpm_limit, tpm_limit)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-       RETURNING id, provider_id, name, model_type, capabilities, parameters, model_config, max_tokens, pricing_tiers, rpm_limit, tpm_limit, is_active, created_at, updated_at`,
+      `INSERT INTO model_provider_models (id, provider_id, name, model_type, capabilities, supported_parameters, parameters, model_config, max_tokens, pricing_tiers, rpm_limit, tpm_limit)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+       RETURNING id, provider_id, name, model_type, capabilities, supported_parameters, parameters, model_config, max_tokens, pricing_tiers, rpm_limit, tpm_limit, is_active, created_at, updated_at`,
       [
         await generateShortId('model_provider_models'),
         provider_id,
         name,
         model_type,
         capabilities ?? [],
+        supported_parameters ?? [],
         JSON.stringify(parameters ?? {}),
         JSON.stringify(model_config ?? {}),
         finalMaxTokens,
@@ -359,6 +421,7 @@ router.post('/:id', async (req: Request, res: Response) => {
       name,
       model_type,
       capabilities,
+      supported_parameters,
       parameters,
       model_config,
       max_tokens,
@@ -369,19 +432,26 @@ router.post('/:id', async (req: Request, res: Response) => {
     } = body;
     logger.debug({ id }, 'Updating provider model');
 
-    if (model_type !== undefined && !['chat', 'embedding'].includes(model_type)) {
-      throw new GatewayError(400, 'invalid_request', 'model_type must be "chat" or "embedding"');
+    if (model_type !== undefined && !['chat', 'embedding', 'rerank', 'image', 'audio'].includes(model_type)) {
+      throw new GatewayError(400, 'invalid_request', 'model_type must be one of chat, embedding, rerank, image, audio');
     }
 
-    // 校验模型能力标识（更新时根据实际 model_type 选择对应白名单）
-    if (Array.isArray(capabilities) && capabilities.length > 0) {
-      let effectiveType = model_type;
-      if (effectiveType === undefined) {
-        const currentRow = await db.query('SELECT model_type FROM model_provider_models WHERE id = $1', [id]);
-        effectiveType = (currentRow.rows[0] as { model_type: string } | undefined)?.model_type;
-      }
-      if (effectiveType !== undefined && effectiveType !== '') {
+    let effectiveType = model_type;
+    const hasCapabilitiesOrParams =
+      (Array.isArray(capabilities) && capabilities.length > 0) ||
+      (Array.isArray(supported_parameters) && supported_parameters.length > 0);
+
+    if (effectiveType === undefined && hasCapabilitiesOrParams) {
+      const currentRow = await db.query('SELECT model_type FROM model_provider_models WHERE id = $1', [id]);
+      effectiveType = (currentRow.rows[0] as { model_type: string } | undefined)?.model_type;
+    }
+
+    if (effectiveType !== undefined && effectiveType !== '') {
+      if (Array.isArray(capabilities) && capabilities.length > 0) {
         validateCapabilities(effectiveType, capabilities);
+      }
+      if (Array.isArray(supported_parameters) && supported_parameters.length > 0) {
+        validateSupportedParameters(effectiveType, supported_parameters);
       }
     }
 
@@ -399,6 +469,7 @@ router.post('/:id', async (req: Request, res: Response) => {
       name,
       model_type,
       capabilities,
+      supported_parameters,
       parameters: parameters === undefined ? undefined : JSON.stringify(parameters),
       model_config: model_config === undefined ? undefined : JSON.stringify(model_config),
       max_tokens,
@@ -415,7 +486,7 @@ router.post('/:id', async (req: Request, res: Response) => {
     update.values.push(id);
     const result = await db.query(
       `UPDATE model_provider_models SET ${update.setClause} WHERE id = $${String(update.nextIdx)}
-       RETURNING id, provider_id, name, model_type, capabilities, parameters, model_config, max_tokens, pricing_tiers, rpm_limit, tpm_limit, is_active, created_at, updated_at`,
+       RETURNING id, provider_id, name, model_type, capabilities, supported_parameters, parameters, model_config, max_tokens, pricing_tiers, rpm_limit, tpm_limit, is_active, created_at, updated_at`,
 
       update.values,
     );

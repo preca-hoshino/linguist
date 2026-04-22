@@ -1,9 +1,9 @@
 // src/types/context.ts — 网关上下文类型定义
 
-import type { InternalChatRequest, InternalChatResponse } from './chat';
-import type { ProviderConfig } from './config';
-import type { InternalEmbeddingRequest, InternalEmbeddingResponse } from './embedding';
 import type { CostBreakdown } from './billing';
+import type { InternalChatRequest, InternalChatResponse } from './chat';
+import type { ModelType, ProviderConfig } from './config';
+import type { InternalEmbeddingRequest, InternalEmbeddingResponse } from './embedding';
 import type { HttpHeaders, ProviderErrorDetail } from './provider';
 
 /**
@@ -66,7 +66,7 @@ export interface ModelHttpContext {
     /** 提供商侧的实际模型 ID（如 "deepseek-chat"） */
     model: string;
     /** 模型类型 */
-    modelType: 'chat' | 'embedding';
+    modelType: ModelType;
     /** 提供商协议类型（如 "openai", "gemini", "deepseek"） */
     providerKind: string;
     /** 提供商配置 ID — UUID */
@@ -77,6 +77,8 @@ export interface ModelHttpContext {
     strategy: 'load_balance' | 'failover';
     /** 请求所需的能力标识 */
     capabilities: string[];
+    /** 选出后端的支持参数列表 */
+    supportedParameters?: string[];
   };
 
   // --- 核心载荷 (Payload) ---
@@ -198,11 +200,12 @@ export interface ModelHttpContext {
 export type RoutedModelHttpContext = ModelHttpContext & {
   route: {
     model: string;
-    modelType: 'chat' | 'embedding';
+    modelType: ModelType;
     providerKind: string;
     providerId: string;
     providerConfig: ProviderConfig;
     strategy: 'load_balance' | 'failover';
     capabilities: string[];
+    supportedParameters: string[];
   };
 };

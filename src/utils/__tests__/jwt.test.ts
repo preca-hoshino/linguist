@@ -1,5 +1,5 @@
-import { signToken, verifyToken } from '../jwt';
 import crypto from 'node:crypto';
+import { signToken, verifyToken } from '../jwt';
 
 describe('jwt util', () => {
   const SECRET = 'test-secret';

@@ -4,7 +4,7 @@
 // 复用与 apiKeyAuth 中间件完全一致的逻辑：环境变量开关 + 哈希校验。
 
 import type { Request } from 'express';
-import { lookupAppByKey, type AppCacheEntry } from '@/db/apps';
+import { type AppCacheEntry, lookupAppByKey } from '@/db/apps';
 import { GatewayError } from '@/utils';
 
 /**

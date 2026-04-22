@@ -1,7 +1,7 @@
 // src/users/openaicompat/chat/response/index.ts — OpenAI 兼容响应适配器（精简编排层）
 
-import type { ModelHttpContext, InternalChatResponse } from '@/types';
 import type { UserChatResponseAdapter } from '@/model/http/users/types';
+import type { InternalChatResponse, ModelHttpContext } from '@/types';
 import { createLogger, logColors } from '@/utils';
 import { convertUsage } from './usage-converter';
 

@@ -38,6 +38,37 @@ function sanitizeProviderError(detail: string): string {
   return stripped.length > 0 ? stripped : 'Provider request failed';
 }
 
+// ========== 参数剥离 ==========
+
+/**
+ * 按后端声明的 supported_parameters 静默剥离 InternalChatRequest 中不支持的调优参数
+ * 用于在适配器序列化前清理请求，避免不支持的参数被透传到提供商 API
+ */
+function stripUnsupportedChatParams(req: InternalChatRequest, supportedParameters: string[] = []): InternalChatRequest {
+  // 若后端未声明任何 supported_parameters，不做过滤（向后兼容）
+  if (supportedParameters.length === 0) {
+    return req;
+  }
+
+  const FILTERABLE_PARAMS: ReadonlyArray<keyof InternalChatRequest> = [
+    'temperature',
+    'top_p',
+    'top_k',
+    'frequency_penalty',
+    'presence_penalty',
+    'stop',
+  ] as const;
+
+  const filtered: InternalChatRequest = { ...req };
+  for (const field of FILTERABLE_PARAMS) {
+    if (!supportedParameters.includes(field as string) && field in filtered) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete (filtered as unknown as Record<string, unknown>)[field];
+    }
+  }
+  return filtered;
+}
+
 // ========== 框架引擎: 泛型内部实现 ==========
 
 interface AdapterSet<TReq, TRes> {
@@ -126,9 +157,10 @@ export async function dispatchChatProvider(
   chatRequest: InternalChatRequest,
   executor: typeof callProvider = callProvider,
 ): Promise<void> {
+  const strippedRequest = stripUnsupportedChatParams(chatRequest, ctx.route.supportedParameters);
   await dispatchProvider<InternalChatRequest, InternalChatResponse>(
     ctx,
-    chatRequest,
+    strippedRequest,
     getProviderChatAdapterSet,
     'Chat',
     executor,
@@ -175,7 +207,8 @@ async function tryStreamConnect(
   );
   providerLogger.debug({ requestId: ctx.id }, '[dispatch] stream adapter initialized');
 
-  const providerReqBody = requestAdapter.toProviderRequest(chatRequest, ctx.route.model);
+  const strippedRequest = stripUnsupportedChatParams(chatRequest, candidate.supportedParameters);
+  const providerReqBody = requestAdapter.toProviderRequest(strippedRequest, ctx.route.model);
   ctx.audit.providerRequest = { body: providerReqBody };
   providerLogger.debug({ requestId: ctx.id }, '[dispatch] stream request serialized');
 

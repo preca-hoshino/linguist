@@ -1,14 +1,14 @@
 // src/providers/copilot/token-manager.ts — Copilot 短效 Token 获取与缓存管理
 
 import { createLogger, GatewayError, logColors } from '@/utils';
+import { resolveEndpointType } from './chat/fallback/endpoint-resolver';
+import type { CopilotEndpointType } from './chat/fallback/types';
 import {
   COPILOT_EDITOR_HEADERS,
   COPILOT_MODELS_CACHE_TTL_MS,
   COPILOT_TOKEN_URL,
   TOKEN_REFRESH_MARGIN_SECONDS,
 } from './constants';
-import { resolveEndpointType } from './chat/fallback/endpoint-resolver';
-import type { CopilotEndpointType } from './chat/fallback/types';
 
 const logger = createLogger('Provider:Copilot:Token', logColors.bold + logColors.cyan);
 

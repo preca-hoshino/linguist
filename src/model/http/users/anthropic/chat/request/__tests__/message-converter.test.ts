@@ -1,5 +1,5 @@
 import { convertMessages, convertSystemPrompt } from '../message-converter';
-import type { AnthropicMessage, AnthropicTextContentBlock, AnthropicContentBlock } from '../types';
+import type { AnthropicContentBlock, AnthropicMessage, AnthropicTextContentBlock } from '../types';
 
 describe('Anthropic Request Message Converter', () => {
   describe('convertSystemPrompt', () => {

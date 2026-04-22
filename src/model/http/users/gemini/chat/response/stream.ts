@@ -1,7 +1,7 @@
 // src/users/gemini/chat/response/stream.ts — Gemini 流式响应适配器
 
-import type { ModelHttpContext, InternalChatStreamChunk } from '@/types';
 import type { UserChatStreamResponseAdapter } from '@/model/http/users/types';
+import type { InternalChatStreamChunk, ModelHttpContext } from '@/types';
 import { safeParseJson } from '@/utils';
 import { convertUsage } from './usage-converter';
 
