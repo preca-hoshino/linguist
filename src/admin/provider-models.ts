@@ -77,6 +77,8 @@ interface ProviderModelBody {
   pricing_tiers?: PricingTierInput[] | undefined;
   rpm_limit?: number | null | undefined;
   tpm_limit?: number | null | undefined;
+  /** API 调用超时时间（毫秒）。null = 使用系统默认超时 */
+  timeout_ms?: number | null | undefined;
 }
 
 /**
@@ -270,7 +272,7 @@ router.get('/', async (req: Request, res: Response) => {
     const sql = `
       SELECT pm.id, pm.provider_id, pm.name, pm.model_type, pm.capabilities, pm.supported_parameters, pm.parameters,
              pm.model_config, pm.request_overrides, pm.max_tokens, pm.is_active, pm.pricing_tiers, pm.rpm_limit, pm.tpm_limit,
-             pm.created_at, pm.updated_at,
+             pm.timeout_ms, pm.created_at, pm.updated_at,
              p.name AS provider_name, p.kind AS provider_kind
       FROM model_provider_models pm
       JOIN model_providers p ON pm.provider_id = p.id
@@ -310,7 +312,7 @@ router.get('/:id', async (req: Request, res: Response) => {
     const result = await db.query(
       `SELECT pm.id, pm.provider_id, pm.name, pm.model_type, pm.capabilities, pm.supported_parameters, pm.parameters,
               pm.model_config, pm.request_overrides, pm.max_tokens, pm.is_active, pm.pricing_tiers, pm.rpm_limit, pm.tpm_limit,
-              pm.created_at, pm.updated_at,
+              pm.timeout_ms, pm.created_at, pm.updated_at,
               p.name AS provider_name, p.kind AS provider_kind
        FROM model_provider_models pm
        JOIN model_providers p ON pm.provider_id = p.id
@@ -352,6 +354,7 @@ router.post('/', async (req: Request, res: Response) => {
       pricing_tiers,
       rpm_limit,
       tpm_limit,
+      timeout_ms,
     } = body;
     logger.debug({ provider_id, name, model_type }, 'Creating provider model');
 
@@ -393,9 +396,9 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     const result = await db.query(
-      `INSERT INTO model_provider_models (id, provider_id, name, model_type, capabilities, supported_parameters, parameters, model_config, request_overrides, max_tokens, pricing_tiers, rpm_limit, tpm_limit)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-       RETURNING id, provider_id, name, model_type, capabilities, supported_parameters, parameters, model_config, request_overrides, max_tokens, pricing_tiers, rpm_limit, tpm_limit, is_active, created_at, updated_at`,
+      `INSERT INTO model_provider_models (id, provider_id, name, model_type, capabilities, supported_parameters, parameters, model_config, request_overrides, max_tokens, pricing_tiers, rpm_limit, tpm_limit, timeout_ms)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       RETURNING id, provider_id, name, model_type, capabilities, supported_parameters, parameters, model_config, request_overrides, max_tokens, pricing_tiers, rpm_limit, tpm_limit, timeout_ms, is_active, created_at, updated_at`,
       [
         await generateShortId('model_provider_models'),
         provider_id,
@@ -410,6 +413,7 @@ router.post('/', async (req: Request, res: Response) => {
         JSON.stringify(pricing_tiers ?? []),
         rpm_limit ?? null,
         tpm_limit ?? null,
+        timeout_ms ?? null,
       ],
     );
 
@@ -439,6 +443,7 @@ router.post('/:id', async (req: Request, res: Response) => {
       pricing_tiers,
       rpm_limit,
       tpm_limit,
+      timeout_ms,
     } = body;
     logger.debug({ id }, 'Updating provider model');
 
@@ -488,6 +493,7 @@ router.post('/:id', async (req: Request, res: Response) => {
       pricing_tiers: pricing_tiers === undefined ? undefined : JSON.stringify(pricing_tiers),
       rpm_limit: rpm_limit === undefined ? undefined : rpm_limit,
       tpm_limit: tpm_limit === undefined ? undefined : tpm_limit,
+      timeout_ms: timeout_ms === undefined ? undefined : timeout_ms,
     });
 
     if (!update) {
@@ -497,7 +503,7 @@ router.post('/:id', async (req: Request, res: Response) => {
     update.values.push(id);
     const result = await db.query(
       `UPDATE model_provider_models SET ${update.setClause} WHERE id = $${String(update.nextIdx)}
-       RETURNING id, provider_id, name, model_type, capabilities, supported_parameters, parameters, model_config, request_overrides, max_tokens, pricing_tiers, rpm_limit, tpm_limit, is_active, created_at, updated_at`,
+       RETURNING id, provider_id, name, model_type, capabilities, supported_parameters, parameters, model_config, request_overrides, max_tokens, pricing_tiers, rpm_limit, tpm_limit, timeout_ms, is_active, created_at, updated_at`,
 
       update.values,
     );
