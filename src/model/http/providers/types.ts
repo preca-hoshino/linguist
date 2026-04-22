@@ -6,6 +6,7 @@ import type {
   InternalChatStreamChunk,
   InternalEmbeddingRequest,
   InternalEmbeddingResponse,
+  ModelType,
   ProviderCallResult,
   ProviderConfig,
   ProviderStreamResult,
@@ -83,6 +84,12 @@ export interface ProviderErrorInfo {
 export interface ProviderPlugin {
   /** 厂商标识符，如 'deepseek', 'gemini' */
   kind: string;
+
+  /**
+   * 该厂商所支持的模型类型列表（由代码实现决定，不可运行时修改）。
+   * 前端可据此过滤模型类别选型，防止配置错误的模型类型。
+   */
+  supportedModelTypes: ModelType[];
 
   /** 获取聊天功能集合 (如果该厂商支持聊天) */
   getChatAdapterSet?: (config: ProviderConfig) => ProviderChatAdapterSet;
