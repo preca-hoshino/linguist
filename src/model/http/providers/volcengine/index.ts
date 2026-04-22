@@ -13,6 +13,7 @@ import { mapVolcEngineError } from './error-mapping';
 
 export const volcenginePlugin: ProviderPlugin = {
   kind: 'volcengine',
+  supportedModelTypes: ['chat', 'embedding'],
 
   getChatAdapterSet: (config) => ({
     requestAdapter: new VolcEngineChatRequestAdapter(),
