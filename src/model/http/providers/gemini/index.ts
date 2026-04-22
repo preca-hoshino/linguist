@@ -13,6 +13,7 @@ import { mapGeminiError } from './error-mapping';
 
 export const geminiPlugin: ProviderPlugin = {
   kind: 'gemini',
+  supportedModelTypes: ['chat', 'embedding'],
 
   getChatAdapterSet: (config) => ({
     requestAdapter: new GeminiChatRequestAdapter(),
