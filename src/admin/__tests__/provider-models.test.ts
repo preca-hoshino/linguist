@@ -47,20 +47,22 @@ describe('Provider Models API Integration', () => {
     // 2. Mock DB insertion
     (generateShortId as jest.Mock).mockResolvedValue('short-id-123');
     (db.query as jest.Mock).mockResolvedValueOnce({
-      rows: [{
-        id: 'short-id-123',
-        ...validPayload,
-        parameters: '{}',
-        model_config: '{}',
-        pricing_tiers: '[]',
-        rpm_limit: null,
-        tpm_limit: null,
-        is_active: true,
-      }]
+      rows: [
+        {
+          id: 'short-id-123',
+          ...validPayload,
+          parameters: '{}',
+          model_config: '{}',
+          pricing_tiers: '[]',
+          rpm_limit: null,
+          tpm_limit: null,
+          is_active: true,
+        },
+      ],
     });
 
     const res = await request(app).post('/api/provider-models').send(validPayload);
-    
+
     expect(res.status).toBe(201);
     expect(res.body.object).toBe('provider_model');
     expect(res.body.supported_parameters).toEqual(['temperature', 'top_p']);
@@ -86,16 +88,20 @@ describe('Provider Models API Integration', () => {
     // 2. Mock DB update
     (db.query as jest.Mock).mockResolvedValueOnce({
       rowCount: 1,
-      rows: [{
-        id: 'model-embed',
-        model_type: 'embedding',
-        supported_parameters: ['dimensions'],
-      }]
+      rows: [
+        {
+          id: 'model-embed',
+          model_type: 'embedding',
+          supported_parameters: ['dimensions'],
+        },
+      ],
     });
 
-    const res = await request(app).post('/api/provider-models/model-embed').send({
-      supported_parameters: ['dimensions'],
-    });
+    const res = await request(app)
+      .post('/api/provider-models/model-embed')
+      .send({
+        supported_parameters: ['dimensions'],
+      });
 
     expect(res.status).toBe(200);
   });
