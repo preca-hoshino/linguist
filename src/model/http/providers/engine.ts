@@ -120,7 +120,13 @@ function applyHeaderOverridesToConfig(
 interface AdapterSet<TReq, TRes> {
   requestAdapter: { toProviderRequest: (req: TReq, model: string) => Record<string, unknown> };
   responseAdapter: { fromProviderResponse: (res: unknown) => TRes };
-  client: { call: (req: Record<string, unknown>, model: string) => Promise<ProviderCallResult> };
+  client: {
+    call: (
+      req: Record<string, unknown>,
+      model: string,
+      options?: { timeoutMs?: number },
+    ) => Promise<ProviderCallResult>;
+  };
 }
 
 type GetAdapterSet<TReq, TRes> = (providerKind: string, providerConfig: ProviderConfig) => AdapterSet<TReq, TRes>;
@@ -144,7 +150,8 @@ export async function callProvider<TReq, TRes extends InternalResponse>(
 
   ctx.timing.providerStart = Date.now();
   providerLogger.debug({ requestId: ctx.id, model: ctx.route.model }, '[dispatch] forwarding to upstream');
-  const result = await client.call(providerReqBody, ctx.route.model);
+  const callOptions = ctx.route.timeoutMs !== undefined ? { timeoutMs: ctx.route.timeoutMs } : undefined;
+  const result = await client.call(providerReqBody, ctx.route.model, callOptions);
   ctx.timing.providerEnd = Date.now();
 
   ctx.audit.providerRequest.headers = result.requestHeaders;
@@ -265,7 +272,12 @@ async function tryStreamConnect(
   ctx.timing.providerStart = Date.now();
   providerLogger.debug({ requestId: ctx.id, model: ctx.route.model }, '[dispatch] forwarding to upstream (stream)');
 
-  const { response, requestHeaders: providerReqHeaders } = await client.callStream(providerReqBody, ctx.route.model);
+  const streamOptions = candidate.timeoutMs !== undefined ? { timeoutMs: candidate.timeoutMs } : undefined;
+  const { response, requestHeaders: providerReqHeaders } = await client.callStream(
+    providerReqBody,
+    ctx.route.model,
+    streamOptions,
+  );
 
   ctx.audit.providerRequest.headers = providerReqHeaders;
   ctx.audit.providerResponse = {
