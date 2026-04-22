@@ -12,6 +12,7 @@ import { mapCopilotError } from './error-mapping';
 
 export const copilotPlugin: ProviderPlugin = {
   kind: 'copilot',
+  supportedModelTypes: ['chat', 'embedding'],
   getChatAdapterSet: (config) => ({
     requestAdapter: new CopilotChatRequestAdapter(),
     responseAdapter: new CopilotChatResponseAdapter(),

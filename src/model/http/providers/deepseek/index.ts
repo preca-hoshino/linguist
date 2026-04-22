@@ -9,6 +9,7 @@ import { mapDeepSeekError } from './error-mapping';
 
 export const deepseekPlugin: ProviderPlugin = {
   kind: 'deepseek',
+  supportedModelTypes: ['chat'],
 
   getChatAdapterSet: (config) => ({
     requestAdapter: new DeepSeekChatRequestAdapter(),

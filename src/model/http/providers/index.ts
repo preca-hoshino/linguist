@@ -50,6 +50,14 @@ export function getRegisteredProviderKinds(): Set<string> {
 }
 
 /**
+ * 获取指定 kind 提供商支持的模型类型列表。
+ * 若该 kind 尚未注册，返回空数组。
+ */
+export function getProviderSupportedModelTypes(kind: string): string[] {
+  return registry.get(kind)?.supportedModelTypes ?? [];
+}
+
+/**
  * 按提供商 kind 获取聊天适配器集合 (提供给 engine 使用)
  */
 export function getProviderChatAdapterSet(providerKind: string, config: ProviderConfig): ProviderChatAdapterSet {

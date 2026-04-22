@@ -3,7 +3,7 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { db, generateShortId } from '@/db';
-import { getRegisteredProviderKinds } from '@/model/http/providers';
+import { getProviderSupportedModelTypes, getRegisteredProviderKinds } from '@/model/http/providers';
 import type { ProviderAdvancedConfig } from '@/types';
 import { DEFAULT_PROVIDER_CONFIG } from '@/types';
 import { buildInClause, buildUpdateSet, createLogger, GatewayError, logColors } from '@/utils';
@@ -26,6 +26,14 @@ interface ProviderBody {
 
 /** SELECT 列常量（不含 is_active） */
 const SELECT_COLUMNS = 'id, name, kind, base_url, credential_type, credential, config, created_at, updated_at';
+
+/**
+ * 向 provider 行数据注入插件声明的 supported_model_types（即时计算，不入库）。
+ */
+function injectSupportedModelTypes(row: Record<string, unknown>): Record<string, unknown> {
+  const kind = typeof row.kind === 'string' ? row.kind : '';
+  return { ...row, supported_model_types: getProviderSupportedModelTypes(kind) };
+}
 
 const router: Router = Router();
 
@@ -81,7 +89,7 @@ router.get('/', async (req: Request, res: Response) => {
     const hasMore = result.rows.length > limitNum;
     const data = hasMore ? result.rows.slice(0, limitNum) : result.rows;
 
-    res.json({ object: 'list', data, has_more: hasMore });
+    res.json({ object: 'list', data: data.map(injectSupportedModelTypes), has_more: hasMore });
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -98,7 +106,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       throw new GatewayError(404, 'not_found', `Provider ${id} not found`);
     }
 
-    res.json({ object: 'provider', ...result.rows[0] });
+    res.json({ object: 'provider', ...injectSupportedModelTypes(result.rows[0] as Record<string, unknown>) });
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -152,7 +160,9 @@ router.post('/', async (req: Request, res: Response) => {
 
     const created = result.rows[0];
     logger.info({ id: created?.id, name, kind }, 'Provider created');
-    res.status(201).json({ object: 'provider', ...result.rows[0] });
+    res
+      .status(201)
+      .json({ object: 'provider', ...injectSupportedModelTypes(result.rows[0] as Record<string, unknown>) });
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -201,7 +211,7 @@ router.post('/:id', async (req: Request, res: Response) => {
     }
 
     logger.info({ id, fields: update.values.length - 1 }, 'Provider updated');
-    res.json({ object: 'provider', ...result.rows[0] });
+    res.json({ object: 'provider', ...injectSupportedModelTypes(result.rows[0] as Record<string, unknown>) });
   } catch (error) {
     handleAdminError(error, res);
   }
