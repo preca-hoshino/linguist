@@ -112,7 +112,7 @@ export async function listApps(options?: {
 
   // 单独计算 total
   const countSql = `SELECT COUNT(*) AS total FROM apps a ${baseWhereClause}`;
-  const countResult = await db.query(countSql, values);
+  const countResult = await db.query(countSql, [...values]);
   const total = Number.parseInt((countResult.rows[0] as { total: string } | undefined)?.total ?? '0', 10);
 
   // 追加游标条件
