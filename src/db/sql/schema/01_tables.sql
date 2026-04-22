@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS model_provider_models (
     rpm_limit       INT          DEFAULT NULL,
     tpm_limit       INT          DEFAULT NULL,
     model_config    JSONB        DEFAULT '{}'::jsonb,
+    request_overrides JSONB      DEFAULT '{}'::jsonb,
     is_active       BOOLEAN      DEFAULT true,
     created_at      TIMESTAMPTZ  DEFAULT NOW(),
     updated_at      TIMESTAMPTZ  DEFAULT NOW(),

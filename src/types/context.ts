@@ -79,6 +79,13 @@ export interface ModelHttpContext {
     capabilities: string[];
     /** 选出后端的支持参数列表 */
     supportedParameters?: string[];
+    /** 请求重写规则 */
+    requestOverrides?:
+      | {
+          headers?: Record<string, string | null>;
+          body?: Record<string, string | null>;
+        }
+      | undefined;
   };
 
   // --- 核心载荷 (Payload) ---
@@ -207,5 +214,11 @@ export type RoutedModelHttpContext = ModelHttpContext & {
     strategy: 'load_balance' | 'failover';
     capabilities: string[];
     supportedParameters: string[];
+    requestOverrides?:
+      | {
+          headers?: Record<string, string | null>;
+          body?: Record<string, string | null>;
+        }
+      | undefined;
   };
 };
