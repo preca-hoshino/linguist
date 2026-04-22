@@ -70,6 +70,10 @@ export interface ProviderConfig {
   baseUrl: string;
   /** 高级配置 */
   config: ProviderAdvancedConfig;
+  /** 提供商级别全局 RPM 限制（undefined = 不限制） */
+  rpmLimit?: number | undefined;
+  /** 提供商级别全局 TPM 限制（undefined = 不限制） */
+  tpmLimit?: number | undefined;
 }
 
 // ==================== 虚拟模型配置 ====================
@@ -107,6 +111,8 @@ export interface VirtualModelBackend {
         body?: Record<string, string | null>;
       }
     | undefined;
+  /** API 调用超时时间（毫秒）。undefined = 使用系统默认常量 */
+  timeoutMs?: number | undefined;
 }
 
 /**
