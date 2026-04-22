@@ -93,6 +93,10 @@ export class ConfigManager {
       pm_rpm_limit: number | null;
       pm_tpm_limit: number | null;
       pm_model_config: Record<string, unknown> | null;
+      pm_request_overrides: {
+        headers?: Record<string, string | null>;
+        body?: Record<string, string | null>;
+      } | null;
       weight: number;
       priority: number;
       provider_id: string;
@@ -119,6 +123,7 @@ export class ConfigManager {
         pm.rpm_limit       AS pm_rpm_limit,
         pm.tpm_limit       AS pm_tpm_limit,
         pm.model_config    AS pm_model_config,
+        pm.request_overrides AS pm_request_overrides,
         vmb.weight,
         vmb.priority,
         p.id               AS provider_id,
@@ -175,6 +180,7 @@ export class ConfigManager {
         rpmLimit: row.pm_rpm_limit ?? undefined,
         tpmLimit: row.pm_tpm_limit ?? undefined,
         modelConfig: row.pm_model_config ?? {},
+        requestOverrides: row.pm_request_overrides ?? {},
       });
     }
 
@@ -263,6 +269,7 @@ export class ConfigManager {
       providerKind: backend.provider.kind,
       providerId: backend.provider.id,
       provider: backend.provider,
+      requestOverrides: backend.requestOverrides,
       routingStrategy: config.routingStrategy,
     });
 

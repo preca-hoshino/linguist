@@ -18,8 +18,10 @@ const DEFAULT_BASE_URL = 'https://ark.cn-beijing.volces.com/api/v3';
 export class VolcEngineChatClient implements ProviderChatClient {
   private readonly apiKey: string;
   private readonly baseUrl: string;
+  private readonly providerConfig: ProviderConfig;
 
   public constructor(config: ProviderConfig) {
+    this.providerConfig = config;
     const cred = config.credential;
     if (cred.type !== 'api_key') {
       throw new GatewayError(500, 'config_error', `VolcEngine requires api_key credential, got: ${cred.type}`);
@@ -41,6 +43,18 @@ export class VolcEngineChatClient implements ProviderChatClient {
       Authorization: `Bearer ${this.apiKey}`,
       'Content-Type': 'application/json',
     };
+
+    const customHeaders = this.providerConfig.config.custom_headers as Record<string, unknown> | undefined;
+    if (customHeaders !== undefined) {
+      for (const [key, val] of Object.entries(customHeaders)) {
+        if (val === null || val === '') {
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+          delete requestHeaders[key];
+        } else {
+          requestHeaders[key] = val as string;
+        }
+      }
+    }
 
     const timeout = DEFAULT_PROVIDER_TIMEOUT;
     const start = Date.now();
@@ -73,6 +87,18 @@ export class VolcEngineChatClient implements ProviderChatClient {
       Authorization: `Bearer ${this.apiKey}`,
       'Content-Type': 'application/json',
     };
+
+    const customHeaders = this.providerConfig.config.custom_headers as Record<string, unknown> | undefined;
+    if (customHeaders !== undefined) {
+      for (const [key, val] of Object.entries(customHeaders)) {
+        if (val === null || val === '') {
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+          delete requestHeaders[key];
+        } else {
+          requestHeaders[key] = val as string;
+        }
+      }
+    }
 
     const response = await fetch(url, {
       method: 'POST',

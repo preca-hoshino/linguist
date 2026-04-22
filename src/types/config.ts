@@ -100,6 +100,13 @@ export interface VirtualModelBackend {
   tpmLimit?: number | undefined;
   /** 提供商模型级专属配置（来自 provider_models.model_config，各提供商插件按需读取） */
   modelConfig?: Record<string, unknown> | undefined;
+  /** 请求重写规则（在转发前应用于 Header 和 Body 顶层字段；null = 删除） */
+  requestOverrides?:
+    | {
+        headers?: Record<string, string | null>;
+        body?: Record<string, string | null>;
+      }
+    | undefined;
 }
 
 /**
@@ -142,6 +149,13 @@ export interface ResolvedRoute {
   providerId: string;
   /** 关联的提供商配置 */
   provider: ProviderConfig;
+  /** 请求重写规则 */
+  requestOverrides?:
+    | {
+        headers?: Record<string, string | null>;
+        body?: Record<string, string | null>;
+      }
+    | undefined;
   /** 路由策略 */
   routingStrategy: 'load_balance' | 'failover';
 }

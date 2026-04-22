@@ -69,6 +69,52 @@ function stripUnsupportedChatParams(req: InternalChatRequest, supportedParameter
   return filtered;
 }
 
+/**
+ * 应用 Body 重写规则（null = 删除字段，字符串 = 覆盖/追加）
+ */
+function applyBodyOverrides(
+  body: Record<string, unknown>,
+  overrides?: Record<string, string | null>,
+): Record<string, unknown> {
+  if (!overrides || Object.keys(overrides).length === 0) {
+    return body;
+  }
+  const result = { ...body };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === null) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete result[key];
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
+/**
+ * 应用 Header 重写规则到 ProviderConfig 的副本中
+ */
+function applyHeaderOverridesToConfig(
+  baseConfig: ProviderConfig,
+  overrides?: Record<string, string | null>,
+): ProviderConfig {
+  if (!overrides || Object.keys(overrides).length === 0) {
+    return baseConfig;
+  }
+  const customHeaders: Record<string, string | null> = { ...baseConfig.config.custom_headers };
+  for (const [k, v] of Object.entries(overrides)) {
+    customHeaders[k] = v;
+  }
+  return {
+    ...baseConfig,
+    config: {
+      ...baseConfig.config,
+      // Temporarily cast to bypass strict string typing for the client's loop
+      custom_headers: customHeaders as unknown as Record<string, string>,
+    },
+  };
+}
+
 // ========== 框架引擎: 泛型内部实现 ==========
 
 interface AdapterSet<TReq, TRes> {
@@ -87,10 +133,12 @@ export async function callProvider<TReq, TRes extends InternalResponse>(
   label: string,
 ): Promise<void> {
   const providerLogger = getProviderLogger(ctx.route.providerKind);
-  const { requestAdapter, responseAdapter, client } = getAdapterSet(ctx.route.providerKind, ctx.route.providerConfig);
+  const providerConfig = applyHeaderOverridesToConfig(ctx.route.providerConfig, ctx.route.requestOverrides?.headers);
+  const { requestAdapter, responseAdapter, client } = getAdapterSet(ctx.route.providerKind, providerConfig);
   providerLogger.debug({ requestId: ctx.id }, `[dispatch] ${label.toLowerCase()} adapter initialized`);
 
-  const providerReqBody = requestAdapter.toProviderRequest(request, ctx.route.model);
+  const rawProviderReqBody = requestAdapter.toProviderRequest(request, ctx.route.model);
+  const providerReqBody = applyBodyOverrides(rawProviderReqBody, ctx.route.requestOverrides?.body);
   ctx.audit.providerRequest = { body: providerReqBody };
   providerLogger.debug({ requestId: ctx.id }, `[dispatch] ${label.toLowerCase()} request serialized`);
 
@@ -201,14 +249,16 @@ async function tryStreamConnect(
   };
 
   const providerLogger = getProviderLogger(ctx.route.providerKind);
+  const providerConfig = applyHeaderOverridesToConfig(ctx.route.providerConfig, candidate.requestOverrides?.headers);
   const { requestAdapter, streamResponseAdapter, client } = getProviderChatAdapterSet(
     ctx.route.providerKind,
-    ctx.route.providerConfig,
+    providerConfig,
   );
   providerLogger.debug({ requestId: ctx.id }, '[dispatch] stream adapter initialized');
 
   const strippedRequest = stripUnsupportedChatParams(chatRequest, candidate.supportedParameters);
-  const providerReqBody = requestAdapter.toProviderRequest(strippedRequest, ctx.route.model);
+  const rawProviderReqBody = requestAdapter.toProviderRequest(strippedRequest, ctx.route.model);
+  const providerReqBody = applyBodyOverrides(rawProviderReqBody, candidate.requestOverrides?.body);
   ctx.audit.providerRequest = { body: providerReqBody };
   providerLogger.debug({ requestId: ctx.id }, '[dispatch] stream request serialized');
 

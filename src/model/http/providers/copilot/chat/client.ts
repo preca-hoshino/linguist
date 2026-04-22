@@ -86,6 +86,18 @@ export class CopilotChatClient implements ProviderChatClient {
       ...COPILOT_CHAT_HEADERS,
     };
 
+    const customHeaders = this.config.config.custom_headers as Record<string, unknown> | undefined;
+    if (customHeaders !== undefined) {
+      for (const [key, val] of Object.entries(customHeaders)) {
+        if (val === null || val === '') {
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+          delete requestHeaders[key];
+        } else {
+          requestHeaders[key] = val as string;
+        }
+      }
+    }
+
     const start = Date.now();
     const response = await fetch(url, {
       method: 'POST',
@@ -127,6 +139,18 @@ export class CopilotChatClient implements ProviderChatClient {
       'Content-Type': 'application/json',
       ...COPILOT_CHAT_HEADERS,
     };
+
+    const customHeaders = this.config.config.custom_headers as Record<string, unknown> | undefined;
+    if (customHeaders !== undefined) {
+      for (const [key, val] of Object.entries(customHeaders)) {
+        if (val === null || val === '') {
+          // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+          delete requestHeaders[key];
+        } else {
+          requestHeaders[key] = val as string;
+        }
+      }
+    }
 
     const response = await fetch(url, {
       method: 'POST',
