@@ -1,12 +1,10 @@
 import { mapGeminiError } from '@/model/http/providers/gemini/error-mapping';
 import { parseProviderResponse } from '@/model/http/providers/http-utils';
-import type { ProviderChatClient } from '@/model/http/providers/types';
+import type { ProviderCallOptions, ProviderChatClient } from '@/model/http/providers/types';
 import type { ProviderCallResult, ProviderConfig, ProviderStreamResult } from '@/types';
 import { createLogger, DEFAULT_PROVIDER_TIMEOUT, GatewayError, logColors } from '@/utils';
 
 const logger = createLogger('Provider:Gemini', logColors.bold + logColors.yellow);
-
-const DEFAULT_BASE_URL = 'https://generativelanguage.googleapis.com';
 
 /**
  * Gemini 聊天客户端
@@ -30,7 +28,10 @@ export class GeminiChatClient implements ProviderChatClient {
       throw new GatewayError(500, 'config_error', `Gemini requires api_key credential, got: ${cred.type}`);
     }
     this.apiKey = cred.key;
-    let resolvedUrl = config.baseUrl.length > 0 ? config.baseUrl : DEFAULT_BASE_URL;
+    if (config.baseUrl.length === 0) {
+      throw new GatewayError(500, 'config_error', 'Gemini requires a non-empty base_url');
+    }
+    let resolvedUrl = config.baseUrl;
     while (resolvedUrl.endsWith('/')) {
       resolvedUrl = resolvedUrl.slice(0, -1);
     }
@@ -38,7 +39,11 @@ export class GeminiChatClient implements ProviderChatClient {
     logger.debug({ baseUrl: this.baseUrl }, 'Gemini chat client initialized');
   }
 
-  public async call(providerReq: Record<string, unknown>, model: string): Promise<ProviderCallResult> {
+  public async call(
+    providerReq: Record<string, unknown>,
+    model: string,
+    options?: ProviderCallOptions,
+  ): Promise<ProviderCallResult> {
     const url = `${this.baseUrl}/v1beta/models/${model}:generateContent`;
     logger.debug({ url, model }, 'Calling Gemini API');
 
@@ -59,7 +64,7 @@ export class GeminiChatClient implements ProviderChatClient {
       }
     }
 
-    const timeout = DEFAULT_PROVIDER_TIMEOUT;
+    const timeout = options?.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT;
     const start = Date.now();
     const response = await fetch(url, {
       method: 'POST',
@@ -82,7 +87,11 @@ export class GeminiChatClient implements ProviderChatClient {
     return { body, statusCode, requestHeaders, responseHeaders };
   }
 
-  public async callStream(providerReq: Record<string, unknown>, model: string): Promise<ProviderStreamResult> {
+  public async callStream(
+    providerReq: Record<string, unknown>,
+    model: string,
+    options?: ProviderCallOptions,
+  ): Promise<ProviderStreamResult> {
     const url = `${this.baseUrl}/v1beta/models/${model}:streamGenerateContent?alt=sse`;
     logger.debug({ url, model }, 'Calling Gemini API (stream)');
 
@@ -107,7 +116,7 @@ export class GeminiChatClient implements ProviderChatClient {
       method: 'POST',
       headers: requestHeaders,
       body: JSON.stringify(providerReq),
-      signal: AbortSignal.timeout(DEFAULT_PROVIDER_TIMEOUT),
+      signal: AbortSignal.timeout(options?.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT),
     });
 
     if (!response.ok) {
