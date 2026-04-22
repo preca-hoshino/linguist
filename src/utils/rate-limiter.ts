@@ -9,7 +9,7 @@ import { createLogger, logColors } from './logger';
 const logger = createLogger('RateLimiter', logColors.bold + logColors.magenta);
 
 /** 限流维度标识前缀 @public */
-export type RateLimitScope = 'pm' | 'vm';
+export type RateLimitScope = 'pm' | 'vm' | 'p';
 
 /**
  * 构建限流器 key
