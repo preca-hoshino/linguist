@@ -164,4 +164,6 @@ export interface ResolvedRoute {
     | undefined;
   /** 路由策略 */
   routingStrategy: 'load_balance' | 'failover';
+  /** API 调用超时时间（毫秒）。undefined = 使用系统默认常量 */
+  timeoutMs?: number | undefined;
 }
