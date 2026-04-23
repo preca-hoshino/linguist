@@ -54,11 +54,6 @@ export async function queryRequestLogs(query: RequestLogQuery = {}): Promise<{
     values.push(`%${query.request_model}%`);
   }
 
-  if (query.api_key_prefix !== undefined && query.api_key_prefix !== '') {
-    conditions.push(`r.api_key_prefix = $${String(idx++)}`);
-    values.push(query.api_key_prefix);
-  }
-
   if (query.user_format !== undefined && query.user_format !== '') {
     baseFrom = 'request_logs r INNER JOIN request_logs_details d ON r.id = d.id';
     const fmtIn = buildInClause("d.gateway_context->>'userFormat'", query.user_format, idx);

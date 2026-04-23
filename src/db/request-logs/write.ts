@@ -84,24 +84,14 @@ export async function markCompleted(ctx: ModelHttpContext): Promise<void> {
            routed_model = $2,
            provider_kind = $3,
            provider_id = $4,
-           prompt_tokens = $5,
-           completion_tokens = $6,
-           total_tokens = $7,
-           cached_tokens = $8,
-           reasoning_tokens = $9,
-           is_stream = $10,
-           calculated_cost = $11
+           is_stream = $5,
+           calculated_cost = $6
        WHERE id = $1`,
       [
         ctx.id,
         ctx.route?.model ?? null,
         ctx.route?.providerKind ?? null,
         ctx.route?.providerId ?? null,
-        promptTokens ?? null,
-        completionTokens ?? null,
-        totalTokens ?? null,
-        cachedTokens ?? null,
-        reasoningTokens ?? null,
         ctx.stream ?? null,
         calculatedCost,
       ],
@@ -111,14 +101,12 @@ export async function markCompleted(ctx: ModelHttpContext): Promise<void> {
     await db.query(
       `UPDATE request_logs_details
        SET timing = $2,
-           gateway_context = $3,
-           cost_breakdown = $4
+           gateway_context = $3
        WHERE id = $1`,
       [
         ctx.id,
         JSON.stringify(ctx.timing),
         JSON.stringify(buildCtxSnapshot(ctx)),
-        costBreakdown === null ? null : JSON.stringify(costBreakdown),
       ],
     );
 

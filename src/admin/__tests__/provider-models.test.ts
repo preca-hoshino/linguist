@@ -59,7 +59,6 @@ describe('Provider Models API Integration', () => {
         {
           id: 'short-id-123',
           ...validPayload,
-          parameters: '{}',
           model_config: '{}',
           pricing_tiers: '[]',
           rpm_limit: null,
@@ -97,7 +96,6 @@ describe('Provider Models API Integration', () => {
           model_type: 'embedding',
           capabilities: ['multimodal', 'dynamic_dim'],
           supported_parameters: ['dimensions', 'encoding_format'],
-          parameters: '{}',
           model_config: '{}',
           pricing_tiers: '[]',
           max_tokens: 1024,
