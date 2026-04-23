@@ -31,8 +31,6 @@ export interface RequestLogEntry {
   duration_ms: number | null;
   /** 后置计费总额 */
   calculated_cost: number | null;
-  /** 计费明细快照（输入/缓存/输出各部分费用） */
-  cost_breakdown: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
   /** ModelHttpContext 完整快照（唯一审计数据源） */
@@ -46,7 +44,6 @@ export interface RequestLogQuery {
   provider_kind?: string | string[] | undefined;
   provider_id?: string | string[] | undefined;
   error_type?: string | string[] | undefined;
-  api_key_prefix?: string | string[] | undefined;
   user_format?: string | string[] | undefined;
   is_stream?: string | string[] | boolean | undefined;
   app_id?: string | string[] | undefined;
@@ -62,6 +59,6 @@ export const ENTRY_COLUMNS: string = `
     THEN ((d.timing->>'end')::float - (d.timing->>'start')::float)::int
     ELSE NULL
   END AS duration_ms,
-  r.calculated_cost, d.cost_breakdown,
+  r.calculated_cost,
   r.created_at, r.updated_at, d.gateway_context
 `.trim();

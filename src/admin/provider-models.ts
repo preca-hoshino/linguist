@@ -62,7 +62,6 @@ interface ProviderModelBody {
   model_type?: string | undefined;
   capabilities?: string[] | undefined;
   supported_parameters?: string[] | undefined;
-  parameters?: Record<string, unknown> | undefined;
   /** 提供商模型级专属配置（如 Copilot 端点覆盖、特殊 Header 等，无深层校验） */
   model_config?: Record<string, unknown> | undefined;
   /** 请求规则重写 */
@@ -270,7 +269,7 @@ router.get('/', async (req: Request, res: Response) => {
     const dataWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const sql = `
-      SELECT pm.id, pm.provider_id, pm.name, pm.model_type, pm.capabilities, pm.supported_parameters, pm.parameters,
+      SELECT pm.id, pm.provider_id, pm.name, pm.model_type, pm.capabilities, pm.supported_parameters,
              pm.model_config, pm.request_overrides, pm.max_tokens, pm.is_active, pm.pricing_tiers, pm.rpm_limit, pm.tpm_limit,
              pm.timeout_ms, pm.created_at, pm.updated_at,
              p.name AS provider_name, p.kind AS provider_kind
@@ -310,7 +309,7 @@ router.get('/:id', async (req: Request, res: Response) => {
     logger.debug({ id }, 'Getting provider model by ID');
 
     const result = await db.query(
-      `SELECT pm.id, pm.provider_id, pm.name, pm.model_type, pm.capabilities, pm.supported_parameters, pm.parameters,
+      `SELECT pm.id, pm.provider_id, pm.name, pm.model_type, pm.capabilities, pm.supported_parameters,
               pm.model_config, pm.request_overrides, pm.max_tokens, pm.is_active, pm.pricing_tiers, pm.rpm_limit, pm.tpm_limit,
               pm.timeout_ms, pm.created_at, pm.updated_at,
               p.name AS provider_name, p.kind AS provider_kind
@@ -347,7 +346,6 @@ router.post('/', async (req: Request, res: Response) => {
       model_type,
       capabilities,
       supported_parameters,
-      parameters,
       model_config,
       request_overrides,
       max_tokens,
@@ -396,9 +394,9 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     const result = await db.query(
-      `INSERT INTO model_provider_models (id, provider_id, name, model_type, capabilities, supported_parameters, parameters, model_config, request_overrides, max_tokens, pricing_tiers, rpm_limit, tpm_limit, timeout_ms)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
-       RETURNING id, provider_id, name, model_type, capabilities, supported_parameters, parameters, model_config, request_overrides, max_tokens, pricing_tiers, rpm_limit, tpm_limit, timeout_ms, is_active, created_at, updated_at`,
+      `INSERT INTO model_provider_models (id, provider_id, name, model_type, capabilities, supported_parameters, model_config, request_overrides, max_tokens, pricing_tiers, rpm_limit, tpm_limit, timeout_ms)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       RETURNING id, provider_id, name, model_type, capabilities, supported_parameters, model_config, request_overrides, max_tokens, pricing_tiers, rpm_limit, tpm_limit, timeout_ms, is_active, created_at, updated_at`,
       [
         await generateShortId('model_provider_models'),
         provider_id,
@@ -406,7 +404,6 @@ router.post('/', async (req: Request, res: Response) => {
         model_type,
         capabilities ?? [],
         supported_parameters ?? [],
-        JSON.stringify(parameters ?? {}),
         JSON.stringify(model_config ?? {}),
         JSON.stringify(request_overrides ?? {}),
         finalMaxTokens,
@@ -435,7 +432,6 @@ router.post('/:id', async (req: Request, res: Response) => {
       model_type,
       capabilities,
       supported_parameters,
-      parameters,
       model_config,
       request_overrides,
       max_tokens,
@@ -485,7 +481,6 @@ router.post('/:id', async (req: Request, res: Response) => {
       model_type,
       capabilities,
       supported_parameters,
-      parameters: parameters === undefined ? undefined : JSON.stringify(parameters),
       model_config: model_config === undefined ? undefined : JSON.stringify(model_config),
       request_overrides: request_overrides === undefined ? undefined : JSON.stringify(request_overrides),
       max_tokens,
@@ -503,7 +498,7 @@ router.post('/:id', async (req: Request, res: Response) => {
     update.values.push(id);
     const result = await db.query(
       `UPDATE model_provider_models SET ${update.setClause} WHERE id = $${String(update.nextIdx)}
-       RETURNING id, provider_id, name, model_type, capabilities, supported_parameters, parameters, model_config, request_overrides, max_tokens, pricing_tiers, rpm_limit, tpm_limit, timeout_ms, is_active, created_at, updated_at`,
+       RETURNING id, provider_id, name, model_type, capabilities, supported_parameters, model_config, request_overrides, max_tokens, pricing_tiers, rpm_limit, tpm_limit, timeout_ms, is_active, created_at, updated_at`,
 
       update.values,
     );

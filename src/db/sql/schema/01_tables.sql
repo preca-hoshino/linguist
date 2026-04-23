@@ -36,7 +36,6 @@ CREATE TABLE IF NOT EXISTS model_provider_models (
     model_type      VARCHAR(20)  NOT NULL CHECK (model_type IN ('chat', 'embedding', 'rerank', 'image', 'audio')),
     capabilities    TEXT[]       DEFAULT '{}',
     supported_parameters TEXT[]  DEFAULT '{}',
-    parameters      JSONB        DEFAULT '{}'::jsonb,
     max_tokens      INTEGER      DEFAULT 128,
     pricing_tiers   JSONB        DEFAULT '[]'::jsonb,
     rpm_limit       INT          DEFAULT NULL,
@@ -76,8 +75,6 @@ CREATE TABLE IF NOT EXISTS virtual_model_backends (
 CREATE TABLE IF NOT EXISTS apps (
     id              VARCHAR(32)   PRIMARY KEY,
     name            VARCHAR(200) NOT NULL,
-    auth_mode       VARCHAR(20)  NOT NULL DEFAULT 'api_key'
-                    CHECK (auth_mode IN ('api_key')),
     is_active       BOOLEAN      DEFAULT true,
     created_at      TIMESTAMPTZ  DEFAULT NOW(),
     updated_at      TIMESTAMPTZ  DEFAULT NOW(),
@@ -104,11 +101,6 @@ CREATE TABLE IF NOT EXISTS request_logs (
     error_message           TEXT,
     error_code              VARCHAR(50),
     error_type              VARCHAR(20),
-    prompt_tokens           INT,
-    completion_tokens       INT,
-    total_tokens            INT,
-    cached_tokens           INT,
-    reasoning_tokens        INT,
     calculated_cost         DECIMAL(16,6)  DEFAULT 0.0,
     created_at              TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
     updated_at              TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
@@ -119,7 +111,6 @@ CREATE TABLE IF NOT EXISTS request_logs_details (
     id                      VARCHAR(36)    NOT NULL,
     gateway_context         JSONB,
     timing                  JSONB,
-    cost_breakdown          JSONB,
     created_at              TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
     PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);
