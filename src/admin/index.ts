@@ -3,19 +3,11 @@
 import { Router } from 'express';
 import { appsRouter } from './apps';
 import { adminAuth } from './auth';
-import { copilotOAuthRouter } from './copilot-oauth';
 import { loginRouter } from './login';
-import { mcpLogsRouter } from './mcp-logs';
-import { mcpProvidersRouter } from './mcp-providers';
-import { mcpStatsRouter } from './mcp-stats';
-import { mcpVirtualServersRouter } from './mcp-virtual-servers';
+import { mcpRouter } from './mcp';
 import { meRouter } from './me';
-import { providerModelsRouter } from './provider-models';
-import { providersRouter } from './providers';
-import { requestLogsRouter } from './request-logs';
-import { statsRouter } from './stats';
+import { modelRouter } from './model';
 import { publicUsersRouter, usersRouter } from './users';
-import { virtualModelsRouter } from './virtual-models';
 
 const adminRouter: Router = Router();
 
@@ -32,18 +24,10 @@ import { idempotencyMiddleware } from './idempotency';
 adminRouter.use(idempotencyMiddleware);
 
 // 挂载子路由
-adminRouter.use('/providers', providersRouter);
-adminRouter.use('/provider-models', providerModelsRouter);
-adminRouter.use('/virtual-models', virtualModelsRouter);
-adminRouter.use('/request-logs', requestLogsRouter);
-adminRouter.use('/mcp-providers', mcpProvidersRouter);
-adminRouter.use('/virtual-mcps', mcpVirtualServersRouter);
-adminRouter.use('/mcp-logs', mcpLogsRouter);
-adminRouter.use('/mcp-stats', mcpStatsRouter);
+adminRouter.use('/model', modelRouter);
+adminRouter.use('/mcp', mcpRouter);
 adminRouter.use('/apps', appsRouter);
-adminRouter.use('/stats', statsRouter);
 adminRouter.use('/users', usersRouter);
 adminRouter.use('/me', meRouter);
-adminRouter.use('/oauth/copilot', copilotOAuthRouter);
 
 export { adminRouter };

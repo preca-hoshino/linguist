@@ -11,7 +11,7 @@ import {
 } from '@/db/mcp-virtual-servers/queries';
 import type { VirtualMcpCreateInput, VirtualMcpUpdateInput } from '@/db/mcp-virtual-servers/types';
 import { GatewayError } from '@/utils';
-import { handleAdminError } from './error';
+import { handleAdminError } from '../error';
 
 const router: Router = Router();
 

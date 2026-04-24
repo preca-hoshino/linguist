@@ -4,7 +4,7 @@ import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { deleteMcpLogById, getMcpLogById, listMcpLogs } from '@/db/mcp-logs/queries';
 import { GatewayError } from '@/utils';
-import { handleAdminError } from './error';
+import { handleAdminError } from '../error';
 
 const router: Router = Router();
 

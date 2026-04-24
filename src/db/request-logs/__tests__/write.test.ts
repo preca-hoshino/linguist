@@ -123,7 +123,7 @@ describe('request-logs/write', () => {
 
       // calculated_cost is $11
       const updateArgs = (db.query as jest.Mock).mock.calls[0][1];
-      expect(updateArgs[10]).toBe(0.15); // calculatedCost
+      expect(updateArgs[5]).toBe(0.15); // calculatedCost
     });
 
     it('should handle billing failure or missing billing result gracefully', async () => {
@@ -140,7 +140,7 @@ describe('request-logs/write', () => {
       expect(lookupPricingTiers).toHaveBeenCalled();
 
       const updateArgs = (db.query as jest.Mock).mock.calls[0][1];
-      expect(updateArgs[10]).toBe(0); // fallback cost
+      expect(updateArgs[5]).toBe(0); // fallback cost
     });
 
     it('should handle ctx.route undefined and different usage variations', async () => {
@@ -162,12 +162,12 @@ describe('request-logs/write', () => {
       (db.query as jest.Mock).mockClear();
       (db.query as jest.Mock).mockResolvedValue({});
       await markCompleted({ ...mockCtx, stream: false } as unknown as ModelHttpContext);
-      expect((db.query as jest.Mock).mock.calls[0][1][9]).toBe(false);
+      expect((db.query as jest.Mock).mock.calls[0][1][4]).toBe(false);
 
       (db.query as jest.Mock).mockClear();
       (db.query as jest.Mock).mockResolvedValue({});
       await markCompleted({ ...mockCtx, stream: undefined } as unknown as ModelHttpContext);
-      expect((db.query as jest.Mock).mock.calls[0][1][9]).toBeNull();
+      expect((db.query as jest.Mock).mock.calls[0][1][4]).toBeNull();
     });
   });
 

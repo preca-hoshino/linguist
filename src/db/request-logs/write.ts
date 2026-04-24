@@ -103,11 +103,7 @@ export async function markCompleted(ctx: ModelHttpContext): Promise<void> {
        SET timing = $2,
            gateway_context = $3
        WHERE id = $1`,
-      [
-        ctx.id,
-        JSON.stringify(ctx.timing),
-        JSON.stringify(buildCtxSnapshot(ctx)),
-      ],
+      [ctx.id, JSON.stringify(ctx.timing), JSON.stringify(buildCtxSnapshot(ctx))],
     );
 
     const duration = ctx.timing.end === undefined ? undefined : ctx.timing.end - ctx.timing.start;

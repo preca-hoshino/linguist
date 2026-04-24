@@ -43,7 +43,7 @@ describe('Admin Internal API: Virtual Models', () => {
     jest.spyOn(rateLimiter, 'getTpmUsage').mockReturnValue(100);
   });
 
-  describe('GET /api/virtual-models', () => {
+  describe('GET /api/model/virtual-models', () => {
     it('should return paginated virtual models with backends array', async () => {
       mockQuery.mockResolvedValueOnce({
         rows: [{ total: '1' }],
@@ -92,7 +92,7 @@ describe('Admin Internal API: Virtual Models', () => {
         fields: [],
       }); // backend result for expand
 
-      const response = await request(app).get('/api/virtual-models?expand=backends');
+      const response = await request(app).get('/api/model/virtual-models?expand=backends');
 
       expect(response.status).toBe(200);
       expect(response.body.data).toHaveLength(1);
@@ -103,7 +103,7 @@ describe('Admin Internal API: Virtual Models', () => {
     });
   });
 
-  describe('GET /api/virtual-models/:id', () => {
+  describe('GET /api/model/virtual-models/:id', () => {
     it('should return a single virtual model and its backends', async () => {
       mockQuery.mockResolvedValueOnce({
         rows: [
@@ -134,7 +134,7 @@ describe('Admin Internal API: Virtual Models', () => {
         fields: [],
       }); // backends info without expand
 
-      const response = await request(app).get('/api/virtual-models/vm-1');
+      const response = await request(app).get('/api/model/virtual-models/vm-1');
       expect(response.status).toBe(200);
       expect(response.body).toHaveProperty('id', 'vm-1');
       expect(response.body.backends).toHaveLength(1);
@@ -150,12 +150,12 @@ describe('Admin Internal API: Virtual Models', () => {
         fields: [],
       }); // empty
 
-      const response = await request(app).get('/api/virtual-models/vm-not-exist');
+      const response = await request(app).get('/api/model/virtual-models/vm-not-exist');
       expect(response.status).toBe(404);
     });
   });
 
-  describe('POST /api/virtual-models', () => {
+  describe('POST /api/model/virtual-models', () => {
     const validPayload = {
       name: 'new-vm',
       description: 'my new vm',
@@ -165,14 +165,14 @@ describe('Admin Internal API: Virtual Models', () => {
     };
 
     it('should validate missing required fields', async () => {
-      const response = await request(app).post('/api/virtual-models').send({});
+      const response = await request(app).post('/api/model/virtual-models').send({});
       expect(response.status).toBe(400);
       expect(response.body.error.message).toContain('name is required');
     });
 
     it('should fail if backends are not provided', async () => {
       const payload = { ...validPayload, backends: [] };
-      const response = await request(app).post('/api/virtual-models').send(payload);
+      const response = await request(app).post('/api/model/virtual-models').send(payload);
       expect(response.status).toBe(400);
       expect(response.body.error.message).toContain('At least one backend is required');
     });
@@ -181,7 +181,7 @@ describe('Admin Internal API: Virtual Models', () => {
       // Mock provider models check query returning empty
       mockQuery.mockResolvedValueOnce({ rows: [], command: 'SELECT', rowCount: 0, oid: 0, fields: [] });
 
-      const response = await request(app).post('/api/virtual-models').send(validPayload);
+      const response = await request(app).post('/api/model/virtual-models').send(validPayload);
       expect(response.status).toBe(404);
       expect(response.body.error.message).toContain('Provider model(s) not found');
     });
@@ -212,7 +212,7 @@ describe('Admin Internal API: Virtual Models', () => {
         fields: [],
       }); // backends
 
-      const response = await request(app).post('/api/virtual-models').send(validPayload);
+      const response = await request(app).post('/api/model/virtual-models').send(validPayload);
 
       expect(response.status).toBe(201);
       expect(response.body).toHaveProperty('id', 'vm-test-id');
@@ -220,7 +220,7 @@ describe('Admin Internal API: Virtual Models', () => {
     });
   });
 
-  describe('POST /api/virtual-models/:id', () => {
+  describe('POST /api/model/virtual-models/:id', () => {
     const updatePayload = {
       model_type: 'chat',
       backends: [{ provider_model_id: 'pm-new', weight: 100 }],
@@ -229,7 +229,7 @@ describe('Admin Internal API: Virtual Models', () => {
     it('should return 404 if virtual model does not exist', async () => {
       mockQuery.mockResolvedValueOnce({ rows: [], command: 'SELECT', rowCount: 0, oid: 0, fields: [] });
 
-      const response = await request(app).post('/api/virtual-models/vm-not-found').send(updatePayload);
+      const response = await request(app).post('/api/model/virtual-models/vm-not-found').send(updatePayload);
       expect(response.status).toBe(404);
     });
 
@@ -251,7 +251,7 @@ describe('Admin Internal API: Virtual Models', () => {
         fields: [],
       });
 
-      const response = await request(app).post('/api/virtual-models/vm-1').send(updatePayload);
+      const response = await request(app).post('/api/model/virtual-models/vm-1').send(updatePayload);
       expect(response.status).toBe(400);
       expect(response.body.error.message).toContain('different type');
     });
@@ -290,7 +290,7 @@ describe('Admin Internal API: Virtual Models', () => {
       });
 
       const response = await request(app)
-        .post('/api/virtual-models/vm-1')
+        .post('/api/model/virtual-models/vm-1')
         .send({
           name: 'updated-name',
           backends: [{ provider_model_id: 'pm-new', weight: 100 }],
@@ -302,16 +302,16 @@ describe('Admin Internal API: Virtual Models', () => {
     });
   });
 
-  describe('DELETE /api/virtual-models/:id', () => {
+  describe('DELETE /api/model/virtual-models/:id', () => {
     it('should return 404 if not found', async () => {
       mockQuery.mockResolvedValueOnce({ rows: [], command: 'DELETE', rowCount: 0, oid: 0, fields: [] });
-      const response = await request(app).delete('/api/virtual-models/vm-not');
+      const response = await request(app).delete('/api/model/virtual-models/vm-not');
       expect(response.status).toBe(404);
     });
 
     it('should successfully delete a virtual model', async () => {
       mockQuery.mockResolvedValueOnce({ rows: [{ id: 'vm-1' }], command: 'DELETE', rowCount: 1, oid: 0, fields: [] });
-      const response = await request(app).delete('/api/virtual-models/vm-1');
+      const response = await request(app).delete('/api/model/virtual-models/vm-1');
       expect(response.status).toBe(200);
       expect(response.body).toHaveProperty('deleted', true);
     });

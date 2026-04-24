@@ -7,7 +7,7 @@ import { getProviderSupportedModelTypes, getRegisteredProviderKinds } from '@/mo
 import type { ProviderAdvancedConfig } from '@/types';
 import { DEFAULT_PROVIDER_CONFIG } from '@/types';
 import { buildInClause, buildUpdateSet, createLogger, GatewayError, logColors } from '@/utils';
-import { handleAdminError } from './error';
+import { handleAdminError } from '../error';
 
 const logger = createLogger('Admin:Providers', logColors.bold + logColors.blue);
 

@@ -13,7 +13,7 @@ import type { McpProviderCreateInput, McpProviderUpdateInput } from '@/db/mcp-pr
 import type { McpToolInfo } from '@/mcp/providers/base-client';
 import { mcpConnectionManager } from '@/mcp/providers/connection-manager';
 import { GatewayError } from '@/utils';
-import { handleAdminError } from './error';
+import { handleAdminError } from '../error';
 
 const router: Router = Router();
 
