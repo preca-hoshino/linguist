@@ -176,7 +176,7 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // ==================== 更新提供商 ====================
-router.post('/:id', async (req: Request, res: Response) => {
+router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const body = req.body as ProviderBody;

@@ -220,7 +220,7 @@ describe('Admin Internal API: Virtual Models', () => {
     });
   });
 
-  describe('POST /api/model/virtual-models/:id', () => {
+  describe('PATCH /api/model/virtual-models/:id', () => {
     const updatePayload = {
       model_type: 'chat',
       backends: [{ provider_model_id: 'pm-new', weight: 100 }],
@@ -229,7 +229,7 @@ describe('Admin Internal API: Virtual Models', () => {
     it('should return 404 if virtual model does not exist', async () => {
       mockQuery.mockResolvedValueOnce({ rows: [], command: 'SELECT', rowCount: 0, oid: 0, fields: [] });
 
-      const response = await request(app).post('/api/model/virtual-models/vm-not-found').send(updatePayload);
+      const response = await request(app).patch('/api/model/virtual-models/vm-not-found').send(updatePayload);
       expect(response.status).toBe(404);
     });
 
@@ -251,7 +251,7 @@ describe('Admin Internal API: Virtual Models', () => {
         fields: [],
       });
 
-      const response = await request(app).post('/api/model/virtual-models/vm-1').send(updatePayload);
+      const response = await request(app).patch('/api/model/virtual-models/vm-1').send(updatePayload);
       expect(response.status).toBe(400);
       expect(response.body.error.message).toContain('different type');
     });
@@ -290,7 +290,7 @@ describe('Admin Internal API: Virtual Models', () => {
       });
 
       const response = await request(app)
-        .post('/api/model/virtual-models/vm-1')
+        .patch('/api/model/virtual-models/vm-1')
         .send({
           name: 'updated-name',
           backends: [{ provider_model_id: 'pm-new', weight: 100 }],

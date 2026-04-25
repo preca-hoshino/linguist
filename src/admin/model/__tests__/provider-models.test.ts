@@ -152,7 +152,7 @@ describe('Provider Models API Integration', () => {
     });
 
     const res = await request(app)
-      .post('/api/model/provider-models/model-embed')
+      .patch('/api/model/provider-models/model-embed')
       .send({
         supported_parameters: ['dimensions'],
       });
