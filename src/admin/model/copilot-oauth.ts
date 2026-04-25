@@ -17,7 +17,7 @@ import {
   GITHUB_DEVICE_CODE_URL,
 } from '@/model/http/providers/copilot/constants';
 import { createLogger, GatewayError, logColors } from '@/utils';
-import { handleAdminError } from './error';
+import { handleAdminError } from '../error';
 
 const logger = createLogger('Admin:Copilot:OAuth', logColors.bold + logColors.cyan);
 

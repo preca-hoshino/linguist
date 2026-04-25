@@ -4,7 +4,7 @@ import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { db, generateShortId } from '@/db';
 import { buildInClause, buildUpdateSet, createLogger, GatewayError, logColors, rateLimiter } from '@/utils';
-import { handleAdminError } from './error';
+import { handleAdminError } from '../error';
 
 const logger = createLogger('Admin:ProviderModels', logColors.bold + logColors.blue);
 

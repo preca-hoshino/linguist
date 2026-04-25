@@ -5,7 +5,7 @@ import { Router } from 'express';
 import type { RequestLogStatus } from '@/db';
 import { deleteRequestLogById, getRequestLogById, queryRequestLogs } from '@/db';
 import { createLogger, GatewayError, logColors } from '@/utils';
-import { handleAdminError } from './error';
+import { handleAdminError } from '../error';
 
 const logger = createLogger('Admin:RequestLogs', logColors.bold + logColors.blue);
 

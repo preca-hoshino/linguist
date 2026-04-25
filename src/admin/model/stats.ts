@@ -13,7 +13,7 @@ import {
   getStatsTokens,
 } from '@/db';
 import { createLogger, GatewayError, logColors } from '@/utils';
-import { handleAdminError } from './error';
+import { handleAdminError } from '../error';
 
 const logger = createLogger('Admin:Stats', logColors.bold + logColors.blue);
 

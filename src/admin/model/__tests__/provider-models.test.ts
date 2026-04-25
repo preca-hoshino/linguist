@@ -25,7 +25,7 @@ jest.mock('@/utils', () => ({
 
 const app = express();
 app.use(express.json());
-app.use('/api/provider-models', providerModelsRouter);
+app.use('/api/model/provider-models', providerModelsRouter);
 
 describe('Provider Models API Integration', () => {
   beforeEach(() => {
@@ -68,7 +68,7 @@ describe('Provider Models API Integration', () => {
       ],
     });
 
-    const res = await request(app).post('/api/provider-models').send(validPayload);
+    const res = await request(app).post('/api/model/provider-models').send(validPayload);
 
     expect(res.status).toBe(201);
     expect(res.body.object).toBe('provider_model');
@@ -107,7 +107,7 @@ describe('Provider Models API Integration', () => {
     });
 
     const res = await request(app)
-      .post('/api/provider-models')
+      .post('/api/model/provider-models')
       .send({
         provider_id: 'provider-123',
         name: 'Embed Model',
@@ -128,7 +128,7 @@ describe('Provider Models API Integration', () => {
       supported_parameters: ['temperature', 'invalid_fake_param'],
     };
 
-    const res = await request(app).post('/api/provider-models').send(invalidPayload);
+    const res = await request(app).post('/api/model/provider-models').send(invalidPayload);
 
     expect(res.status).toBe(400);
     expect((res.body as any).error.code).toBe('invalid_request');
@@ -152,7 +152,7 @@ describe('Provider Models API Integration', () => {
     });
 
     const res = await request(app)
-      .post('/api/provider-models/model-embed')
+      .post('/api/model/provider-models/model-embed')
       .send({
         supported_parameters: ['dimensions'],
       });

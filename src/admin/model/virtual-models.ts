@@ -12,7 +12,7 @@ import {
   logColors,
   rateLimiter,
 } from '@/utils';
-import { handleAdminError } from './error';
+import { handleAdminError } from '../error';
 
 const logger = createLogger('Admin:VirtualModels', logColors.bold + logColors.blue);
 
