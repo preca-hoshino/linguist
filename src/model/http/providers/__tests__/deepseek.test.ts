@@ -44,7 +44,7 @@ describe('Provider Plugin: DeepSeek', () => {
       if (!set) {
         throw new Error('set undefined');
       }
-      const result = await set.client.call({ messages: [{ role: 'user', content: 'test' }] }, 'deepseek-chat');
+      const result = await set.client.call({ messages: [{ role: 'user', content: 'test' }] }, 'deepseek-v4-pro');
 
       const body = result.body as { choices: { message: { content: string } }[] };
       expect(body.choices[0]).toBeDefined();
@@ -60,7 +60,7 @@ describe('Provider Plugin: DeepSeek', () => {
       if (!set) {
         throw new Error('set undefined');
       }
-      const promise = set.client.call({ messages: [] }, 'deepseek-chat');
+      const promise = set.client.call({ messages: [] }, 'deepseek-v4-pro');
 
       await expect(promise).rejects.toThrow();
       try {
