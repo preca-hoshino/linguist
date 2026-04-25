@@ -133,12 +133,12 @@ export type FinishReason =
  *
  * 用户适配器层将各格式的思考参数统一转换为此结构：
  * - OpenAI `thinking.type` ("enabled"/"disabled"/"auto") → 直接映射 type 字段
- * - OpenAI `reasoning_effort` ("minimal"/"low"/"medium"/"high") → minimal 映射 type:disabled，其余透传
+ * - OpenAI `reasoning_effort` ("minimal"/"low"/"medium"/"high") → 在用户适配器层全量消化为 budget_tokens，不进入内部类型
  * - Gemini `thinkingBudget` / OpenAI `thinking.budget_tokens` → 直接使用
  *
  * 提供商适配器层再从此结构转换为厂商特定格式：
- * - DeepSeek：type → "enabled"/"disabled"（不支持 auto，视为 enabled）
- * - 火山引擎：type 直接透传（enabled/disabled/auto），reasoning_effort 作为独立顶层字段
+ * - DeepSeek：type → "enabled"/"disabled"（不支持 auto，视为 enabled）；推理强度由 budget_tokens/max_tokens 比率推断
+ * - 火山引擎：type 直接透传（enabled/disabled/auto）；推理强度由 budget_tokens/max_tokens 比率推断
  * - Gemini：type !== 'disabled' → includeThoughts:true，budget_tokens → thinkingBudget
  */
 export interface ThinkingConfig {
@@ -222,20 +222,6 @@ export interface InternalChatRequest {
 
   /** 深度思考配置（DeepSeek-R1 / doubao-seed / Gemini 等支持） */
   thinking?: ThinkingConfig | undefined;
-
-  /**
-   * 推理努力级别
-   * - minimal：关闭思考，直接回答
-   * - low：轻量思考，侧重快速响应
-   * - medium：均衡模式，兼顾速度与深度（默认）
-   * - high：深度分析，处理复杂问题
-   *
-   * 与 thinking 字段配合使用，thinking 控制开关，reasoning_effort 调节深度。
-   * 此字段由用户侧适配器层写入；提供商适配器应优先从 thinking.budget_tokens
-   * 推算出该提供商格式的推理强度参数，而非直接读取本字段。
-   * 目前由火山引擎适配器直接消费；其他提供商（如 DeepSeek）通过 budget_tokens 推断。
-   */
-  reasoning_effort?: 'minimal' | 'low' | 'medium' | 'high' | undefined;
 
   /** 可用工具/函数定义 */
   tools?: ToolDefinition[] | undefined;
