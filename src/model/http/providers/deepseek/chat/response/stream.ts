@@ -86,8 +86,8 @@ export class DeepSeekChatStreamResponseAdapter implements ProviderChatStreamResp
     if (reason === null || reason === '') {
       return null;
     }
-    // 仅识别已知原因；未知值视为尚未结束（返回 null 而非 'unknown'），
-    // 避免下游用户适配器误判为最终 chunk
-    return DeepSeekChatStreamResponseAdapter.KNOWN_REASONS.has(reason) ? (reason as FinishReason) : null;
+    // 已知原因直接映射；未知但非空的原因统一为 'unknown'，
+    // 与非流式适配器行为对齐，确保下游结束逻辑可正常触发
+    return DeepSeekChatStreamResponseAdapter.KNOWN_REASONS.has(reason) ? (reason as FinishReason) : 'unknown';
   }
 }

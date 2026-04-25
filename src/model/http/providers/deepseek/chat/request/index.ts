@@ -3,7 +3,7 @@
 import type { ProviderChatRequestAdapter } from '@/model/http/providers/types';
 import type { InternalChatRequest, ToolDefinition } from '@/types';
 import { createLogger, GatewayError, logColors } from '@/utils';
-import { normalizeMessages, prepareMessagesForReasoner } from './message-converter';
+import { normalizeMessages } from './message-converter';
 
 const logger = createLogger('Provider:DeepSeek', logColors.bold + logColors.green);
 
@@ -49,17 +49,9 @@ function normalizeTools(tools: ToolDefinition[]): ToolDefinition[] {
  */
 export class DeepSeekChatRequestAdapter implements ProviderChatRequestAdapter {
   public toProviderRequest(internalReq: InternalChatRequest, routedModel: string): Record<string, unknown> {
-    // DeepSeek v4 默认开启思考模式 (thinking: enabled)。
-    // 抛弃对旧模型名的判断，统一按此默认行为处理。
-    let isReasoner = true;
-    if (internalReq.thinking) {
-      isReasoner = internalReq.thinking.type !== 'disabled';
-    }
-
     logger.debug(
       {
         routedModel,
-        isReasoner,
         messagesCount: internalReq.messages.length,
         hasTools: !!internalReq.tools,
         hasThinking: !!internalReq.thinking,
@@ -67,11 +59,8 @@ export class DeepSeekChatRequestAdapter implements ProviderChatRequestAdapter {
       'Adapting internal request to DeepSeek format',
     );
 
-    // reasoner 模型需要特殊处理消息中的 reasoning_content 字段
-    // 两条路径均需将 ContentPart[] 内容转换为 OpenAI image_url 格式
-    const messages = isReasoner
-      ? prepareMessagesForReasoner(internalReq.messages)
-      : normalizeMessages(internalReq.messages);
+    // 消息列表导租：由数据自身决定是否携带 reasoning_content
+    const messages = normalizeMessages(internalReq.messages);
 
     const req: Record<string, unknown> = {
       model: routedModel,
@@ -121,9 +110,17 @@ export class DeepSeekChatRequestAdapter implements ProviderChatRequestAdapter {
     }
 
     // 推理强度控制 (reasoning_effort)
-    // DeepSeek v4 支持作为顶层参数传入
-    if (internalReq.reasoning_effort !== undefined) {
-      req.reasoning_effort = internalReq.reasoning_effort;
+    // 由统一类型的 thinking.budget_tokens / max_tokens 比率推断，而非直接透传 reasoning_effort 字段。
+    // DeepSeek v4 仅支持 'max' 和 'high' 两档。
+    // 比率 >= 0.75 → 'max'； >= 0.40 → 'high'；其余 → 不传，由提供商默认处理
+    if (internalReq.thinking?.budget_tokens !== undefined && (internalReq.max_tokens ?? 0) > 0) {
+      const ratio = internalReq.thinking.budget_tokens / (internalReq.max_tokens as number);
+      if (ratio >= 0.75) {
+        req.reasoning_effort = 'max';
+      } else if (ratio >= 0.4) {
+        req.reasoning_effort = 'high';
+      }
+      // ratio < 0.4：不传该字段
     }
 
     // 响应格式（JSON mode）

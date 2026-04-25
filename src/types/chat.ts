@@ -120,7 +120,13 @@ export type ResponseFormat =
     };
 
 /** 停止原因统一类型 */
-export type FinishReason = 'stop' | 'length' | 'tool_calls' | 'content_filter' | 'unknown';
+export type FinishReason =
+  | 'stop'
+  | 'length'
+  | 'tool_calls'
+  | 'content_filter'
+  | 'insufficient_system_resource'
+  | 'unknown';
 
 /**
  * 深度思考配置
@@ -218,14 +224,16 @@ export interface InternalChatRequest {
   thinking?: ThinkingConfig | undefined;
 
   /**
-   * 推理努力级别（火山引擎 doubao-seed 系列支持）
+   * 推理努力级别
    * - minimal：关闭思考，直接回答
    * - low：轻量思考，侧重快速响应
    * - medium：均衡模式，兼顾速度与深度（默认）
    * - high：深度分析，处理复杂问题
    *
    * 与 thinking 字段配合使用，thinking 控制开关，reasoning_effort 调节深度。
-   * 仅火山引擎提供商使用此字段，其他提供商忽略。
+   * 此字段由用户侧适配器层写入；提供商适配器应优先从 thinking.budget_tokens
+   * 推算出该提供商格式的推理强度参数，而非直接读取本字段。
+   * 目前由火山引擎适配器直接消费；其他提供商（如 DeepSeek）通过 budget_tokens 推断。
    */
   reasoning_effort?: 'minimal' | 'low' | 'medium' | 'high' | undefined;
 
