@@ -166,7 +166,11 @@ export interface ChatUsage {
   prompt_tokens: number;
   completion_tokens: number;
   total_tokens: number;
-  /** 思考过程消耗的 token 数（包含在 completion_tokens 中） */
+  /**
+   * 思考过程消耗的 token 数
+   * 注：DeepSeek / Volcengine / Gemini 将此值与 completion_tokens 分开上报，
+   * 计费层统一以相同的 output_price 合并计算，不单独定价。
+   */
   reasoning_tokens?: number | undefined;
   /**
    * 上下文缓存命中的 token 数
