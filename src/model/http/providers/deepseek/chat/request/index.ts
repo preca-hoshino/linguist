@@ -119,6 +119,13 @@ export class DeepSeekChatRequestAdapter implements ProviderChatRequestAdapter {
       req.thinking = {
         type: internalReq.thinking.type === 'disabled' ? 'disabled' : 'enabled',
       };
+    } else if (!isReasoner) {
+      // 向后兼容：DeepSeek v4 API 默认开启 thinking。
+      // 对于未显式配置 thinking 且使用旧版 deepseek-chat 等非思考模型的请求，主动下发 disabled，
+      // 以保持旧应用原有的快速、低成本响应表现。
+      req.thinking = {
+        type: 'disabled',
+      };
     }
 
     // 推理强度控制 (reasoning_effort)
