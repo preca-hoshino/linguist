@@ -77,9 +77,11 @@ async function start(): Promise<void> {
     setupWebSocket(server);
     initMcpGateway();
 
-    // 配置请求超时（10 分钟），以支持高级模型的长时间思考
-    server.requestTimeout = 600_000;
-    server.headersTimeout = 620_000; // 略大于 requestTimeout
+    // 彻底取消网关层面的内置 HTTP 超时限制
+    // 完全由提供商客户端内部的 AbortSignal（基于用户配置的 timeout_ms）来控制请求生命周期
+    server.requestTimeout = 0;
+    server.headersTimeout = 0;
+    server.timeout = 0;
 
     // 优雅关闭
     let isShuttingDown = false;
