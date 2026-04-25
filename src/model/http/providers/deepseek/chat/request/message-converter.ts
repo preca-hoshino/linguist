@@ -51,12 +51,13 @@ function convertContent(content: string | ContentPart[]): string | Record<string
 // ==================== 消息列表转换 ====================
 
 /**
- * 将内部消息列表规范化为 DeepSeek/OpenAI 兼容格式（非 reasoner 模型）
+ * 将内部消息列表规范化为 DeepSeek/OpenAI 兼容格式
  *
- * 主要处理：
+ * 设计原则：忠实于统一数据类型 InternalMessage，由数据自身决定输出结构：
+ * - assistant 消息若携带 reasoning_content，则原样传递给 DeepSeek（满足多轮对话需求）
+ * - assistant 消息若不携带 reasoning_content，则不注入任何默认值（由提供商自然处理）
  * - content ContentPart[] → OpenAI image_url 格式
  * - 保留 tool_calls / tool_call_id / name 有效字段
- * - 移除 reasoning_content（非 reasoner 模型无需透传）
  */
 export function normalizeMessages(messages: InternalMessage[]): Record<string, unknown>[] {
   return messages.map((msg) => {
@@ -67,46 +68,18 @@ export function normalizeMessages(messages: InternalMessage[]): Record<string, u
     if (msg.name !== undefined) {
       normalized.name = msg.name;
     }
-    if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
-      normalized.tool_calls = msg.tool_calls;
+    if (msg.role === 'assistant') {
+      // 仅在消息本身携带推理内容时才传递，不注入默认空字符串
+      if (typeof msg.reasoning_content === 'string') {
+        normalized.reasoning_content = msg.reasoning_content;
+      }
+      if (msg.tool_calls && msg.tool_calls.length > 0) {
+        normalized.tool_calls = msg.tool_calls;
+      }
     }
     if (msg.tool_call_id !== undefined) {
       normalized.tool_call_id = msg.tool_call_id;
     }
     return normalized;
-  });
-}
-
-/**
- * 为 DeepSeek reasoner 模型处理消息列表：
- * - 所有 assistant 消息必须包含 reasoning_content 字段（至少为空字符串）
- * - 清除非 assistant 消息上多余的 reasoning_content
- * - content ContentPart[] 同样转换为 OpenAI image_url 格式
- */
-export function prepareMessagesForReasoner(messages: InternalMessage[]): Record<string, unknown>[] {
-  return messages.map((msg) => {
-    if (msg.role === 'assistant') {
-      const result: Record<string, unknown> = {
-        role: msg.role,
-        content: convertContent(msg.content),
-        reasoning_content: msg.reasoning_content ?? '',
-      };
-      if (msg.tool_calls && msg.tool_calls.length > 0) {
-        result.tool_calls = msg.tool_calls;
-      }
-      return result;
-    }
-    // 非 assistant 消息，转换内容格式并移除不必要的字段
-    const cleaned: Record<string, unknown> = {
-      role: msg.role,
-      content: convertContent(msg.content),
-    };
-    if (msg.name !== undefined) {
-      cleaned.name = msg.name;
-    }
-    if (msg.tool_call_id !== undefined) {
-      cleaned.tool_call_id = msg.tool_call_id;
-    }
-    return cleaned;
   });
 }
