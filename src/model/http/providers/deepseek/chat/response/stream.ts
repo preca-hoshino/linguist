@@ -36,7 +36,13 @@ interface DeepSeekStreamChunk {
 
 export class DeepSeekChatStreamResponseAdapter implements ProviderChatStreamResponseAdapter {
   /** 已知的 finish_reason 值集合 */
-  private static readonly KNOWN_REASONS = new Set<string>(['stop', 'length', 'tool_calls', 'content_filter']);
+  private static readonly KNOWN_REASONS = new Set<string>([
+    'stop',
+    'length',
+    'tool_calls',
+    'content_filter',
+    'insufficient_system_resource',
+  ]);
 
   public fromProviderStreamChunk(providerChunk: unknown): InternalChatStreamChunk {
     const chunk = providerChunk as DeepSeekStreamChunk;
