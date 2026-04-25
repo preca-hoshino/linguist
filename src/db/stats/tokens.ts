@@ -1,30 +1,39 @@
 // src/db/stats/tokens.ts — Token 用量统计查询
 
 import { db } from '@/db/client';
-import { buildDimensionFilter, buildTimeFilter } from './helpers';
+import { buildDimensionFilterAliased, buildTimeFilter } from './helpers';
 import type { StatsQueryParams, StatsTokens } from './types';
+
+// JSON 路径提取各 token 字段（request_logs 表中的 token 列已在 migration 07 中删除，
+// 实际数据迁移至 request_logs_details.gateway_context）
+const J_PROMPT = `(d.gateway_context->'response'->'usage'->>'prompt_tokens')::bigint`;
+const J_COMPLETION = `(d.gateway_context->'response'->'usage'->>'completion_tokens')::bigint`;
+const J_REASONING = `(d.gateway_context->'response'->'usage'->>'reasoning_tokens')::bigint`;
+const J_CACHED = `(d.gateway_context->'response'->'usage'->>'cached_tokens')::bigint`;
 
 /**
  * 获取 Token 用量分析数据
  */
 export async function getStatsTokens(params: StatsQueryParams): Promise<StatsTokens> {
   const timeFilter = buildTimeFilter(params, 1);
-  const dimFilter = buildDimensionFilter(params.dimension, params.id, timeFilter.nextIdx);
+  const timeClauseAliased = timeFilter.clause.replaceAll('created_at', 'r.created_at');
+  const dimFilter = buildDimensionFilterAliased(params.dimension, params.id, timeFilter.nextIdx, 'r');
   const allValues = [...timeFilter.values, ...dimFilter.values];
 
   const sql = `
     SELECT
-      COALESCE(SUM(prompt_tokens), 0)::bigint AS prompt_tokens,
-      COALESCE(SUM(completion_tokens), 0)::bigint AS completion_tokens,
-      COALESCE(SUM(reasoning_tokens), 0)::bigint AS reasoning_tokens,
-      COALESCE(SUM(cached_tokens), 0)::bigint AS cached_tokens,
-      AVG(prompt_tokens)::float AS avg_input,
-      AVG(completion_tokens)::float AS avg_output,
-      PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY prompt_tokens)::float AS p95_input,
-      PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY completion_tokens)::float AS p95_output
-    FROM request_logs
-    WHERE ${timeFilter.clause}
-    AND status = 'completed'
+      COALESCE(SUM(${J_PROMPT}), 0)::bigint AS prompt_tokens,
+      COALESCE(SUM(${J_COMPLETION}), 0)::bigint AS completion_tokens,
+      COALESCE(SUM(${J_REASONING}), 0)::bigint AS reasoning_tokens,
+      COALESCE(SUM(${J_CACHED}), 0)::bigint AS cached_tokens,
+      AVG(${J_PROMPT})::float AS avg_input,
+      AVG(${J_COMPLETION})::float AS avg_output,
+      PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY ${J_PROMPT})::float AS p95_input,
+      PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY ${J_COMPLETION})::float AS p95_output
+    FROM request_logs r
+    LEFT JOIN request_logs_details d ON d.id = r.id
+    WHERE ${timeClauseAliased}
+    AND r.status = 'completed'
     ${dimFilter.clause}
   `;
 
