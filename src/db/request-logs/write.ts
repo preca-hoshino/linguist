@@ -63,7 +63,13 @@ export async function markCompleted(ctx: ModelHttpContext): Promise<void> {
 
   if (ctx.route && promptTokens !== undefined) {
     const tiers = await lookupPricingTiers(ctx.route.providerId, ctx.route.model);
-    const billingResult = calculatePostBillingCost(tiers, promptTokens, completionTokens ?? 0, cachedTokens ?? 0);
+    const billingResult = calculatePostBillingCost(
+      tiers,
+      promptTokens,
+      completionTokens ?? 0,
+      cachedTokens ?? 0,
+      reasoningTokens ?? 0,
+    );
     if (billingResult.status === 'success') {
       calculatedCost = billingResult.cost;
       costBreakdown = billingResult.breakdown;
