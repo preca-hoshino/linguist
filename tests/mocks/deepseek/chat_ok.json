@@ -2,7 +2,7 @@
   "id": "chatcmpl-mock-123",
   "object": "chat.completion",
   "created": 1700000000,
-  "model": "deepseek-chat",
+  "model": "deepseek-v4-pro",
   "choices": [
     {
       "index": 0,
