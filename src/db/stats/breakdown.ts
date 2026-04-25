@@ -68,7 +68,7 @@ async function breakdownByProviderModel(params: StatsQueryParams): Promise<Stats
       COALESCE(rl.routed_model::text, 'unknown') AS name,
       (SELECT id FROM model_provider_models pm WHERE pm.provider_id = rl.provider_id AND pm.name = rl.routed_model LIMIT 1) AS provider_model_id,
       COUNT(*)::int AS request_count,
-      COALESCE(SUM(rl.total_tokens), 0)::bigint AS total_tokens,
+      COALESCE(SUM((d.gateway_context->'response'->'usage'->>'total_tokens')::bigint), 0)::bigint AS total_tokens,
       COUNT(*) FILTER (WHERE rl.status = 'error')::int AS error_count,
       AVG(${latExpr})::float AS avg_latency_ms,
       PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY ${latExpr})::float AS p50_latency_ms,
@@ -76,7 +76,7 @@ async function breakdownByProviderModel(params: StatsQueryParams): Promise<Stats
       PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY ${latExpr})::float AS p99_latency_ms,
       AVG(${ttftEx})::float AS ttft_avg_ms,
       AVG(${itlEx})::float AS itl_avg_ms,
-      AVG(rl.completion_tokens)::float AS avg_completion_tokens,
+      AVG((d.gateway_context->'response'->'usage'->>'completion_tokens')::bigint)::float AS avg_completion_tokens,
       COALESCE(SUM(rl.calculated_cost), 0.0)::float AS total_cost
     FROM request_logs rl
     LEFT JOIN request_logs_details d ON d.id = rl.id
@@ -112,7 +112,7 @@ async function breakdownByApp(params: StatsQueryParams): Promise<StatsBreakdown>
       COALESCE(d.gateway_context->>'appName', d.gateway_context->>'appId', 'unknown') AS name,
       NULL::text AS provider_name,
       COUNT(*)::int AS request_count,
-      COALESCE(SUM(r.total_tokens), 0)::bigint AS total_tokens,
+      COALESCE(SUM((d.gateway_context->'response'->'usage'->>'total_tokens')::bigint), 0)::bigint AS total_tokens,
       COUNT(*) FILTER (WHERE r.status = 'error')::int AS error_count,
       AVG(${latExpr})::float AS avg_latency_ms,
       PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY ${latExpr})::float AS p50_latency_ms,
@@ -120,7 +120,7 @@ async function breakdownByApp(params: StatsQueryParams): Promise<StatsBreakdown>
       PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY ${latExpr})::float AS p99_latency_ms,
       AVG(${ttftEx})::float AS ttft_avg_ms,
       AVG(${itlEx})::float AS itl_avg_ms,
-      AVG(r.completion_tokens)::float AS avg_completion_tokens,
+      AVG((d.gateway_context->'response'->'usage'->>'completion_tokens')::bigint)::float AS avg_completion_tokens,
       COALESCE(SUM(r.calculated_cost), 0.0)::float AS total_cost
     FROM request_logs r
     LEFT JOIN request_logs_details d ON d.id = r.id
@@ -157,7 +157,7 @@ async function breakdownByProvider(params: StatsQueryParams): Promise<StatsBreak
       COALESCE((SELECT name FROM model_providers WHERE id = r.provider_id), r.provider_id::text, 'unknown') AS name,
       NULL::text AS provider_name,
       COUNT(*)::int AS request_count,
-      COALESCE(SUM(r.total_tokens), 0)::bigint AS total_tokens,
+      COALESCE(SUM((d.gateway_context->'response'->'usage'->>'total_tokens')::bigint), 0)::bigint AS total_tokens,
       COUNT(*) FILTER (WHERE r.status = 'error')::int AS error_count,
       AVG(${latExpr})::float AS avg_latency_ms,
       PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY ${latExpr})::float AS p50_latency_ms,
@@ -165,7 +165,7 @@ async function breakdownByProvider(params: StatsQueryParams): Promise<StatsBreak
       PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY ${latExpr})::float AS p99_latency_ms,
       AVG(${ttftEx})::float AS ttft_avg_ms,
       AVG(${itlEx})::float AS itl_avg_ms,
-      AVG(r.completion_tokens)::float AS avg_completion_tokens,
+      AVG((d.gateway_context->'response'->'usage'->>'completion_tokens')::bigint)::float AS avg_completion_tokens,
       COALESCE(SUM(r.calculated_cost), 0.0)::float AS total_cost
     FROM request_logs r
     LEFT JOIN request_logs_details d ON d.id = r.id
@@ -214,7 +214,7 @@ async function breakdownGeneric(
       COALESCE(${col}::text, 'unknown') AS name,
       NULL::text AS provider_name,
       COUNT(*)::int AS request_count,
-      COALESCE(SUM(r.total_tokens), 0)::bigint AS total_tokens,
+      COALESCE(SUM((d.gateway_context->'response'->'usage'->>'total_tokens')::bigint), 0)::bigint AS total_tokens,
       COUNT(*) FILTER (WHERE r.status = 'error')::int AS error_count,
       AVG(${latExpr})::float AS avg_latency_ms,
       PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY ${latExpr})::float AS p50_latency_ms,
@@ -222,7 +222,7 @@ async function breakdownGeneric(
       PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY ${latExpr})::float AS p99_latency_ms,
       AVG(${ttftEx})::float AS ttft_avg_ms,
       AVG(${itlEx})::float AS itl_avg_ms,
-      AVG(r.completion_tokens)::float AS avg_completion_tokens,
+      AVG((d.gateway_context->'response'->'usage'->>'completion_tokens')::bigint)::float AS avg_completion_tokens,
       COALESCE(SUM(r.calculated_cost), 0.0)::float AS total_cost
     FROM request_logs r
     LEFT JOIN request_logs_details d ON d.id = r.id

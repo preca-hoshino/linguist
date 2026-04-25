@@ -15,17 +15,18 @@ export async function getStatsToday(dimension: StatsDimension, id?: string): Pro
     WITH today AS (
       SELECT
         COUNT(*)::int AS total_reqs,
-        COALESCE(SUM(r.total_tokens), 0)::bigint AS total_tokens,
-        COALESCE(SUM(r.prompt_tokens), 0)::bigint AS prompt_tokens,
-        COALESCE(SUM(r.completion_tokens), 0)::bigint AS completion_tokens,
+        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'total_tokens')::bigint), 0)::bigint AS total_tokens,
+        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'prompt_tokens')::bigint), 0)::bigint AS prompt_tokens,
+        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'completion_tokens')::bigint), 0)::bigint AS completion_tokens,
         COUNT(*) FILTER (WHERE r.status = 'error')::int AS total_errors,
         COALESCE(SUM(r.calculated_cost), 0.0)::float AS today_cost
       FROM request_logs r
+      LEFT JOIN request_logs_details d ON r.id = d.id
       WHERE r.created_at >= date_trunc('day', NOW())
       ${dimFilter.clause}
     ),
     today_latency_sample AS (
-      SELECT d.timing, r.completion_tokens
+      SELECT d.timing, (d.gateway_context->'response'->'usage'->>'completion_tokens')::bigint as completion_tokens
       FROM request_logs r
       JOIN request_logs_details d ON r.id = d.id
       WHERE r.created_at >= date_trunc('day', NOW())
@@ -51,8 +52,9 @@ export async function getStatsToday(dimension: StatsDimension, id?: string): Pro
     recent_1m AS (
       SELECT
         COUNT(*)::int AS reqs,
-        COALESCE(SUM(r.total_tokens), 0)::bigint AS tokens
+        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'total_tokens')::bigint), 0)::bigint AS tokens
       FROM request_logs r
+      LEFT JOIN request_logs_details d ON r.id = d.id
       WHERE r.created_at >= NOW() - INTERVAL '1 minute'
       ${dimFilter.clause}
     ),
@@ -61,9 +63,9 @@ export async function getStatsToday(dimension: StatsDimension, id?: string): Pro
         AVG(${latencyExpr('d')})::float AS recent_avg_latency,
         COUNT(*) FILTER (WHERE r.status = 'error')::int AS errors,
         COUNT(*)::int AS total,
-        COALESCE(SUM(r.cached_tokens), 0)::bigint AS cached,
-        COALESCE(SUM(r.prompt_tokens), 0)::bigint AS prompt,
-        COALESCE(SUM(r.total_tokens), 0)::bigint AS tokens
+        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'cached_tokens')::bigint), 0)::bigint AS cached,
+        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'prompt_tokens')::bigint), 0)::bigint AS prompt,
+        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'total_tokens')::bigint), 0)::bigint AS tokens
       FROM request_logs r
       LEFT JOIN request_logs_details d ON r.id = d.id
       WHERE r.created_at >= NOW() - INTERVAL '5 minutes'
