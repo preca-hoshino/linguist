@@ -55,9 +55,10 @@ export interface OpenAICompatChatRequestBody {
   presence_penalty?: number;
   frequency_penalty?: number;
   /**
-   * 推理努力级别（火山引擎 doubao-seed 系列 / OpenAI o1/o3 系列参数）
-   * - minimal：关闭思考，映射为 thinking.type = 'disabled'
-   * - low / medium / high：透传至内部，支持 Gemini budget_tokens 计算及 VolcEngine 直接透传
+   * 推理努力级别（用户协议层参数，不进入 InternalChatRequest）
+   * - minimal：关闭思考，在用户适配器入口映射为 thinking.type = 'disabled'
+   * - low / medium / high：在用户适配器入口按 max_tokens 百分比计算 thinking.budget_tokens
+   * 此字段全量在 resolveThinking() 函数中消化完毕，不透传至内部统一类型。
    */
   reasoning_effort?: OpenAICompatReasoningEffort;
   /**
