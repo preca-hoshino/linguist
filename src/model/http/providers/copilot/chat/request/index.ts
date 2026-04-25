@@ -162,9 +162,21 @@ export class CopilotChatRequestAdapter implements ProviderChatRequestAdapter {
       req.tool_choice = internalReq.tool_choice;
     }
 
-    // 响应格式（Copilot 背后模型支持完整 OpenAI response_format）
+    // 响应格式（按类型显式构建，禁止整体透传内部类型对象）
     if (internalReq.response_format !== undefined) {
-      req.response_format = internalReq.response_format;
+      const rf = internalReq.response_format;
+      if (rf.type === 'json_schema') {
+        req.response_format = {
+          type: 'json_schema',
+          json_schema: {
+            name: rf.json_schema.name,
+            strict: rf.json_schema.strict,
+            schema: rf.json_schema.schema,
+          },
+        };
+      } else {
+        req.response_format = { type: rf.type };
+      }
     }
 
     // 终端用户标识

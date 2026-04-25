@@ -114,9 +114,19 @@ export class VolcEngineChatRequestAdapter implements ProviderChatRequestAdapter 
       };
     }
 
-    // 推理努力级别（火山引擎独有参数，与 thinking 配合使用）
-    if (internalReq.reasoning_effort !== undefined) {
-      req.reasoning_effort = internalReq.reasoning_effort;
+    // 推理强度控制：由 thinking.budget_tokens / max_tokens 比率推断
+    // 火山引擎支持 'low' / 'medium' / 'high' 三档
+    // 比率 >= 0.75 → 'high'；>= 0.4 → 'medium'；>= 0.1 → 'low'；其余 → 不传（由提供商默认处理）
+    if (internalReq.thinking?.budget_tokens !== undefined && (internalReq.max_tokens ?? 0) > 0) {
+      const ratio = internalReq.thinking.budget_tokens / (internalReq.max_tokens as number);
+      if (ratio >= 0.75) {
+        req.reasoning_effort = 'high';
+      } else if (ratio >= 0.4) {
+        req.reasoning_effort = 'medium';
+      } else if (ratio >= 0.1) {
+        req.reasoning_effort = 'low';
+      }
+      // ratio < 0.1：不传该字段
     }
 
     // 响应格式（JSON mode）
