@@ -27,22 +27,23 @@ export async function getStatsOverview(params: StatsQueryParams): Promise<StatsO
       SELECT
         COUNT(*)::int AS total_requests,
         COALESCE(SUM(r.calculated_cost), 0.0)::float AS total_cost,
-        COALESCE(SUM(r.prompt_tokens), 0)::bigint AS prompt_tokens,
-        COALESCE(SUM(r.completion_tokens), 0)::bigint AS completion_tokens,
-        COALESCE(SUM(r.total_tokens), 0)::bigint AS total_tokens,
-        COALESCE(SUM(r.cached_tokens), 0)::bigint AS cached_tokens,
-        COALESCE(SUM(r.reasoning_tokens), 0)::bigint AS reasoning_tokens,
+        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'prompt_tokens')::bigint), 0)::bigint AS prompt_tokens,
+        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'completion_tokens')::bigint), 0)::bigint AS completion_tokens,
+        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'total_tokens')::bigint), 0)::bigint AS total_tokens,
+        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'cached_tokens')::bigint), 0)::bigint AS cached_tokens,
+        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'reasoning_tokens')::bigint), 0)::bigint AS reasoning_tokens,
         COUNT(*) FILTER (WHERE r.status = 'error')::int AS error_count,
         COUNT(*) FILTER (WHERE r.error_type = 'rate_limit')::int AS rate_limit_error_count,
         COUNT(*) FILTER (WHERE r.error_type = 'timeout')::int AS timeout_error_count,
-        AVG(r.prompt_tokens)::float AS avg_input_tokens,
-        AVG(r.completion_tokens)::float AS avg_output_tokens
+        AVG((d.gateway_context->'response'->'usage'->>'prompt_tokens')::bigint)::float AS avg_input_tokens,
+        AVG((d.gateway_context->'response'->'usage'->>'completion_tokens')::bigint)::float AS avg_output_tokens
       FROM request_logs r
+      LEFT JOIN request_logs_details d ON r.id = d.id
       WHERE ${timeClauseAliased}
       ${dimFilter.clause}
     ),
     latency_sample AS (
-      SELECT d.timing, r.completion_tokens
+      SELECT d.timing, (d.gateway_context->'response'->'usage'->>'completion_tokens')::bigint as completion_tokens
       FROM request_logs r
       JOIN request_logs_details d ON r.id = d.id
       WHERE ${timeClauseAliased}
