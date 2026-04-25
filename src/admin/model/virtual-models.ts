@@ -384,7 +384,7 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // ==================== 更新虚拟模型 ====================
-router.post('/:id', async (req: Request, res: Response) => {
+router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const body = req.body as VirtualModelBody;
