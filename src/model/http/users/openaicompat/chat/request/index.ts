@@ -32,9 +32,12 @@ const REASONING_EFFORT_RATIO: Record<Exclude<OpenAICompatReasoningEffort, 'minim
  * 规则：
  * 1. reasoning_effort = 'minimal' → 强制关闭，返回 { type: 'disabled' }
  * 2. thinking 已提供：直接使用；若缺少 budget_tokens 且有 reasoning_effort + max_tokens，用百分比补充
- * 3. 仅 reasoning_effort (non-minimal)：初始化 { type: 'enabled' } 并计算 budget_tokens
+ * 3. 仅 reasoning_effort (non-minimal)：初始化 { type: 'enabled' } 并按百分比计算 budget_tokens
  *
- * 优先级：thinking.budget_tokens > reasoning_effort 百分比计算
+ * 全量消化规则：所有 reasoning_effort 语义在此函数内完全转化为 ThinkingConfig.budget_tokens，
+ * 返回结果不包含 reasoning_effort 信息，不进入 InternalChatRequest。
+ *
+ * 优先级：thinking.budget_tokens > reasoning_effort 百分比推算
  */
 function resolveThinking(
   thinking?: ThinkingConfig,
@@ -237,10 +240,6 @@ export class OpenAICompatChatRequestAdapter implements UserChatRequestAdapter {
     const messages = convertMessages(body.messages);
     const thinking = resolveThinking(body.thinking, body.reasoning_effort, body.max_tokens);
 
-    // reasoning_effort 透传至内部（minimal 已转为 thinking.type='disabled'，无需再传）
-    const reasoningEffort =
-      body.reasoning_effort !== undefined && body.reasoning_effort !== 'minimal' ? body.reasoning_effort : undefined;
-
     return {
       messages,
       stream: body.stream ?? false,
@@ -252,7 +251,6 @@ export class OpenAICompatChatRequestAdapter implements UserChatRequestAdapter {
       presence_penalty: body.presence_penalty,
       frequency_penalty: body.frequency_penalty,
       thinking,
-      reasoning_effort: reasoningEffort,
       tools: body.tools,
       tool_choice: body.tool_choice,
       response_format: body.response_format,

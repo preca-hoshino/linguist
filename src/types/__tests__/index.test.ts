@@ -94,7 +94,7 @@ describe('Internal Types', () => {
   });
 
   describe('InternalChatRequest', () => {
-    it('should accept a minimal chat request (no model field)', () => {
+    it('should accept a minimal chat request (no model/reasoning_effort field)', () => {
       const req: InternalChatRequest = {
         messages: [{ role: 'user', content: 'What is 1+1?' }],
         stream: false,
@@ -104,6 +104,9 @@ describe('Internal Types', () => {
       expect(req.stream).toBe(false);
       // InternalChatRequest should NOT have a model field
       expect((req as unknown as Record<string, unknown>).model).toBeUndefined();
+      // InternalChatRequest should NOT have a reasoning_effort field
+      // (it is a user-protocol concept, fully absorbed into ThinkingConfig.budget_tokens at the adapter layer)
+      expect((req as unknown as Record<string, unknown>).reasoning_effort).toBeUndefined();
     });
 
     it('should support all optional generation parameters', () => {
