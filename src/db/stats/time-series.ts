@@ -60,7 +60,7 @@ export async function getStatsTimeSeries(
 
   const L_EXPR = latencyExpr('d');
   const T_EXPR = ttftExpr('d');
-  const I_EXPR = itlExpr('d', 'r');
+  const I_EXPR = itlExpr('d', 'd');
 
   // generate_series 生成完整时间槽；agg CTE 聚合实际数据；LEFT JOIN 填充空 bucket 为 0
   const sql = `
