@@ -59,7 +59,7 @@ async function breakdownByProviderModel(params: StatsQueryParams): Promise<Stats
 
   const latExpr = latencyExpr('d');
   const ttftEx = ttftExpr('d');
-  const itlEx = itlExpr('d', 'rl');
+  const itlEx = itlExpr('d', 'd');
 
   const sql = `
     SELECT
@@ -105,7 +105,7 @@ async function breakdownByApp(params: StatsQueryParams): Promise<StatsBreakdown>
 
   const latExpr = latencyExpr('d');
   const ttftEx = ttftExpr('d');
-  const itlEx = itlExpr('d', 'r');
+  const itlEx = itlExpr('d', 'd');
 
   const sql = `
     SELECT
@@ -150,7 +150,7 @@ async function breakdownByProvider(params: StatsQueryParams): Promise<StatsBreak
 
   const latExpr = latencyExpr('d');
   const ttftEx = ttftExpr('d');
-  const itlEx = itlExpr('d', 'r');
+  const itlEx = itlExpr('d', 'd');
 
   const sql = `
     SELECT
@@ -207,7 +207,7 @@ async function breakdownGeneric(
 
   const latExpr = latencyExpr('d');
   const ttftEx = ttftExpr('d');
-  const itlEx = itlExpr('d', 'r');
+  const itlEx = itlExpr('d', 'd');
 
   const sql = `
     SELECT
