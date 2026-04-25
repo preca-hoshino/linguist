@@ -41,6 +41,34 @@ router.post('/v1/messages', async (req: Request, res: Response): Promise<void> =
 });
 
 /**
+ * POST /v1/messages/count_tokens — Token Counting API (估算实现)
+ *
+ * 目前采用本地字符粗略估算 (长度 / 4) 以满足 Claude Code 等依赖此端点估算上下文的客户端
+ */
+router.post('/v1/messages/count_tokens', async (req: Request, res: Response): Promise<void> => {
+  logger.debug({ ip: req.ip ?? req.socket.remoteAddress }, 'POST /v1/messages/count_tokens');
+  try {
+    // 基础校验 API Key，防止未授权访问
+    await validateApiKeyFromRequest(
+      req,
+      extractApiKey,
+      'API key is required. Provide it via x-api-key header.',
+    );
+
+    // 简单高效的本地 Token 估算：通常 1 个 token 约等于 4 个英文字符或 1.5 个汉字
+    // 为避免解析开销，直接将请求体序列化并除以 4
+    const payloadStr = JSON.stringify(req.body || {});
+    const estimatedTokens = Math.max(1, Math.ceil(payloadStr.length / 4));
+
+    res.json({
+      input_tokens: estimatedTokens,
+    });
+  } catch (error) {
+    handleError(error, res, 'anthropic');
+  }
+});
+
+/**
  * GET /v1/models — 返回可调用的虚拟模型列表（Anthropic 规范）
  */
 router.get('/v1/models', async (req: Request, res: Response): Promise<void> => {
