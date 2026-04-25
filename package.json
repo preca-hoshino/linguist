@@ -18,8 +18,7 @@
     "check:test": "jest --reporters=summary",
     "check": "run-s check:format check:lint check:types check:deps check:test",
     "db": "ts-node -r tsconfig-paths/register src/db/migrate.ts",
-    "db:clear": "ts-node -r tsconfig-paths/register src/db/migrate.ts --clear",
-    "backfill:billing": "ts-node -r tsconfig-paths/register scripts/backfill-reasoning-billing.ts"
+    "db:clear": "ts-node -r tsconfig-paths/register src/db/migrate.ts --clear"
   },
   "keywords": [
     "llm",
