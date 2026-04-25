@@ -33,10 +33,10 @@ describe('Integration: OpenAICompat -> DeepSeek -> Gateway', () => {
     // 3. Context Preparation
     const mockContext = {
       id: uuidv4(),
-      requestModel: 'deepseek-chat',
+      requestModel: 'deepseek-v4-pro',
       route: {
         providerKind: 'deepseek',
-        model: 'deepseek-chat',
+        model: 'deepseek-v4-pro',
         capabilities: { chat: true, embedding: false },
         providerConfig: {
           id: 'ds-1', kind: 'deepseek', name: 'DeepSeek',

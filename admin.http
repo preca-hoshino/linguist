@@ -177,10 +177,10 @@ Content-Type: application/json
 
 {
     "provider_id": "{{fixedProviderId}}",
-    "name": "deepseek-reasoner",
+    "name": "deepseek-v4-pro",
     "model_type": "chat",
     "capabilities": ["tools", "thinking"],
-    "supported_parameters": ["temperature", "top_p", "stop"],
+    "supported_parameters": ["temperature", "top_p", "stop", "reasoning_effort"],
     "parameters": {
         "max_tokens": 16000,
         "context_window": 128000
@@ -199,7 +199,7 @@ Authorization: Bearer {{adminToken}}
 
 {
   "provider_id": "{{fixedProviderId}}",
-  "name": "deepseek-chat",
+  "name": "deepseek-v4-flash",
   "model_type": "chat",
   "capabilities": ["stream", "tools", "vision"],
   "supported_parameters": ["temperature", "top_p", "frequency_penalty", "presence_penalty", "stop"],

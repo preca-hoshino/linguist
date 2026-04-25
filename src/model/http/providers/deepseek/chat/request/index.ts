@@ -38,9 +38,6 @@ function normalizeTools(tools: ToolDefinition[]): ToolDefinition[] {
   }));
 }
 
-/** DeepSeek reasoner 模型名称匹配 */
-const REASONER_MODEL_PATTERN = /reasoner/i;
-
 /**
  * DeepSeek 聊天请求适配器
  * InternalChatRequest + routedModel → DeepSeek API 请求体
@@ -52,7 +49,13 @@ const REASONER_MODEL_PATTERN = /reasoner/i;
  */
 export class DeepSeekChatRequestAdapter implements ProviderChatRequestAdapter {
   public toProviderRequest(internalReq: InternalChatRequest, routedModel: string): Record<string, unknown> {
-    const isReasoner = REASONER_MODEL_PATTERN.test(routedModel);
+    // DeepSeek v4 默认开启思考模式 (thinking: enabled)。
+    // 抛弃对旧模型名的判断，统一按此默认行为处理。
+    let isReasoner = true;
+    if (internalReq.thinking) {
+      isReasoner = internalReq.thinking.type !== 'disabled';
+    }
+
     logger.debug(
       {
         routedModel,
@@ -115,6 +118,12 @@ export class DeepSeekChatRequestAdapter implements ProviderChatRequestAdapter {
       req.thinking = {
         type: internalReq.thinking.type === 'disabled' ? 'disabled' : 'enabled',
       };
+    }
+
+    // 推理强度控制 (reasoning_effort)
+    // DeepSeek v4 支持作为顶层参数传入
+    if (internalReq.reasoning_effort !== undefined) {
+      req.reasoning_effort = internalReq.reasoning_effort;
     }
 
     // 响应格式（JSON mode）

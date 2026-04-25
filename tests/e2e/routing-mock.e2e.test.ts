@@ -61,7 +61,7 @@ describe('Phase B: Routing Mock with Nock', () => {
               vm_model_type: 'chat',
               routing_strategy: 'load_balance',
               pm_id: 'mock-pm-id',
-              pm_name: 'deepseek-chat',
+              pm_name: 'deepseek-v4-pro',
               model_type: 'chat',
               weight: 100,
               priority: 0,
@@ -122,10 +122,10 @@ describe('Phase B: Routing Mock with Nock', () => {
     nock('https://api.deepseek.com')
       .post('/chat/completions')
       .reply(200, {
-        id: 'mock-deepseek-chat-id',
+        id: 'mock-deepseek-v4-pro-id',
         object: 'chat.completion',
         created: Date.now(),
-        model: 'deepseek-chat',
+        model: 'deepseek-v4-pro',
         choices: [
           {
             index: 0,
