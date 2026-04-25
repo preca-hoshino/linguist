@@ -10,16 +10,21 @@ import type { BillingResult, PricingTier } from '@/types';
  *
  * 根据上游返回的实际 usage 和模型配置的阶梯价格，计算本次请求的准确费用。
  *
- * @param tiers        - 该模型配置的阶梯价格列表（无需排序，内部会按 startTokens 排序）
- * @param promptTokens - 上游返回的 usage.prompt_tokens（含缓存部分的总量）
+ * @param tiers            - 该模型配置的阶梯价格列表（无需排序，内部会按 startTokens 排序）
+ * @param promptTokens     - 上游返回的 usage.prompt_tokens（含缓存部分的总量）
  * @param completionTokens - 上游返回的 usage.completion_tokens
- * @param cachedTokens - 上游返回的缓存命中 Token 数（默认 0）
+ * @param cachedTokens     - 上游返回的缓存命中 Token 数（默认 0）
+ * @param reasoningTokens  - 思维链消耗的 Token 数（默认 0）
+ *                           注：主流提供商（DeepSeek / Volcengine / Gemini）将 reasoning_tokens
+ *                           与 completion_tokens 分开上报，此处统一以相同的 output_price 合并计费，
+ *                           不单独定价。
  */
 export function calculatePostBillingCost(
   tiers: readonly PricingTier[],
   promptTokens: number,
   completionTokens: number,
   cachedTokens = 0,
+  reasoningTokens = 0,
 ): BillingResult {
   // 未配置阶梯 → 跳过（不计费）
   if (tiers.length === 0) {
@@ -51,7 +56,9 @@ export function calculatePostBillingCost(
   const UNIT = 1_000_000;
   const inputCost = (pureInputTokens / UNIT) * tier.input_price;
   const cacheCost = (safeCached / UNIT) * tier.cache_price;
-  const outputCost = (completionTokens / UNIT) * tier.output_price;
+  // reasoning_tokens 与普通 completion_tokens 使用相同的输出单价合并计费
+  const totalOutputTokens = completionTokens + Math.max(0, reasoningTokens);
+  const outputCost = (totalOutputTokens / UNIT) * tier.output_price;
 
   const totalCost = inputCost + cacheCost + outputCost;
 
