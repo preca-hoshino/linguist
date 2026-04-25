@@ -56,7 +56,13 @@ export class DeepSeekChatResponseAdapter implements ProviderChatResponseAdapter 
   }
 
   /** 已知的 finish_reason 值集合 */
-  private static readonly KNOWN_REASONS = new Set<string>(['stop', 'length', 'tool_calls', 'content_filter']);
+  private static readonly KNOWN_REASONS = new Set<string>([
+    'stop',
+    'length',
+    'tool_calls',
+    'content_filter',
+    'insufficient_system_resource',
+  ]);
 
   /**
    * 映射 DeepSeek finish_reason 到内部统一值
