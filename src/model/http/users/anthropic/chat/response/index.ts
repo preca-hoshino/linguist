@@ -38,6 +38,7 @@ function mapFinishReason(reason: FinishReason): string {
       return 'tool_use';
     }
     case 'content_filter':
+    case 'insufficient_system_resource':
     case 'unknown': {
       return 'end_turn';
     }
