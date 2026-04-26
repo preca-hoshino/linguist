@@ -98,7 +98,7 @@ async function parseStatsParams(req: Request): Promise<{
 
   // app: id 是 apps.id，但在此不需转名称（或者可转），当前可保留 id 查询
   if (dimension === 'app' && id !== undefined) {
-    // 若前端传递了 appId，可以直接查询 request_logs_details
+    // 若前端传递了 appId，可以直接查询 request_log_details
     // 假如需要名称转换也可以加在这个逻辑里
   }
 

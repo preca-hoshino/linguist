@@ -12,7 +12,7 @@ const logger = createLogger('Stats', logColors.bold + logColors.blue);
  *
  * 性能优化策略：
  * - stats_base CTE 直接读取 request_logs 主表的 token 统计列（prompt_tokens 等），
- *   无需 JOIN request_logs_details，消除双分区扫描 + JSONB 解析开销。
+ *   无需 JOIN request_log_details，消除双分区扫描 + JSONB 解析开销。
  * - latency_sample 仍需 JOIN details 表（timing JSON），但限制 1000 条抽样，
  *   避免对全量数据执行 PERCENTILE_CONT 计算。
  */
@@ -47,7 +47,7 @@ export async function getStatsOverview(params: StatsQueryParams): Promise<StatsO
       -- 延迟百分位计算：仅取最近 1000 条，避免全量 JSONB 解析
       SELECT d.timing, r.completion_tokens
       FROM request_logs r
-      JOIN request_logs_details d ON r.id = d.id
+      JOIN request_log_details d ON r.id = d.id
       WHERE ${timeClauseAliased}
       ${dimFilter.clause}
       ORDER BY r.created_at DESC

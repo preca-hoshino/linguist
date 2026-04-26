@@ -107,9 +107,10 @@ CREATE TABLE IF NOT EXISTS request_logs (
     PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);
 
-CREATE TABLE IF NOT EXISTS request_logs_details (
+CREATE TABLE IF NOT EXISTS request_log_details (
     id                      VARCHAR(36)    NOT NULL,
     gateway_context         JSONB,
+    cost_breakdown          JSONB,
     timing                  JSONB,
     created_at              TIMESTAMPTZ    NOT NULL DEFAULT NOW(),
     PRIMARY KEY (id, created_at)
@@ -124,14 +125,14 @@ CREATE TABLE IF NOT EXISTS request_logs_2026_06 PARTITION OF request_logs FOR VA
 CREATE TABLE IF NOT EXISTS request_logs_2026_h2 PARTITION OF request_logs FOR VALUES FROM ('2026-07-01') TO ('2027-01-01');
 CREATE TABLE IF NOT EXISTS request_logs_default PARTITION OF request_logs DEFAULT;
 
-CREATE TABLE IF NOT EXISTS request_logs_details_2026_01 PARTITION OF request_logs_details FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
-CREATE TABLE IF NOT EXISTS request_logs_details_2026_02 PARTITION OF request_logs_details FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
-CREATE TABLE IF NOT EXISTS request_logs_details_2026_03 PARTITION OF request_logs_details FOR VALUES FROM ('2026-03-01') TO ('2026-04-01');
-CREATE TABLE IF NOT EXISTS request_logs_details_2026_04 PARTITION OF request_logs_details FOR VALUES FROM ('2026-04-01') TO ('2026-05-01');
-CREATE TABLE IF NOT EXISTS request_logs_details_2026_05 PARTITION OF request_logs_details FOR VALUES FROM ('2026-05-01') TO ('2026-06-01');
-CREATE TABLE IF NOT EXISTS request_logs_details_2026_06 PARTITION OF request_logs_details FOR VALUES FROM ('2026-06-01') TO ('2026-07-01');
-CREATE TABLE IF NOT EXISTS request_logs_details_2026_h2 PARTITION OF request_logs_details FOR VALUES FROM ('2026-07-01') TO ('2027-01-01');
-CREATE TABLE IF NOT EXISTS request_logs_details_default PARTITION OF request_logs_details DEFAULT;
+CREATE TABLE IF NOT EXISTS request_log_details_2026_01 PARTITION OF request_log_details FOR VALUES FROM ('2026-01-01') TO ('2026-02-01');
+CREATE TABLE IF NOT EXISTS request_log_details_2026_02 PARTITION OF request_log_details FOR VALUES FROM ('2026-02-01') TO ('2026-03-01');
+CREATE TABLE IF NOT EXISTS request_log_details_2026_03 PARTITION OF request_log_details FOR VALUES FROM ('2026-03-01') TO ('2026-04-01');
+CREATE TABLE IF NOT EXISTS request_log_details_2026_04 PARTITION OF request_log_details FOR VALUES FROM ('2026-04-01') TO ('2026-05-01');
+CREATE TABLE IF NOT EXISTS request_log_details_2026_05 PARTITION OF request_log_details FOR VALUES FROM ('2026-05-01') TO ('2026-06-01');
+CREATE TABLE IF NOT EXISTS request_log_details_2026_06 PARTITION OF request_log_details FOR VALUES FROM ('2026-06-01') TO ('2026-07-01');
+CREATE TABLE IF NOT EXISTS request_log_details_2026_h2 PARTITION OF request_log_details FOR VALUES FROM ('2026-07-01') TO ('2027-01-01');
+CREATE TABLE IF NOT EXISTS request_log_details_default PARTITION OF request_log_details DEFAULT;
 
 
 

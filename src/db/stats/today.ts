@@ -10,7 +10,7 @@ import type { StatsDimension, StatsToday } from './types';
  *
  * 性能优化策略：
  * - today / recent_1m / recent_5m CTE 中的 token 汇总直接读主表统计列（prompt_tokens 等），
- *   无需 JOIN request_logs_details，大幅降低 I/O 和 JSONB 解析开销。
+ *   无需 JOIN request_log_details，大幅降低 I/O 和 JSONB 解析开销。
  * - today_latency_sample 仍需 JOIN details 表获取 timing JSON，但限 1000 条抽样。
  * - recent_5m 也需 JOIN details 以计算延迟均值（timing），其余字段走主表列。
  */
@@ -34,7 +34,7 @@ export async function getStatsToday(dimension: StatsDimension, id?: string): Pro
       -- 延迟百分位：仅需 timing JSON，限 1000 条抽样
       SELECT d.timing, r.completion_tokens
       FROM request_logs r
-      JOIN request_logs_details d ON r.id = d.id
+      JOIN request_log_details d ON r.id = d.id
       WHERE r.created_at >= date_trunc('day', NOW())
       ${dimFilter.clause}
       ORDER BY r.created_at DESC LIMIT 1000
@@ -74,7 +74,7 @@ export async function getStatsToday(dimension: StatsDimension, id?: string): Pro
         COALESCE(SUM(r.prompt_tokens), 0)::bigint AS prompt,
         COALESCE(SUM(r.total_tokens), 0)::bigint AS tokens
       FROM request_logs r
-      LEFT JOIN request_logs_details d ON r.id = d.id
+      LEFT JOIN request_log_details d ON r.id = d.id
       WHERE r.created_at >= NOW() - INTERVAL '5 minutes'
       ${dimFilter.clause}
     )
