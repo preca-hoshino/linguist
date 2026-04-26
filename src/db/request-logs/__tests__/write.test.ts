@@ -182,7 +182,7 @@ describe('request-logs/write', () => {
       await markError(mockCtx, new Error('Failure'));
       expect(db.query).toHaveBeenCalledTimes(2);
       expect((db.query as jest.Mock).mock.calls[0][0]).toContain('UPDATE request_logs');
-      expect((db.query as jest.Mock).mock.calls[1][0]).toContain('UPDATE request_logs_details');
+      expect((db.query as jest.Mock).mock.calls[1][0]).toContain('UPDATE request_log_details');
     });
 
     it('should insert new records if rowCount is undefined (handled as 0)', async () => {
@@ -209,7 +209,7 @@ describe('request-logs/write', () => {
       expect(db.query).toHaveBeenCalledTimes(3);
       expect((db.query as jest.Mock).mock.calls[0][0]).toContain('UPDATE request_logs');
       expect((db.query as jest.Mock).mock.calls[1][0]).toContain('INSERT INTO request_logs');
-      expect((db.query as jest.Mock).mock.calls[2][0]).toContain('INSERT INTO request_logs_details');
+      expect((db.query as jest.Mock).mock.calls[2][0]).toContain('INSERT INTO request_log_details');
 
       const insertArgs = (db.query as jest.Mock).mock.calls[1][1];
       expect(insertArgs[1]).toBeNull(); // appId
