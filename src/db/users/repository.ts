@@ -44,11 +44,11 @@ export async function findById(id: string): Promise<UserRow | null> {
 
 export async function listUsers(options?: {
   limit?: number;
-  starting_after?: string;
+  offset?: number;
   search?: string;
 }): Promise<{ data: UserRow[]; has_more: boolean; total: number }> {
   const limitNum = typeof options?.limit === 'number' ? Math.min(Math.max(options.limit, 1), 100) : 10;
-  const startingAfterStr = options?.starting_after;
+  const offsetNum = typeof options?.offset === 'number' ? Math.max(options.offset, 0) : 0;
   const search = options?.search;
 
   const conditions: string[] = [];
@@ -64,32 +64,24 @@ export async function listUsers(options?: {
   const baseWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
   const countSql = `SELECT COUNT(*) AS total FROM users ${baseWhereClause}`;
-  const countResult = await db.query(countSql, values);
+  const countResult = await db.query(countSql, [...values]);
   const total = Number.parseInt((countResult.rows[0] as { total: string } | undefined)?.total ?? '0', 10);
 
-  if (typeof startingAfterStr === 'string' && startingAfterStr.trim() !== '') {
-    conditions.push(`created_at < (SELECT created_at FROM users WHERE id = $${String(paramIdx)})`);
-    values.push(startingAfterStr);
-    paramIdx++;
-  }
-
-  const dataWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+  const whereClause = baseWhereClause;
+  values.push(limitNum, offsetNum);
 
   const sql = `
     SELECT ${SAFE_COLUMNS}
     FROM users
-    ${dataWhereClause}
+    ${whereClause}
     ORDER BY created_at DESC
-    LIMIT $${String(paramIdx)}
+    LIMIT $${String(paramIdx)} OFFSET $${String(paramIdx + 1)}
   `;
 
-  values.push(limitNum + 1);
-
   const result = await db.query<UserRow>(sql, values);
-  const dataRows = result.rows.length > limitNum ? result.rows.slice(0, limitNum) : result.rows;
-  const hasMore = result.rows.length > limitNum;
+  const dataRows = result.rows;
 
-  return { data: dataRows, has_more: hasMore, total };
+  return { data: dataRows, has_more: offsetNum + dataRows.length < total, total };
 }
 
 /**
