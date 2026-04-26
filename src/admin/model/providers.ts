@@ -45,29 +45,22 @@ const router: Router = Router();
 // ==================== 列出所有提供商 ====================
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { search, limit, starting_after, kind } = req.query;
+    const { search, limit, offset, kind } = req.query;
 
     const limitNum =
       typeof limit === 'string' && limit !== '' ? Math.min(Math.max(Number.parseInt(limit, 10), 1), 100) : 10;
-    const startingAfter = typeof starting_after === 'string' ? starting_after : undefined;
+    const offsetNum = typeof offset === 'string' && offset !== '' ? Math.max(Number.parseInt(offset, 10), 0) : 0;
 
     const conditions: string[] = [];
     const values: unknown[] = [];
     let paramIdx = 1;
 
     // 多 Tag 过滤支持
-
     const kindIn = buildInClause('kind', kind as string | string[] | undefined, paramIdx);
     if (kindIn) {
       conditions.push(kindIn.clause);
       values.push(...kindIn.values);
       paramIdx = kindIn.nextIdx;
-    }
-
-    if (typeof startingAfter === 'string' && startingAfter.trim() !== '') {
-      conditions.push(`created_at < (SELECT created_at FROM model_providers WHERE id = $${String(paramIdx)})`);
-      values.push(startingAfter);
-      paramIdx++;
     }
 
     if (typeof search === 'string' && search.trim() !== '') {
@@ -76,25 +69,34 @@ router.get('/', async (req: Request, res: Response) => {
       paramIdx++;
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-    const fetchLimit = limitNum + 1;
-    values.push(fetchLimit);
+    const baseWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    // 先算 total
+    const countResult = await db.query(`SELECT COUNT(*) AS total FROM model_providers ${baseWhereClause}`, [...values]);
+    const total = Number.parseInt((countResult.rows[0] as { total: string } | undefined)?.total ?? '0', 10);
+
+    const whereClause = baseWhereClause;
+    values.push(limitNum, offsetNum);
 
     const sql = `
       SELECT ${SELECT_COLUMNS}
       FROM model_providers
       ${whereClause}
       ORDER BY created_at DESC
-      LIMIT $${String(paramIdx)}
+      LIMIT $${String(paramIdx)} OFFSET $${String(paramIdx + 1)}
     `;
 
-    logger.debug({ search, limit: limitNum, starting_after: startingAfter }, 'Listing providers');
+    logger.debug({ search, limit: limitNum, offset: offsetNum }, 'Listing providers');
     const result = await db.query(sql, values);
+    const data = result.rows;
 
-    const hasMore = result.rows.length > limitNum;
-    const data = hasMore ? result.rows.slice(0, limitNum) : result.rows;
-
-    res.json({ object: 'list', data: data.map(injectSupportedModelTypes), has_more: hasMore });
+    res.json({
+      object: 'list',
+      url: '/admin/providers',
+      data: data.map(injectSupportedModelTypes),
+      total,
+      has_more: offsetNum + data.length < total,
+    });
   } catch (error) {
     handleAdminError(error, res);
   }
