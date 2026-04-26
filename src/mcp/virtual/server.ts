@@ -8,6 +8,7 @@ import type { Request, Response } from 'express';
 import { insertMcpLog } from '@/db/mcp-logs';
 import { getMcpProviderById } from '@/db/mcp-providers';
 import type { VirtualMcpRow } from '@/db/mcp-virtual-servers';
+import type { McpGatewayContext } from '@/types';
 import { createLogger, logColors } from '@/utils';
 import { mcpConnectionManager } from '../providers/connection-manager';
 import { filterTools, isToolAllowed } from './tool-registry';
@@ -40,35 +41,6 @@ setInterval(
   },
   60 * 60 * 1000,
 ).unref();
-
-/**
- * 记录日志帮助函数
- */
-async function logMcp(
-  virtualId: string,
-  providerId: string,
-  appId: string | undefined,
-  sessionId: string,
-  method: string,
-  params: Record<string, unknown>,
-  result: Record<string, unknown>,
-  error: Record<string, unknown> | undefined,
-  durationMs: number,
-): Promise<void> {
-  const id = crypto.randomUUID();
-  await insertMcpLog({
-    id,
-    virtual_mcp_id: virtualId,
-    mcp_provider_id: providerId,
-    app_id: appId,
-    session_id: sessionId,
-    method,
-    params,
-    result,
-    error,
-    duration_ms: durationMs,
-  });
-}
 
 interface AuthenticatedRequest extends Request {
   appId?: string;
@@ -104,39 +76,40 @@ export async function handleMcpSseConnect(req: Request, res: Response, virtualMc
   // 3. 注册 tools/list 处理程序
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const start = Date.now();
+    const ctx: McpGatewayContext = {
+      id: crypto.randomUUID(),
+      virtualMcpId: virtualMcp.id,
+      virtualMcpName: virtualMcp.name,
+      mcpProviderId: provider.id,
+      appId: (req as AuthenticatedRequest).appId,
+      sessionId,
+      method: 'tools/list',
+      status: 'completed',
+      audit: {},
+      timing: { start },
+    };
+
     try {
       const client = await mcpConnectionManager.getClient(provider);
       const tools = await client.listTools();
 
       // 根据 ACL 过滤
       const filtered = filterTools(tools, allowedTools);
-
       const result = { tools: filtered };
-      await logMcp(
-        virtualMcp.id,
-        provider.id,
-        (req as AuthenticatedRequest).appId,
-        sessionId,
-        'tools/list',
-        {},
-        result,
-        undefined,
-        Date.now() - start,
-      );
+
+      ctx.audit.result = result as Record<string, unknown>;
+      ctx.timing.end = Date.now();
+
+      await insertMcpLog(ctx);
       return result;
     } catch (err) {
-      const errObj = { message: err instanceof Error ? err.message : String(err) };
-      await logMcp(
-        virtualMcp.id,
-        provider.id,
-        (req as AuthenticatedRequest).appId,
-        sessionId,
-        'tools/list',
-        {},
-        {},
-        errObj,
-        Date.now() - start,
-      );
+      const message = err instanceof Error ? err.message : String(err);
+      ctx.status = 'error';
+      ctx.errorMessage = message;
+      ctx.audit.error = { message };
+      ctx.timing.end = Date.now();
+
+      await insertMcpLog(ctx);
       throw err;
     }
   });
@@ -147,7 +120,22 @@ export async function handleMcpSseConnect(req: Request, res: Response, virtualMc
     const start = Date.now();
     const name = request.params.name;
     const args = request.params.arguments;
-    const params = { name, arguments: args };
+
+    const ctx: McpGatewayContext = {
+      id: crypto.randomUUID(),
+      virtualMcpId: virtualMcp.id,
+      virtualMcpName: virtualMcp.name,
+      mcpProviderId: provider.id,
+      appId: (req as AuthenticatedRequest).appId,
+      sessionId,
+      method: 'tools/call',
+      toolName: name,
+      status: 'completed',
+      audit: {
+        params: { name, arguments: args },
+      },
+      timing: { start },
+    };
 
     try {
       // 检查 ACL 是否允许
@@ -158,31 +146,19 @@ export async function handleMcpSseConnect(req: Request, res: Response, virtualMc
       const client = await mcpConnectionManager.getClient(provider);
       const result = await client.callTool(name, args as Record<string, unknown>);
 
-      await logMcp(
-        virtualMcp.id,
-        provider.id,
-        (req as AuthenticatedRequest).appId,
-        sessionId,
-        'tools/call',
-        params,
-        result as unknown as Record<string, unknown>,
-        undefined,
-        Date.now() - start,
-      );
+      ctx.audit.result = result as unknown as Record<string, unknown>;
+      ctx.timing.end = Date.now();
+
+      await insertMcpLog(ctx);
       return result;
     } catch (err) {
-      const errObj = { message: err instanceof Error ? err.message : String(err) };
-      await logMcp(
-        virtualMcp.id,
-        provider.id,
-        (req as AuthenticatedRequest).appId,
-        sessionId,
-        'tools/call',
-        params,
-        {},
-        errObj,
-        Date.now() - start,
-      );
+      const message = err instanceof Error ? err.message : String(err);
+      ctx.status = 'error';
+      ctx.errorMessage = message;
+      ctx.audit.error = { message };
+      ctx.timing.end = Date.now();
+
+      await insertMcpLog(ctx);
       throw err;
     }
   });
