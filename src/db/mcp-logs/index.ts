@@ -14,4 +14,9 @@ export {
   getMcpStatsOverview,
   getMcpStatsTimeSeries,
 } from './stats';
-export type { McpLogCreateInput, McpLogRow } from './types';
+export type {
+  McpLogCreateInput,
+  McpLogEntry,
+  McpLogListItem,
+  McpLogQuery,
+} from './types';
