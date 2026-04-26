@@ -15,10 +15,10 @@ export const publicUsersRouter: Router = Router();
 /** GET /api/users — 列出所有用户 */
 usersRouter.get('/', async (req: Request, res: Response) => {
   try {
-    const { search, limit, starting_after } = req.query;
+    const { search, limit, offset } = req.query;
     const limitNum =
       typeof limit === 'string' && limit !== '' ? Math.min(Math.max(Number.parseInt(limit, 10), 1), 100) : 10;
-    const startingAfterStr = typeof starting_after === 'string' ? starting_after.trim() : undefined;
+    const offsetNum = typeof offset === 'string' && offset !== '' ? Math.max(Number.parseInt(offset, 10), 0) : 0;
     const searchStr = typeof search === 'string' ? search : undefined;
 
     const {
@@ -27,7 +27,7 @@ usersRouter.get('/', async (req: Request, res: Response) => {
       has_more,
     } = await listUsers({
       limit: limitNum,
-      ...(startingAfterStr !== undefined ? { starting_after: startingAfterStr } : {}),
+      offset: offsetNum,
       ...(searchStr === undefined ? {} : { search: searchStr }),
     });
 
@@ -43,7 +43,7 @@ usersRouter.get('/', async (req: Request, res: Response) => {
       updated_at: u.updated_at,
     }));
 
-    res.json({ object: 'list', url: '/api/users', data, total, has_more });
+    res.json({ object: 'list', url: '/admin/users', data, total, has_more });
   } catch (error) {
     handleAdminError(error, res);
   }
