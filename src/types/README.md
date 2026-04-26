@@ -12,17 +12,18 @@
 
 ```
 types/
-├── api.ts        # ApiErrorType、ApiErrorBody、ApiErrorResponse（管理 API 公共类型系统）
-├── billing.ts    # PricingTier、CostBreakdown、BillingResult（阶梯计费类型）
-├── chat.ts       # InternalMessage、InternalChatRequest、InternalChatResponse、ThinkingConfig、ChatUsage 等
-├── config.ts     # ProviderConfig、VirtualModelBackend、VirtualModelConfig、ResolvedRoute
-├── context.ts    # GatewayContext、RoutedGatewayContext、ModelHttpContext
-├── embedding.ts  # InternalEmbeddingRequest、InternalEmbeddingResponse
-├── mcp.ts        # McpToolDefinition、McpCallRequest、McpCallResponse、McpContent（MCP 协议映射类型）
-├── provider.ts   # HttpHeaders、ProviderCallResult、ProviderStreamResult、ProviderErrorDetail
-├── realtime.ts   # 实时模式相关类型
-├── session.ts    # 会话相关类型
-└── index.ts      # 统一 export type * 再导出
+├── api.ts          # ApiErrorType、ApiErrorBody、ApiErrorResponse（管理 API 公共类型系统）
+├── billing.ts      # PricingTier、CostBreakdown、BillingResult（阶梯计费类型）
+├── chat.ts         # InternalMessage、InternalChatRequest、InternalChatResponse、ThinkingConfig、ChatUsage 等
+├── config.ts       # ProviderConfig、VirtualModelBackend、VirtualModelConfig、ResolvedRoute
+├── context.ts      # ModelHttpContext、RoutedModelHttpContext（模型请求全生命周期上下文）
+├── embedding.ts    # InternalEmbeddingRequest、InternalEmbeddingResponse
+├── mcp.ts          # McpToolDefinition、McpCallRequest、McpCallResponse、McpContent（MCP 协议映射类型）
+├── mcp-context.ts  # McpGatewayContext（MCP 请求全生命周期上下文，对标 ModelHttpContext）
+├── provider.ts     # HttpHeaders、ProviderCallResult、ProviderStreamResult、ProviderErrorDetail
+├── realtime.ts     # 实时模式相关类型
+├── session.ts      # 会话相关类型
+└── index.ts        # 统一 export type * 再导出
 ```
 
 ## 核心设计约定
