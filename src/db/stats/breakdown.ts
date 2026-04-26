@@ -84,7 +84,7 @@ async function breakdownByProviderModel(params: StatsQueryParams): Promise<Stats
       AVG(rl.completion_tokens)::float AS avg_completion_tokens,
       COALESCE(SUM(rl.calculated_cost), 0.0)::float AS total_cost
     FROM request_logs rl
-    LEFT JOIN request_logs_details d ON d.id = rl.id
+    LEFT JOIN request_log_details d ON d.id = rl.id
     LEFT JOIN model_providers mp ON mp.id = rl.provider_id
     LEFT JOIN model_provider_models mpm
       ON mpm.provider_id = rl.provider_id AND mpm.name = rl.routed_model
@@ -133,7 +133,7 @@ async function breakdownByApp(params: StatsQueryParams): Promise<StatsBreakdown>
       AVG(r.completion_tokens)::float AS avg_completion_tokens,
       COALESCE(SUM(r.calculated_cost), 0.0)::float AS total_cost
     FROM request_logs r
-    LEFT JOIN request_logs_details d ON d.id = r.id
+    LEFT JOIN request_log_details d ON d.id = r.id
     WHERE ${rlTimeClause}
     ${dimFilter.clause}
     GROUP BY d.gateway_context->>'appName', d.gateway_context->>'appId'
@@ -181,7 +181,7 @@ async function breakdownByProvider(params: StatsQueryParams): Promise<StatsBreak
       AVG(r.completion_tokens)::float AS avg_completion_tokens,
       COALESCE(SUM(r.calculated_cost), 0.0)::float AS total_cost
     FROM request_logs r
-    LEFT JOIN request_logs_details d ON d.id = r.id
+    LEFT JOIN request_log_details d ON d.id = r.id
     LEFT JOIN model_providers mp ON mp.id = r.provider_id
     WHERE ${rlTimeClause}
     ${dimFilter.clause}
@@ -239,7 +239,7 @@ async function breakdownGeneric(
       AVG(r.completion_tokens)::float AS avg_completion_tokens,
       COALESCE(SUM(r.calculated_cost), 0.0)::float AS total_cost
     FROM request_logs r
-    LEFT JOIN request_logs_details d ON d.id = r.id
+    LEFT JOIN request_log_details d ON d.id = r.id
     WHERE ${rlTimeClause}
     ${dimFilter.clause}
     GROUP BY ${col}

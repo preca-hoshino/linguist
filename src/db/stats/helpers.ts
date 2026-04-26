@@ -22,7 +22,7 @@ export function ttftExpr(alias = ''): string {
 
 export function itlExpr(aliasTiming = '', aliasDetails = ''): string {
   const t = aliasTiming ? `${aliasTiming}.timing` : 'timing';
-  // completion_tokens 已迁移至 request_logs_details.gateway_context JSON，
+  // completion_tokens 已迁移至 request_log_details.gateway_context JSON，
   // 不再存在于 request_logs 表的直接字段上
   const c = aliasDetails
     ? `(${aliasDetails}.gateway_context->'response'->'usage'->>'completion_tokens')::bigint`

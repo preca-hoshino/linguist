@@ -9,7 +9,7 @@ import type { StatsQueryParams, StatsTokens } from './types';
  *
  * 性能优化：
  * - 直接读取 request_logs 主表的 token 统计列（prompt_tokens 等），
- *   无需 JOIN request_logs_details，消除 JSONB 路径解析开销。
+ *   无需 JOIN request_log_details，消除 JSONB 路径解析开销。
  * - PERCENTILE_CONT 排序也直接基于主表列，避免重复 JSONB 解析。
  */
 export async function getStatsTokens(params: StatsQueryParams): Promise<StatsTokens> {

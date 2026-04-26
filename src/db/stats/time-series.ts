@@ -93,7 +93,7 @@ export async function getStatsTimeSeries(
         PERCENTILE_CONT(0.9)  WITHIN GROUP (ORDER BY ${I_EXPR})::float   AS itl_p90_ms,
         PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY ${I_EXPR})::float   AS itl_p99_ms
       FROM request_logs r
-      LEFT JOIN request_logs_details d ON r.id = d.id
+      LEFT JOIN request_log_details d ON r.id = d.id
       WHERE r.created_at >= $1 AND r.created_at < $2
       ${dimFilterAliased.clause}
       GROUP BY bucket
