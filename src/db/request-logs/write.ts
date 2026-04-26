@@ -83,7 +83,7 @@ export async function markCompleted(ctx: ModelHttpContext): Promise<void> {
   }
 
   try {
-    // 更新主表热数据
+    // 更新主表热数据（同步写入 token 统计列，避免聚合查询 JOIN details 表）
     await db.query(
       `UPDATE request_logs
        SET status = 'completed',
@@ -91,7 +91,12 @@ export async function markCompleted(ctx: ModelHttpContext): Promise<void> {
            provider_kind = $3,
            provider_id = $4,
            is_stream = $5,
-           calculated_cost = $6
+           calculated_cost = $6,
+           prompt_tokens = $7,
+           completion_tokens = $8,
+           total_tokens = $9,
+           cached_tokens = $10,
+           reasoning_tokens = $11
        WHERE id = $1`,
       [
         ctx.id,
@@ -100,6 +105,11 @@ export async function markCompleted(ctx: ModelHttpContext): Promise<void> {
         ctx.route?.providerId ?? null,
         ctx.stream ?? null,
         calculatedCost,
+        promptTokens ?? null,
+        completionTokens ?? null,
+        totalTokens ?? null,
+        cachedTokens ?? null,
+        reasoningTokens ?? null,
       ],
     );
 
