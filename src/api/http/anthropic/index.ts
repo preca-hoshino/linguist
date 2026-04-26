@@ -78,7 +78,10 @@ router.get('/v1/models', async (req: Request, res: Response): Promise<void> => {
 
     let modelNames = configManager.getAllVirtualModels();
     if (appInfo && appInfo.allowedModelIds.length > 0) {
-      modelNames = modelNames.filter((name) => appInfo.allowedModelIds.includes(name));
+      modelNames = modelNames.filter((name) => {
+        const vmConfig = configManager.getVirtualModelConfig(name);
+        return vmConfig !== undefined && appInfo.allowedModelIds.includes(vmConfig.id);
+      });
     }
 
     const data = modelNames.map((name) => {
