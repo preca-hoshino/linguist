@@ -1,8 +1,9 @@
-// src/admin/mcp-logs.ts — MCP Logs API
+// src/admin/mcp/logs.ts — MCP Logs API
 
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { deleteMcpLogById, getMcpLogById, listMcpLogs } from '@/db/mcp-logs/queries';
+import type { McpLogQuery } from '@/db/mcp-logs/types';
 import { GatewayError } from '@/utils';
 import { handleAdminError } from '../error';
 
@@ -11,20 +12,28 @@ const router: Router = Router();
 // ==================== 列出所有 MCP 日志 ====================
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { limit, offset, virtual_mcp_id, mcp_provider_id, method } = req.query;
+    const { limit, offset, virtual_mcp_id, mcp_provider_id, method, status, tool_name } = req.query;
 
     const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : 20;
     const offsetNum = typeof offset === 'string' && offset !== '' ? Number.parseInt(offset, 10) : 0;
 
-    const opts: Parameters<typeof listMcpLogs>[0] = { limit: limitNum, offset: offsetNum };
-    if (typeof virtual_mcp_id === 'string') {
+    const opts: McpLogQuery = { limit: limitNum, offset: offsetNum };
+    if (typeof virtual_mcp_id === 'string' && virtual_mcp_id !== '') {
       opts.virtual_mcp_id = virtual_mcp_id;
     }
-    if (typeof mcp_provider_id === 'string') {
+    if (typeof mcp_provider_id === 'string' && mcp_provider_id !== '') {
       opts.mcp_provider_id = mcp_provider_id;
     }
-    if (typeof method === 'string') {
+    if (typeof method === 'string' && method !== '') {
       opts.method = method;
+    }
+    if (typeof status === 'string' && status !== '') {
+      if (status === 'processing' || status === 'completed' || status === 'error') {
+        opts.status = status;
+      }
+    }
+    if (typeof tool_name === 'string' && tool_name !== '') {
+      opts.tool_name = tool_name;
     }
 
     const { data, has_more, total } = await listMcpLogs(opts);
@@ -52,7 +61,6 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 // ==================== 删除单条 MCP 日志 ====================
-// DELETE /admin/mcp-logs/:id
 router.delete('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;

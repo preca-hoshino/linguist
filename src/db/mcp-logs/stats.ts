@@ -41,7 +41,7 @@ function buildTimeClause(
 ): { clause: string; values: unknown[]; nextIdx: number } {
   if (params.from !== undefined && params.to !== undefined) {
     return {
-      clause: `created_at >= $${String(startIdx)} AND created_at < $${String(startIdx + 1)}`,
+      clause: `m.created_at >= $${String(startIdx)} AND m.created_at < $${String(startIdx + 1)}`,
       values: [params.from, params.to],
       nextIdx: startIdx + 2,
     };
@@ -57,7 +57,7 @@ function buildTimeClause(
   };
   const interval = rangeMap[params.range ?? '1h'];
   return {
-    clause: `created_at >= NOW() - INTERVAL '${interval}'`,
+    clause: `m.created_at >= NOW() - INTERVAL '${interval}'`,
     values: [],
     nextIdx: startIdx,
   };
@@ -68,10 +68,10 @@ function buildDimClause(
   startIdx: number,
 ): { clause: string; values: unknown[]; nextIdx: number } {
   if (params.dimension === 'mcp_provider' && params.id !== undefined) {
-    return { clause: `AND mcp_provider_id = $${String(startIdx)}`, values: [params.id], nextIdx: startIdx + 1 };
+    return { clause: `AND m.mcp_provider_id = $${String(startIdx)}`, values: [params.id], nextIdx: startIdx + 1 };
   }
   if (params.dimension === 'virtual_mcp' && params.id !== undefined) {
-    return { clause: `AND virtual_mcp_id = $${String(startIdx)}`, values: [params.id], nextIdx: startIdx + 1 };
+    return { clause: `AND m.virtual_mcp_id = $${String(startIdx)}`, values: [params.id], nextIdx: startIdx + 1 };
   }
   return { clause: '', values: [], nextIdx: startIdx };
 }
@@ -96,10 +96,10 @@ export async function getMcpStatsOverview(params: McpStatsQueryParams): Promise<
   const sql = `
     SELECT
       COUNT(*)::int                                               AS total_requests,
-      COUNT(*) FILTER (WHERE error IS NOT NULL)::int             AS error_count,
-      PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY duration_ms)  AS avg_duration_ms,
-      PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms)  AS p95_duration_ms
-    FROM mcp_logs
+      COUNT(*) FILTER (WHERE m.status = 'error')::int            AS error_count,
+      PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY m.duration_ms) AS avg_duration_ms,
+      PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY m.duration_ms) AS p95_duration_ms
+    FROM mcp_logs m
     WHERE ${timePart.clause}
     ${dimPart.clause}
   `;
@@ -167,12 +167,12 @@ export async function getMcpStatsTimeSeries(
   const sql = `
     SELECT
       ${bucketExpr} AS ts,
-      COUNT(*)::int                                              AS requests,
-      COUNT(*) FILTER (WHERE error IS NOT NULL)::int             AS errors,
-      AVG(duration_ms)                                           AS avg_duration_ms,
-      PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms)  AS p95_duration_ms,
-      PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY duration_ms)  AS p99_duration_ms
-    FROM mcp_logs
+      COUNT(*)::int                                               AS requests,
+      COUNT(*) FILTER (WHERE m.status = 'error')::int            AS errors,
+      AVG(m.duration_ms)                                          AS avg_duration_ms,
+      PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY m.duration_ms) AS p95_duration_ms,
+      PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY m.duration_ms) AS p99_duration_ms
+    FROM mcp_logs m
     WHERE ${timePart.clause}
     ${dimPart.clause}
     GROUP BY 1
@@ -214,14 +214,14 @@ export async function getMcpMethodBreakdown(params: McpStatsQueryParams): Promis
 
   const sql = `
     SELECT
-      method,
+      m.method,
       COUNT(*)::int                                        AS count,
-      COUNT(*) FILTER (WHERE error IS NOT NULL)::int       AS error_count,
-      AVG(duration_ms)                                     AS avg_duration_ms
-    FROM mcp_logs
+      COUNT(*) FILTER (WHERE m.status = 'error')::int     AS error_count,
+      AVG(m.duration_ms)                                   AS avg_duration_ms
+    FROM mcp_logs m
     WHERE ${timePart.clause}
     ${dimPart.clause}
-    GROUP BY method
+    GROUP BY m.method
     ORDER BY count DESC
     LIMIT 20
   `;
