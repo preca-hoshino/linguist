@@ -73,9 +73,10 @@ mcpRouter.get('/mcp/sse', async (req: Request, res: Response, next: NextFunction
 
 /**
  * 接收 JSON-RPC 消息 (MCP Server 规范)
- * POST /mcp/messages?sessionId=...
+ * POST /mcp/sse?sessionId=...
  * 注：Session 已在建立连接时与 appId 及 virtualMcpId 绑定，这里无需再次鉴权
+ * 注：Cherry Studio 等客户端会将消息 POST 回原始 SSE URL 而非单独的消息端点
  */
-mcpRouter.post('/mcp/messages', (req: Request, res: Response, next: NextFunction) => {
+mcpRouter.post('/mcp/sse', (req: Request, res: Response, next: NextFunction) => {
   handleMcpMessage(req, res).catch(next);
 });
