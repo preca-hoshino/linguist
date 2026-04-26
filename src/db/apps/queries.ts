@@ -74,19 +74,19 @@ export async function createApp(input: AppCreateInput): Promise<AppRow> {
 }
 
 /**
- * 列出应用（Stripe 风格游标分页）
+ * 列出应用（Offset 分页）
  * @param options.limit 每页数量（默认 10，最大 100）
- * @param options.starting_after 游标 ID（返回创建时间早于此 ID 的记录）
+ * @param options.offset 偏移量（默认 0）
  * @param options.search 搜索关键词（名称模糊匹配）
  */
 export async function listApps(options?: {
   limit?: number;
-  starting_after?: string;
+  offset?: number;
   search?: string;
   is_active?: boolean;
 }): Promise<{ data: AppRow[]; has_more: boolean; total: number }> {
   const limit = Math.min(Math.max(options?.limit ?? 10, 1), 100);
-  const startingAfter = options?.starting_after;
+  const offset = Math.max(options?.offset ?? 0, 0);
   const search = options?.search;
   const isActive = options?.is_active;
 
@@ -115,32 +115,21 @@ export async function listApps(options?: {
   const countResult = await db.query(countSql, [...values]);
   const total = Number.parseInt((countResult.rows[0] as { total: string } | undefined)?.total ?? '0', 10);
 
-  // 追加游标条件
-  if (typeof startingAfter === 'string' && startingAfter.trim() !== '') {
-    conditions.push(`a.created_at < (SELECT created_at FROM apps WHERE id = $${String(paramIdx)})`);
-    values.push(startingAfter);
-    paramIdx++;
-  }
-
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
-  // 多查 1 条来判断 has_more
-  const fetchLimit = limit + 1;
-  values.push(fetchLimit);
+  const whereClause = baseWhereClause;
+  values.push(limit, offset);
 
   const sql = `
     ${APP_SELECT}
     ${whereClause}
     GROUP BY a.id
     ORDER BY a.created_at DESC
-    LIMIT $${String(paramIdx)}
+    LIMIT $${String(paramIdx)} OFFSET $${String(paramIdx + 1)}
   `;
 
   const result = await db.query<AppRow>(sql, values);
-  const hasMore = result.rows.length > limit;
-  const data = hasMore ? result.rows.slice(0, limit) : result.rows;
+  const data = result.rows;
 
-  return { data, has_more: hasMore, total };
+  return { data, has_more: offset + data.length < total, total };
 }
 
 /**
