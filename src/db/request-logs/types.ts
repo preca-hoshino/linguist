@@ -15,8 +15,9 @@ export type ErrorType =
 /**
  * 列表专用日志条目（仅窄表字段，不含 JSONB，用于分页列表接口）
  *
- * 直接使用 request_logs 窄表独立列（duration_ms/ttft_ms/user_format），
- * 无需 JOIN request_log_details 宽表。
+ * 所有字段均来自 request_logs 热表独立列，无需 JOIN request_log_details 宽表。
+ * migration 08：token 五列；migration 09：duration_ms/ttft_ms/user_format；
+ * migration 12：ip / app_name。
  */
 export interface RequestLogListItem {
   id: string;
@@ -26,17 +27,27 @@ export interface RequestLogListItem {
   provider_kind: string | null;
   provider_id: string | null;
   app_id: string | null;
+  /** 应用名称（热表列，migration 12 新增） */
+  app_name: string | null;
+  /** 请求来源 IP（热表列，migration 12 新增） */
+  ip: string | null;
   is_stream: boolean | null;
+  /** 客户端协议格式（热表列，可直接用于过滤/分组） */
+  user_format: string | null;
   error_type: ErrorType | null;
   error_code: string | null;
   error_message: string | null;
   calculated_cost: number | null;
-  /** 全链路延迟（窄表列，无需 JOIN 计算） */
+  /** Token 统计列（热表，migration 08 恢复） */
+  prompt_tokens: number | null;
+  completion_tokens: number | null;
+  total_tokens: number | null;
+  cached_tokens: number | null;
+  reasoning_tokens: number | null;
+  /** 全链路延迟（热表列，无需 JOIN 计算） */
   duration_ms: number | null;
-  /** 首 Token 延迟（窄表列） */
+  /** 首 Token 延迟（热表列） */
   ttft_ms: number | null;
-  /** 客户端格式（窄表列，可直接用于过滤/分组） */
-  user_format: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -89,7 +100,10 @@ export const ENTRY_COLUMNS: string = `
 /** 列表查询列：仅查窄表（严禁 JOIN request_log_details） */
 export const LIST_COLUMNS: string = `
   r.id, r.status, r.request_model, r.routed_model, r.provider_kind, r.provider_id,
-  r.app_id, r.is_stream, r.error_type, r.error_code, r.error_message,
-  r.calculated_cost, r.duration_ms, r.ttft_ms, r.user_format,
+  r.app_id, r.app_name, r.ip, r.is_stream, r.user_format,
+  r.error_type, r.error_code, r.error_message,
+  r.calculated_cost,
+  r.prompt_tokens, r.completion_tokens, r.total_tokens, r.cached_tokens, r.reasoning_tokens,
+  r.duration_ms, r.ttft_ms,
   r.created_at, r.updated_at
 `.trim();
