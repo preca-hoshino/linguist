@@ -85,7 +85,10 @@ export async function handleMcpSseConnect(req: Request, res: Response, virtualMc
       sessionId,
       method: 'tools/list',
       status: 'completed',
-      audit: {},
+      audit: {
+        userRequest: { body: { method: 'tools/list' } },
+        providerRequest: { body: { method: 'tools/list' } },
+      },
       timing: { start },
     };
 
@@ -97,7 +100,8 @@ export async function handleMcpSseConnect(req: Request, res: Response, virtualMc
       const filtered = filterTools(tools, allowedTools);
       const result = { tools: filtered };
 
-      ctx.audit.result = result as Record<string, unknown>;
+      ctx.audit.providerResponse = { body: { tools } };
+      ctx.audit.userResponse = { body: result };
       ctx.timing.end = Date.now();
 
       await insertMcpLog(ctx);
@@ -106,7 +110,7 @@ export async function handleMcpSseConnect(req: Request, res: Response, virtualMc
       const message = err instanceof Error ? err.message : String(err);
       ctx.status = 'error';
       ctx.errorMessage = message;
-      ctx.audit.error = { message };
+      ctx.audit.userResponse = { body: { error: { message } } };
       ctx.timing.end = Date.now();
 
       await insertMcpLog(ctx);
@@ -132,7 +136,8 @@ export async function handleMcpSseConnect(req: Request, res: Response, virtualMc
       toolName: name,
       status: 'completed',
       audit: {
-        params: { name, arguments: args },
+        userRequest: { body: { method: 'tools/call', params: { name, arguments: args } } },
+        providerRequest: { body: { method: 'tools/call', params: { name, arguments: args } } },
       },
       timing: { start },
     };
@@ -146,7 +151,8 @@ export async function handleMcpSseConnect(req: Request, res: Response, virtualMc
       const client = await mcpConnectionManager.getClient(provider);
       const result = await client.callTool(name, args as Record<string, unknown>);
 
-      ctx.audit.result = result as unknown as Record<string, unknown>;
+      ctx.audit.providerResponse = { body: result as unknown as Record<string, unknown> };
+      ctx.audit.userResponse = { body: result as unknown as Record<string, unknown> };
       ctx.timing.end = Date.now();
 
       await insertMcpLog(ctx);
@@ -155,7 +161,7 @@ export async function handleMcpSseConnect(req: Request, res: Response, virtualMc
       const message = err instanceof Error ? err.message : String(err);
       ctx.status = 'error';
       ctx.errorMessage = message;
-      ctx.audit.error = { message };
+      ctx.audit.userResponse = { body: { error: { message } } };
       ctx.timing.end = Date.now();
 
       await insertMcpLog(ctx);
