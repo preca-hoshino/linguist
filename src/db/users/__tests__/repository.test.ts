@@ -59,13 +59,13 @@ describe('Users Repository', () => {
 
   describe('listUsers', () => {
     it('should handle pagination and counting', async () => {
-      const mockResult = {
-        rows: [
-          { id: '1', username: 'u1' },
-          { id: '2', username: 'u2' },
-        ],
-      };
-      (db.query as jest.Mock).mockResolvedValue(mockResult);
+      const mockRows = [
+        { id: '1', username: 'u1' },
+        { id: '2', username: 'u2' },
+      ];
+      (db.query as jest.Mock)
+        .mockResolvedValueOnce({ rows: [{ total: '2' }] }) // COUNT
+        .mockResolvedValueOnce({ rows: mockRows }); // SELECT
 
       const result = await listUsers({ limit: 10 });
 
@@ -74,13 +74,20 @@ describe('Users Repository', () => {
     });
 
     it('should apply search logic', async () => {
-      (db.query as jest.Mock).mockResolvedValue({ rows: [] });
+      (db.query as jest.Mock)
+        .mockResolvedValueOnce({ rows: [{ total: '0' }] }) // COUNT
+        .mockResolvedValueOnce({ rows: [] }); // SELECT
 
       await listUsers({ search: 'testword' });
 
-      expect(db.query).toHaveBeenCalledWith(expect.stringContaining('username ILIKE $1 OR email ILIKE $1'), [
+      // COUNT query uses search filter
+      expect(db.query).toHaveBeenNthCalledWith(1, expect.stringContaining('COUNT(*)'), ['%testword%']);
+
+      // SELECT query uses search filter + limit + offset
+      expect(db.query).toHaveBeenNthCalledWith(2, expect.stringContaining('username ILIKE $1 OR email ILIKE $1'), [
         '%testword%',
-        11,
+        10,
+        0,
       ]);
     });
   });

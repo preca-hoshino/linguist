@@ -7,26 +7,32 @@ import type { StatsDimension, StatsToday } from './types';
 /**
  * 获取今日实时统计（大数字卡片）
  * 同一次查询返回「今日累计」和「近期实时值」，前端轮询此端点刷新卡片。
- * 修复：由于表分离，引入延迟分离CTE (today_latency_sample) 并以 1000 条抽样优化当天庞大数据流检索。
+ *
+ * 性能优化策略：
+ * - today / recent_1m / recent_5m CTE 中的 token 汇总直接读主表统计列（prompt_tokens 等），
+ *   无需 JOIN request_logs_details，大幅降低 I/O 和 JSONB 解析开销。
+ * - today_latency_sample 仍需 JOIN details 表获取 timing JSON，但限 1000 条抽样。
+ * - recent_5m 也需 JOIN details 以计算延迟均值（timing），其余字段走主表列。
  */
 export async function getStatsToday(dimension: StatsDimension, id?: string): Promise<StatsToday> {
   const dimFilter = buildDimensionFilterAliased(dimension, id, 1, 'r');
   const sql = `
     WITH today AS (
+      -- 今日累计：token 直接读主表列，单表扫描
       SELECT
         COUNT(*)::int AS total_reqs,
-        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'total_tokens')::bigint), 0)::bigint AS total_tokens,
-        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'prompt_tokens')::bigint), 0)::bigint AS prompt_tokens,
-        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'completion_tokens')::bigint), 0)::bigint AS completion_tokens,
+        COALESCE(SUM(r.total_tokens), 0)::bigint AS total_tokens,
+        COALESCE(SUM(r.prompt_tokens), 0)::bigint AS prompt_tokens,
+        COALESCE(SUM(r.completion_tokens), 0)::bigint AS completion_tokens,
         COUNT(*) FILTER (WHERE r.status = 'error')::int AS total_errors,
         COALESCE(SUM(r.calculated_cost), 0.0)::float AS today_cost
       FROM request_logs r
-      LEFT JOIN request_logs_details d ON r.id = d.id
       WHERE r.created_at >= date_trunc('day', NOW())
       ${dimFilter.clause}
     ),
     today_latency_sample AS (
-      SELECT d.timing, (d.gateway_context->'response'->'usage'->>'completion_tokens')::bigint as completion_tokens
+      -- 延迟百分位：仅需 timing JSON，限 1000 条抽样
+      SELECT d.timing, r.completion_tokens
       FROM request_logs r
       JOIN request_logs_details d ON r.id = d.id
       WHERE r.created_at >= date_trunc('day', NOW())
@@ -50,22 +56,23 @@ export async function getStatsToday(dimension: StatsDimension, id?: string): Pro
       FROM today_latency_sample s
     ),
     recent_1m AS (
+      -- 近 1 分钟：token 直接读主表列
       SELECT
         COUNT(*)::int AS reqs,
-        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'total_tokens')::bigint), 0)::bigint AS tokens
+        COALESCE(SUM(r.total_tokens), 0)::bigint AS tokens
       FROM request_logs r
-      LEFT JOIN request_logs_details d ON r.id = d.id
       WHERE r.created_at >= NOW() - INTERVAL '1 minute'
       ${dimFilter.clause}
     ),
     recent_5m AS (
+      -- 近 5 分钟：token/cached/prompt 直接读主表列，JOIN details 仅用于计算延迟
       SELECT
         AVG(${latencyExpr('d')})::float AS recent_avg_latency,
         COUNT(*) FILTER (WHERE r.status = 'error')::int AS errors,
         COUNT(*)::int AS total,
-        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'cached_tokens')::bigint), 0)::bigint AS cached,
-        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'prompt_tokens')::bigint), 0)::bigint AS prompt,
-        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'total_tokens')::bigint), 0)::bigint AS tokens
+        COALESCE(SUM(r.cached_tokens), 0)::bigint AS cached,
+        COALESCE(SUM(r.prompt_tokens), 0)::bigint AS prompt,
+        COALESCE(SUM(r.total_tokens), 0)::bigint AS tokens
       FROM request_logs r
       LEFT JOIN request_logs_details d ON r.id = d.id
       WHERE r.created_at >= NOW() - INTERVAL '5 minutes'

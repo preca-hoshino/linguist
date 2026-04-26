@@ -202,13 +202,13 @@ const router: Router = Router();
 // ==================== 列出所有提供商模型 ====================
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { provider_id, model_type, is_active, search, limit, starting_after } = req.query;
+    const { provider_id, model_type, is_active, search, limit, offset } = req.query;
     const limitNum =
       typeof limit === 'string' && limit !== '' ? Math.min(Math.max(Number.parseInt(limit, 10), 1), 100) : 10;
-    const startingAfterStr = typeof starting_after === 'string' ? starting_after.trim() : undefined;
+    const offsetNum = typeof offset === 'string' && offset !== '' ? Math.max(Number.parseInt(offset, 10), 0) : 0;
 
     logger.debug(
-      { providerId: provider_id ?? 'all', search, limit: limitNum, starting_after: startingAfterStr, is_active },
+      { providerId: provider_id ?? 'all', search, limit: limitNum, offset: offsetNum, is_active },
       'Listing provider models',
     );
 
@@ -259,14 +259,8 @@ router.get('/', async (req: Request, res: Response) => {
     const countResult = await db.query(countSql, values);
     const total = Number.parseInt((countResult.rows[0] as { total: string } | undefined)?.total ?? '0', 10);
 
-    // 加入游标过滤
-    if (startingAfterStr !== undefined && startingAfterStr !== '') {
-      conditions.push(`pm.created_at < (SELECT created_at FROM model_provider_models WHERE id = $${String(paramIdx)})`);
-      values.push(startingAfterStr);
-      paramIdx++;
-    }
-
-    const dataWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const whereClause = baseWhereClause;
+    values.push(limitNum, offsetNum);
 
     const sql = `
       SELECT pm.id, pm.provider_id, pm.name, pm.model_type, pm.capabilities, pm.supported_parameters,
@@ -275,16 +269,13 @@ router.get('/', async (req: Request, res: Response) => {
              p.name AS provider_name, p.kind AS provider_kind
       FROM model_provider_models pm
       JOIN model_providers p ON pm.provider_id = p.id
-      ${dataWhereClause}
+      ${whereClause}
       ORDER BY pm.created_at DESC
-      LIMIT $${String(paramIdx)}
+      LIMIT $${String(paramIdx)} OFFSET $${String(paramIdx + 1)}
     `;
 
-    values.push(limitNum + 1);
-
     const result = await db.query(sql, values);
-    const dataRows = result.rows.length > limitNum ? result.rows.slice(0, limitNum) : result.rows;
-    const hasMore = result.rows.length > limitNum;
+    const dataRows = result.rows;
 
     const data = dataRows.map((row) => {
       const id = row.id as string;
@@ -295,8 +286,8 @@ router.get('/', async (req: Request, res: Response) => {
       return { ...row, throughput };
     });
 
-    logger.debug({ count: data.length, total, has_more: hasMore }, 'Provider models listed');
-    res.json({ object: 'list', url: '/api/providers/models', data, total, has_more: hasMore });
+    logger.debug({ count: data.length, total, has_more: offsetNum + data.length < total }, 'Provider models listed');
+    res.json({ object: 'list', url: '/admin/provider-models', data, total, has_more: offsetNum + data.length < total });
   } catch (error) {
     handleAdminError(error, res);
   }

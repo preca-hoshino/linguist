@@ -21,8 +21,8 @@ export async function markProcessing(ctx: RoutedModelHttpContext): Promise<void>
     // 写入基础热数据
     await db.query(
       `INSERT INTO request_logs
-         (id, status, app_id, ip, is_stream, request_model, routed_model, provider_kind, provider_id)
-       VALUES ($1, 'processing', $2, $3, $4, $5, $6, $7, $8)`,
+         (id, status, app_id, ip, is_stream, request_model, routed_model, provider_kind, provider_id, user_format)
+       VALUES ($1, 'processing', $2, $3, $4, $5, $6, $7, $8, $9)`,
       [
         ctx.id,
         ctx.appId ?? null,
@@ -32,11 +32,12 @@ export async function markProcessing(ctx: RoutedModelHttpContext): Promise<void>
         ctx.route.model,
         ctx.route.providerKind,
         ctx.route.providerId,
+        ctx.userFormat,
       ],
     );
     // 同步写入冷数据详情
     await db.query(
-      `INSERT INTO request_logs_details
+      `INSERT INTO request_log_details
          (id, timing, gateway_context)
        VALUES ($1, $2, $3)`,
       [ctx.id, JSON.stringify(ctx.timing), JSON.stringify(buildCtxSnapshot(ctx))],
@@ -83,7 +84,16 @@ export async function markCompleted(ctx: ModelHttpContext): Promise<void> {
   }
 
   try {
-    // 更新主表热数据
+    // 计算时序字段（从 timing 推导）
+    const timing = ctx.timing;
+    const durationMs = timing.end !== undefined ? timing.end - timing.start : null;
+    const ttftMs = timing.ttft !== undefined ? timing.ttft - timing.start : null;
+    const providerDurationMs =
+      timing.providerEnd !== undefined && timing.providerStart !== undefined
+        ? timing.providerEnd - timing.providerStart
+        : null;
+
+    // 更新主表热数据（同步写入 token 统计列 + 时序列，避免聚合查询 JOIN details 表）
     await db.query(
       `UPDATE request_logs
        SET status = 'completed',
@@ -91,7 +101,15 @@ export async function markCompleted(ctx: ModelHttpContext): Promise<void> {
            provider_kind = $3,
            provider_id = $4,
            is_stream = $5,
-           calculated_cost = $6
+           calculated_cost = $6,
+           prompt_tokens = $7,
+           completion_tokens = $8,
+           total_tokens = $9,
+           cached_tokens = $10,
+           reasoning_tokens = $11,
+           duration_ms = $12,
+           ttft_ms = $13,
+           provider_duration_ms = $14
        WHERE id = $1`,
       [
         ctx.id,
@@ -100,12 +118,20 @@ export async function markCompleted(ctx: ModelHttpContext): Promise<void> {
         ctx.route?.providerId ?? null,
         ctx.stream ?? null,
         calculatedCost,
+        promptTokens ?? null,
+        completionTokens ?? null,
+        totalTokens ?? null,
+        cachedTokens ?? null,
+        reasoningTokens ?? null,
+        durationMs,
+        ttftMs,
+        providerDurationMs,
       ],
     );
 
     // 更新详情冷数据
     await db.query(
-      `UPDATE request_logs_details
+      `UPDATE request_log_details
        SET timing = $2,
            gateway_context = $3
        WHERE id = $1`,
@@ -152,6 +178,9 @@ export async function markError(ctx: ModelHttpContext, err: unknown): Promise<vo
   }
 
   try {
+    const errTiming = ctx.timing;
+    const errDurationMs = errTiming.end !== undefined ? errTiming.end - errTiming.start : null;
+
     const updateRes = await db.query(
       `UPDATE request_logs
        SET status = 'error',
@@ -161,7 +190,8 @@ export async function markError(ctx: ModelHttpContext, err: unknown): Promise<vo
            error_message = $5,
            error_code = $6,
            error_type = $7,
-           is_stream = COALESCE($8, is_stream)
+           is_stream = COALESCE($8, is_stream),
+           duration_ms = COALESCE($9, duration_ms)
        WHERE id = $1`,
       [
         ctx.id,
@@ -172,13 +202,14 @@ export async function markError(ctx: ModelHttpContext, err: unknown): Promise<vo
         errorCode,
         errorType,
         ctx.stream ?? null,
+        errDurationMs,
       ],
     );
 
     if ((updateRes.rowCount ?? 0) > 0) {
       // 记录已存在，只更新从表
       await db.query(
-        `UPDATE request_logs_details
+        `UPDATE request_log_details
          SET timing = $2, gateway_context = $3
          WHERE id = $1`,
         [ctx.id, JSON.stringify(ctx.timing), JSON.stringify(buildCtxSnapshot(ctx))],
@@ -189,8 +220,9 @@ export async function markError(ctx: ModelHttpContext, err: unknown): Promise<vo
         `INSERT INTO request_logs
            (id, status, app_id, ip, is_stream, request_model,
             routed_model, provider_kind, provider_id,
-            error_message, error_code, error_type)
-         VALUES ($1, 'error', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+            error_message, error_code, error_type,
+            user_format, duration_ms)
+         VALUES ($1, 'error', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
         [
           ctx.id,
           ctx.appId ?? null,
@@ -203,11 +235,13 @@ export async function markError(ctx: ModelHttpContext, err: unknown): Promise<vo
           ctx.error ?? null,
           errorCode,
           errorType,
+          ctx.userFormat,
+          errDurationMs,
         ],
       );
 
       await db.query(
-        `INSERT INTO request_logs_details
+        `INSERT INTO request_log_details
            (id, timing, gateway_context)
          VALUES ($1, $2, $3)`,
         [ctx.id, JSON.stringify(ctx.timing), JSON.stringify(buildCtxSnapshot(ctx))],

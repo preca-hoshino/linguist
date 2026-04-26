@@ -47,8 +47,13 @@ function mapBreakdownRow(row: BreakdownRow, providerNameOverride?: string | null
 // ==================== 分组查询实现 ====================
 
 /**
- * provider_model 分组：JOIN providers 获取提供商名称
- * timing 字段已迁移至 request_logs_details，故需 LEFT JOIN 后使用 d. 别名
+ * provider_model 分组
+ *
+ * 性能优化：
+ * - total_tokens / avg_completion_tokens 直接读主表列，去掉 token 的 JSONB 提取
+ * - provider_name 改用 LEFT JOIN 代替相关子查询（消灭 N+1）
+ * - provider_model_id 改用 LEFT JOIN 代替相关子查询（消灭 N+1）
+ * - timing 延迟计算仍需 JOIN details 表，保留
  */
 async function breakdownByProviderModel(params: StatsQueryParams): Promise<StatsBreakdown> {
   const timeFilter = buildTimeFilter(params, 1);
@@ -63,12 +68,12 @@ async function breakdownByProviderModel(params: StatsQueryParams): Promise<Stats
 
   const sql = `
     SELECT
-      COALESCE((SELECT name FROM model_providers WHERE id = rl.provider_id), rl.provider_id::text, 'unknown') AS provider_name,
+      COALESCE(mp.name, rl.provider_id::text, 'unknown') AS provider_name,
       MAX(rl.provider_kind) AS provider_kind,
       COALESCE(rl.routed_model::text, 'unknown') AS name,
-      (SELECT id FROM model_provider_models pm WHERE pm.provider_id = rl.provider_id AND pm.name = rl.routed_model LIMIT 1) AS provider_model_id,
+      MAX(mpm.id) AS provider_model_id,
       COUNT(*)::int AS request_count,
-      COALESCE(SUM((d.gateway_context->'response'->'usage'->>'total_tokens')::bigint), 0)::bigint AS total_tokens,
+      COALESCE(SUM(rl.total_tokens), 0)::bigint AS total_tokens,
       COUNT(*) FILTER (WHERE rl.status = 'error')::int AS error_count,
       AVG(${latExpr})::float AS avg_latency_ms,
       PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY ${latExpr})::float AS p50_latency_ms,
@@ -76,13 +81,16 @@ async function breakdownByProviderModel(params: StatsQueryParams): Promise<Stats
       PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY ${latExpr})::float AS p99_latency_ms,
       AVG(${ttftEx})::float AS ttft_avg_ms,
       AVG(${itlEx})::float AS itl_avg_ms,
-      AVG((d.gateway_context->'response'->'usage'->>'completion_tokens')::bigint)::float AS avg_completion_tokens,
+      AVG(rl.completion_tokens)::float AS avg_completion_tokens,
       COALESCE(SUM(rl.calculated_cost), 0.0)::float AS total_cost
     FROM request_logs rl
     LEFT JOIN request_logs_details d ON d.id = rl.id
+    LEFT JOIN model_providers mp ON mp.id = rl.provider_id
+    LEFT JOIN model_provider_models mpm
+      ON mpm.provider_id = rl.provider_id AND mpm.name = rl.routed_model
     WHERE ${rlTimeClause}
     ${dimFilter.clause}
-    GROUP BY rl.provider_id, rl.routed_model
+    GROUP BY rl.provider_id, rl.routed_model, mp.name
     ORDER BY request_count DESC
     LIMIT 50
   `;
@@ -95,7 +103,9 @@ async function breakdownByProviderModel(params: StatsQueryParams): Promise<Stats
 }
 
 /**
- * app 分组：从 request_logs_details 的 gateway_context 中提取 appId 和 appName
+ * app 分组
+ *
+ * 性能优化：total_tokens 直接读主表列，仅 appName/appId 标识字段仍需 JOIN details
  */
 async function breakdownByApp(params: StatsQueryParams): Promise<StatsBreakdown> {
   const timeFilter = buildTimeFilter(params, 1);
@@ -112,7 +122,7 @@ async function breakdownByApp(params: StatsQueryParams): Promise<StatsBreakdown>
       COALESCE(d.gateway_context->>'appName', d.gateway_context->>'appId', 'unknown') AS name,
       NULL::text AS provider_name,
       COUNT(*)::int AS request_count,
-      COALESCE(SUM((d.gateway_context->'response'->'usage'->>'total_tokens')::bigint), 0)::bigint AS total_tokens,
+      COALESCE(SUM(r.total_tokens), 0)::bigint AS total_tokens,
       COUNT(*) FILTER (WHERE r.status = 'error')::int AS error_count,
       AVG(${latExpr})::float AS avg_latency_ms,
       PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY ${latExpr})::float AS p50_latency_ms,
@@ -120,7 +130,7 @@ async function breakdownByApp(params: StatsQueryParams): Promise<StatsBreakdown>
       PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY ${latExpr})::float AS p99_latency_ms,
       AVG(${ttftEx})::float AS ttft_avg_ms,
       AVG(${itlEx})::float AS itl_avg_ms,
-      AVG((d.gateway_context->'response'->'usage'->>'completion_tokens')::bigint)::float AS avg_completion_tokens,
+      AVG(r.completion_tokens)::float AS avg_completion_tokens,
       COALESCE(SUM(r.calculated_cost), 0.0)::float AS total_cost
     FROM request_logs r
     LEFT JOIN request_logs_details d ON d.id = r.id
@@ -139,8 +149,11 @@ async function breakdownByApp(params: StatsQueryParams): Promise<StatsBreakdown>
 }
 
 /**
- * provider 分组：JOIN providers 表获取真实名称
- * timing 字段已迁移至 request_logs_details，故需 LEFT JOIN
+ * provider 分组
+ *
+ * 性能优化：
+ * - total_tokens 直接读主表列
+ * - provider_name 改用 LEFT JOIN 代替相关子查询
  */
 async function breakdownByProvider(params: StatsQueryParams): Promise<StatsBreakdown> {
   const timeFilter = buildTimeFilter(params, 1);
@@ -154,10 +167,10 @@ async function breakdownByProvider(params: StatsQueryParams): Promise<StatsBreak
 
   const sql = `
     SELECT
-      COALESCE((SELECT name FROM model_providers WHERE id = r.provider_id), r.provider_id::text, 'unknown') AS name,
+      COALESCE(mp.name, r.provider_id::text, 'unknown') AS name,
       NULL::text AS provider_name,
       COUNT(*)::int AS request_count,
-      COALESCE(SUM((d.gateway_context->'response'->'usage'->>'total_tokens')::bigint), 0)::bigint AS total_tokens,
+      COALESCE(SUM(r.total_tokens), 0)::bigint AS total_tokens,
       COUNT(*) FILTER (WHERE r.status = 'error')::int AS error_count,
       AVG(${latExpr})::float AS avg_latency_ms,
       PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY ${latExpr})::float AS p50_latency_ms,
@@ -165,13 +178,14 @@ async function breakdownByProvider(params: StatsQueryParams): Promise<StatsBreak
       PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY ${latExpr})::float AS p99_latency_ms,
       AVG(${ttftEx})::float AS ttft_avg_ms,
       AVG(${itlEx})::float AS itl_avg_ms,
-      AVG((d.gateway_context->'response'->'usage'->>'completion_tokens')::bigint)::float AS avg_completion_tokens,
+      AVG(r.completion_tokens)::float AS avg_completion_tokens,
       COALESCE(SUM(r.calculated_cost), 0.0)::float AS total_cost
     FROM request_logs r
     LEFT JOIN request_logs_details d ON d.id = r.id
+    LEFT JOIN model_providers mp ON mp.id = r.provider_id
     WHERE ${rlTimeClause}
     ${dimFilter.clause}
-    GROUP BY r.provider_id
+    GROUP BY r.provider_id, mp.name
     ORDER BY request_count DESC
     LIMIT 50
   `;
@@ -185,8 +199,8 @@ async function breakdownByProvider(params: StatsQueryParams): Promise<StatsBreak
 
 /**
  * 通用分组：virtual_model, error_type, user_format
- * timing 字段已迁移至 request_logs_details，故需 LEFT JOIN
- * user_format 字段来自 d.gateway_context，也需要 JOIN
+ *
+ * 性能优化：total_tokens / avg_completion_tokens 改为直接读主表列
  */
 async function breakdownGeneric(
   params: StatsQueryParams,
@@ -214,7 +228,7 @@ async function breakdownGeneric(
       COALESCE(${col}::text, 'unknown') AS name,
       NULL::text AS provider_name,
       COUNT(*)::int AS request_count,
-      COALESCE(SUM((d.gateway_context->'response'->'usage'->>'total_tokens')::bigint), 0)::bigint AS total_tokens,
+      COALESCE(SUM(r.total_tokens), 0)::bigint AS total_tokens,
       COUNT(*) FILTER (WHERE r.status = 'error')::int AS error_count,
       AVG(${latExpr})::float AS avg_latency_ms,
       PERCENTILE_CONT(0.50) WITHIN GROUP (ORDER BY ${latExpr})::float AS p50_latency_ms,
@@ -222,7 +236,7 @@ async function breakdownGeneric(
       PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY ${latExpr})::float AS p99_latency_ms,
       AVG(${ttftEx})::float AS ttft_avg_ms,
       AVG(${itlEx})::float AS itl_avg_ms,
-      AVG((d.gateway_context->'response'->'usage'->>'completion_tokens')::bigint)::float AS avg_completion_tokens,
+      AVG(r.completion_tokens)::float AS avg_completion_tokens,
       COALESCE(SUM(r.calculated_cost), 0.0)::float AS total_cost
     FROM request_logs r
     LEFT JOIN request_logs_details d ON d.id = r.id

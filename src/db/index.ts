@@ -32,7 +32,7 @@ export {
   updateVirtualMcp,
 } from './mcp-virtual-servers/index';
 export { runMigrations } from './migrate';
-export type { RequestLogStatus } from './request-logs/index';
+export type { RequestLogListItem, RequestLogStatus } from './request-logs/index';
 export {
   deleteRequestLogById,
   getRequestLogById,

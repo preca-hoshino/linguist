@@ -15,25 +15,22 @@ const router: Router = Router();
 //  应用（App）CRUD
 // ====================================================================
 
-// ==================== 列出应用（游标分页） ====================
-// GET /api/apps?limit=10&starting_after=abc123&search=xxx
+// ==================== 列出应用（Offset 分页） ====================
+// GET /admin/apps?limit=10&offset=0&search=xxx
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { limit, starting_after, search, is_active } = req.query;
+    const { limit, offset, search, is_active } = req.query;
     const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : undefined;
-    const startingAfter = typeof starting_after === 'string' ? starting_after : undefined;
+    const offsetNum = typeof offset === 'string' && offset !== '' ? Math.max(Number.parseInt(offset, 10), 0) : 0;
     const searchStr = typeof search === 'string' ? search : undefined;
     const isActiveParam =
       typeof is_active === 'string' && is_active !== '' ? is_active.toLowerCase() === 'true' : undefined;
 
-    logger.debug(
-      { search: searchStr, limit: limitNum, starting_after: startingAfter, is_active: isActiveParam },
-      'Listing apps',
-    );
+    logger.debug({ search: searchStr, limit: limitNum, offset: offsetNum, is_active: isActiveParam }, 'Listing apps');
 
     const result = await listApps({
       ...(limitNum !== undefined ? { limit: limitNum } : {}),
-      ...(startingAfter !== undefined ? { starting_after: startingAfter } : {}),
+      offset: offsetNum,
       ...(searchStr !== undefined ? { search: searchStr } : {}),
       ...(isActiveParam !== undefined ? { is_active: isActiveParam } : {}),
     });
@@ -43,7 +40,7 @@ router.get('/', async (req: Request, res: Response) => {
     logger.debug({ count: data.length, has_more: result.has_more, total: result.total }, 'Apps listed');
     res.json({
       object: 'list',
-      url: '/api/apps',
+      url: '/admin/apps',
       has_more: result.has_more,
       total: result.total,
       data,

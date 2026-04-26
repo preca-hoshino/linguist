@@ -49,15 +49,11 @@ router.post('/v1/messages/count_tokens', async (req: Request, res: Response): Pr
   logger.debug({ ip: req.ip ?? req.socket.remoteAddress }, 'POST /v1/messages/count_tokens');
   try {
     // 基础校验 API Key，防止未授权访问
-    await validateApiKeyFromRequest(
-      req,
-      extractApiKey,
-      'API key is required. Provide it via x-api-key header.',
-    );
+    await validateApiKeyFromRequest(req, extractApiKey, 'API key is required. Provide it via x-api-key header.');
 
     // 简单高效的本地 Token 估算：通常 1 个 token 约等于 4 个英文字符或 1.5 个汉字
     // 为避免解析开销，直接将请求体序列化并除以 4
-    const payloadStr = JSON.stringify(req.body || {});
+    const payloadStr = JSON.stringify(req.body ?? {});
     const estimatedTokens = Math.max(1, Math.ceil(payloadStr.length / 4));
 
     res.json({

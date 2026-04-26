@@ -80,7 +80,7 @@ describe('App Queries', () => {
   });
 
   describe('listApps', () => {
-    it('should build sql condition for search and cursor', async () => {
+    it('should build sql condition for search and offset', async () => {
       const countResult = { rows: [{ total: '5' }] };
       const listResult = { rows: [{ id: 'app_2' }, { id: 'app_3' }] };
 
@@ -89,26 +89,21 @@ describe('App Queries', () => {
 
       const result = await listApps({
         limit: 10,
-        starting_after: 'app_1',
+        offset: 10,
         search: 'Demo',
         is_active: true,
       });
 
       // COUNT query
-      expect(mockDbQuery).toHaveBeenNthCalledWith(
-        1,
-        expect.stringContaining('COUNT(*)'),
-        ['%Demo%', true], // Note limit logic, parameter order changes over clauses
-      );
+      expect(mockDbQuery).toHaveBeenNthCalledWith(1, expect.stringContaining('COUNT(*)'), ['%Demo%', true]);
 
-      // SELECT query -> search criteria (%Demo%), active check (true), cursor condition ('app_1'), and limit (11)
-      expect(mockDbQuery).toHaveBeenNthCalledWith(
-        2,
-        expect.stringContaining(
-          'WHERE a.name ILIKE $1 AND a.is_active = $2 AND a.created_at < (SELECT created_at FROM apps WHERE id = $3)',
-        ),
-        ['%Demo%', true, 'app_1', 11],
-      );
+      // SELECT query -> search criteria (%Demo%), active check (true), limit (10), offset (10)
+      expect(mockDbQuery).toHaveBeenNthCalledWith(2, expect.stringContaining('LIMIT $3 OFFSET $4'), [
+        '%Demo%',
+        true,
+        10,
+        10,
+      ]);
 
       expect(result.data).toHaveLength(2);
       expect(result.has_more).toBe(false);

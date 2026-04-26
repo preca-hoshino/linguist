@@ -4,15 +4,13 @@ import { db } from '@/db/client';
 import { buildDimensionFilterAliased, buildTimeFilter } from './helpers';
 import type { StatsQueryParams, StatsTokens } from './types';
 
-// JSON 路径提取各 token 字段（request_logs 表中的 token 列已在 migration 07 中删除，
-// 实际数据迁移至 request_logs_details.gateway_context）
-const J_PROMPT = `(d.gateway_context->'response'->'usage'->>'prompt_tokens')::bigint`;
-const J_COMPLETION = `(d.gateway_context->'response'->'usage'->>'completion_tokens')::bigint`;
-const J_REASONING = `(d.gateway_context->'response'->'usage'->>'reasoning_tokens')::bigint`;
-const J_CACHED = `(d.gateway_context->'response'->'usage'->>'cached_tokens')::bigint`;
-
 /**
  * 获取 Token 用量分析数据
+ *
+ * 性能优化：
+ * - 直接读取 request_logs 主表的 token 统计列（prompt_tokens 等），
+ *   无需 JOIN request_logs_details，消除 JSONB 路径解析开销。
+ * - PERCENTILE_CONT 排序也直接基于主表列，避免重复 JSONB 解析。
  */
 export async function getStatsTokens(params: StatsQueryParams): Promise<StatsTokens> {
   const timeFilter = buildTimeFilter(params, 1);
@@ -22,16 +20,15 @@ export async function getStatsTokens(params: StatsQueryParams): Promise<StatsTok
 
   const sql = `
     SELECT
-      COALESCE(SUM(${J_PROMPT}), 0)::bigint AS prompt_tokens,
-      COALESCE(SUM(${J_COMPLETION}), 0)::bigint AS completion_tokens,
-      COALESCE(SUM(${J_REASONING}), 0)::bigint AS reasoning_tokens,
-      COALESCE(SUM(${J_CACHED}), 0)::bigint AS cached_tokens,
-      AVG(${J_PROMPT})::float AS avg_input,
-      AVG(${J_COMPLETION})::float AS avg_output,
-      PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY ${J_PROMPT})::float AS p95_input,
-      PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY ${J_COMPLETION})::float AS p95_output
+      COALESCE(SUM(r.prompt_tokens), 0)::bigint AS prompt_tokens,
+      COALESCE(SUM(r.completion_tokens), 0)::bigint AS completion_tokens,
+      COALESCE(SUM(r.reasoning_tokens), 0)::bigint AS reasoning_tokens,
+      COALESCE(SUM(r.cached_tokens), 0)::bigint AS cached_tokens,
+      AVG(r.prompt_tokens)::float AS avg_input,
+      AVG(r.completion_tokens)::float AS avg_output,
+      PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY r.prompt_tokens)::float AS p95_input,
+      PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY r.completion_tokens)::float AS p95_output
     FROM request_logs r
-    LEFT JOIN request_logs_details d ON d.id = r.id
     WHERE ${timeClauseAliased}
     AND r.status = 'completed'
     ${dimFilter.clause}

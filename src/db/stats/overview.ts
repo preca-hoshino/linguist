@@ -10,10 +10,11 @@ const logger = createLogger('Stats', logColors.bold + logColors.blue);
 /**
  * 获取概览统计数据
  *
- * 百万级优化：
- * - 耗时的 JSON 细节查询 (d.timing) 与 PERCENTILE 计算被转移到独立的 1000 条极限抽样 CTE 中执行，
- *   避开全局亿级深度计算。
- * - 基础指标全部落入瘦身后的 `request_logs` 主表索引层级。
+ * 性能优化策略：
+ * - stats_base CTE 直接读取 request_logs 主表的 token 统计列（prompt_tokens 等），
+ *   无需 JOIN request_logs_details，消除双分区扫描 + JSONB 解析开销。
+ * - latency_sample 仍需 JOIN details 表（timing JSON），但限制 1000 条抽样，
+ *   避免对全量数据执行 PERCENTILE_CONT 计算。
  */
 export async function getStatsOverview(params: StatsQueryParams): Promise<StatsOverview> {
   const minutes = getWindowMinutes(params);
@@ -24,31 +25,31 @@ export async function getStatsOverview(params: StatsQueryParams): Promise<StatsO
 
   const sql = `
     WITH stats_base AS (
+      -- 直接读取主表 token 列，单表扫描，无 JOIN，走覆盖索引
       SELECT
         COUNT(*)::int AS total_requests,
         COALESCE(SUM(r.calculated_cost), 0.0)::float AS total_cost,
-        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'prompt_tokens')::bigint), 0)::bigint AS prompt_tokens,
-        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'completion_tokens')::bigint), 0)::bigint AS completion_tokens,
-        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'total_tokens')::bigint), 0)::bigint AS total_tokens,
-        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'cached_tokens')::bigint), 0)::bigint AS cached_tokens,
-        COALESCE(SUM((d.gateway_context->'response'->'usage'->>'reasoning_tokens')::bigint), 0)::bigint AS reasoning_tokens,
+        COALESCE(SUM(r.prompt_tokens), 0)::bigint AS prompt_tokens,
+        COALESCE(SUM(r.completion_tokens), 0)::bigint AS completion_tokens,
+        COALESCE(SUM(r.total_tokens), 0)::bigint AS total_tokens,
+        COALESCE(SUM(r.cached_tokens), 0)::bigint AS cached_tokens,
+        COALESCE(SUM(r.reasoning_tokens), 0)::bigint AS reasoning_tokens,
         COUNT(*) FILTER (WHERE r.status = 'error')::int AS error_count,
         COUNT(*) FILTER (WHERE r.error_type = 'rate_limit')::int AS rate_limit_error_count,
         COUNT(*) FILTER (WHERE r.error_type = 'timeout')::int AS timeout_error_count,
-        AVG((d.gateway_context->'response'->'usage'->>'prompt_tokens')::bigint)::float AS avg_input_tokens,
-        AVG((d.gateway_context->'response'->'usage'->>'completion_tokens')::bigint)::float AS avg_output_tokens
+        AVG(r.prompt_tokens)::float AS avg_input_tokens,
+        AVG(r.completion_tokens)::float AS avg_output_tokens
       FROM request_logs r
-      LEFT JOIN request_logs_details d ON r.id = d.id
       WHERE ${timeClauseAliased}
       ${dimFilter.clause}
     ),
     latency_sample AS (
-      SELECT d.timing, (d.gateway_context->'response'->'usage'->>'completion_tokens')::bigint as completion_tokens
+      -- 延迟百分位计算：仅取最近 1000 条，避免全量 JSONB 解析
+      SELECT d.timing, r.completion_tokens
       FROM request_logs r
       JOIN request_logs_details d ON r.id = d.id
       WHERE ${timeClauseAliased}
       ${dimFilter.clause}
-      -- 轻量级抽样，保证不拖垮主库计算资源
       ORDER BY r.created_at DESC
       LIMIT 1000
     ),
