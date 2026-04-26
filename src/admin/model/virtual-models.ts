@@ -117,10 +117,10 @@ function withThroughput<T extends { id: string }>(vm: T): T & { throughput: { rp
 // ==================== 列出所有虚拟模型 ====================
 router.get('/', async (req: Request, res: Response) => {
   try {
-    const { search, limit, starting_after, expand, model_type, routing_strategy, is_active } = req.query;
+    const { search, limit, offset, expand, model_type, routing_strategy, is_active } = req.query;
     const limitNum =
       typeof limit === 'string' && limit !== '' ? Math.min(Math.max(Number.parseInt(limit, 10), 1), 100) : 10;
-    const startingAfterStr = typeof starting_after === 'string' ? starting_after.trim() : undefined;
+    const offsetNum = typeof offset === 'string' && offset !== '' ? Math.max(Number.parseInt(offset, 10), 0) : 0;
 
     // 解析按需展开字段
     const expands = Array.isArray(expand) ? expand : typeof expand === 'string' ? [expand] : [];
@@ -130,7 +130,7 @@ router.get('/', async (req: Request, res: Response) => {
       {
         search,
         limit: limitNum,
-        starting_after: startingAfterStr,
+        offset: offsetNum,
         expandBackends,
         model_type,
         routing_strategy,
@@ -183,33 +183,24 @@ router.get('/', async (req: Request, res: Response) => {
     const countResult = await db.query(countSql, values);
     const total = Number.parseInt((countResult.rows[0] as { total: string } | undefined)?.total ?? '0', 10);
 
-    // 加入游标过滤
-    if (startingAfterStr !== undefined && startingAfterStr !== '') {
-      conditions.push(`created_at < (SELECT created_at FROM virtual_models WHERE id = $${String(paramIdx)})`);
-      values.push(startingAfterStr);
-      paramIdx++;
-    }
-
-    const dataWhereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const whereClause = baseWhereClause;
+    values.push(limitNum, offsetNum);
 
     const sql = `
       SELECT id, name, description, model_type, routing_strategy, is_active, rpm_limit, tpm_limit,
              created_at, updated_at
       FROM virtual_models
-      ${dataWhereClause}
+      ${whereClause}
       ORDER BY created_at DESC
-      LIMIT $${String(paramIdx)}
+      LIMIT $${String(paramIdx)} OFFSET $${String(paramIdx + 1)}
     `;
 
-    values.push(limitNum + 1);
-
     const vmResult = await db.query<VirtualModelRow>(sql, values);
-
-    const hasMore = vmResult.rows.length > limitNum;
-    const dataRows = hasMore ? vmResult.rows.slice(0, limitNum) : vmResult.rows;
+    const dataRows = vmResult.rows;
+    const hasMore = offsetNum + dataRows.length < total;
 
     if (dataRows.length === 0) {
-      res.json({ object: 'list', url: '/api/virtual-models', data: [], total, has_more: false });
+      res.json({ object: 'list', url: '/admin/virtual-models', data: [], total, has_more: false });
       return;
     }
 
@@ -264,7 +255,7 @@ router.get('/', async (req: Request, res: Response) => {
     );
 
     logger.debug({ count: finalData.length, total, has_more: hasMore }, 'Virtual models listed');
-    res.json({ object: 'list', url: '/api/virtual-models', data: finalData, total, has_more: hasMore });
+    res.json({ object: 'list', url: '/admin/virtual-models', data: finalData, total, has_more: hasMore });
   } catch (error) {
     handleAdminError(error, res);
   }
