@@ -64,12 +64,17 @@ export interface McpGatewayContext {
    * 对应 request-logs 侧的 audit 字段，但仅有单次 JSON-RPC 交换
    */
   audit: {
-    /** 请求参数（来自 JSON-RPC request.params） */
+    /** 旧字段（向后兼容）：请求参数 */
     params?: Record<string, unknown> | undefined;
-    /** 成功响应内容（provider 返回的原始 result） */
+    /** 旧字段（向后兼容）：成功响应内容 */
     result?: Record<string, unknown> | undefined;
-    /** 错误信息（调用失败时填充） */
+    /** 旧字段（向后兼容）：错误信息 */
     error?: { message: string; [key: string]: unknown } | undefined;
+    /** 新字段：四段式生命周期跟踪（模拟 HTTP 交换结构） */
+    userRequest?: { body?: unknown; headers?: Record<string, unknown> } | undefined;
+    providerRequest?: { body?: unknown; headers?: Record<string, unknown> } | undefined;
+    providerResponse?: { body?: unknown; headers?: Record<string, unknown> } | undefined;
+    userResponse?: { body?: unknown; headers?: Record<string, unknown> } | undefined;
   };
 
   // --- 错误信息（冗余至窄表，便于列表过滤）---
