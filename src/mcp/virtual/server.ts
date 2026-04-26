@@ -59,7 +59,7 @@ export async function handleMcpSseConnect(req: Request, res: Response, virtualMc
   }
 
   // eslint-disable-next-line @typescript-eslint/no-deprecated
-  const transport = new SSEServerTransport('/mcp/messages', res);
+  const transport = new SSEServerTransport('/mcp/sse', res);
   // transport provides its own generated session ID
   const sessionId = transport.sessionId;
 
