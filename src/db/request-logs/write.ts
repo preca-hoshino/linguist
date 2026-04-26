@@ -18,7 +18,7 @@ const logger = createLogger('RequestLog', logColors.bold + logColors.blue);
  */
 export async function markProcessing(ctx: RoutedModelHttpContext): Promise<void> {
   try {
-    // 写入基础热数据
+    // 写入基础热数据（含 ip 列，app_name 在 markCompleted/markError 时回填）
     await db.query(
       `INSERT INTO request_logs
          (id, status, app_id, ip, is_stream, request_model, routed_model, provider_kind, provider_id, user_format)
@@ -93,7 +93,7 @@ export async function markCompleted(ctx: ModelHttpContext): Promise<void> {
         ? timing.providerEnd - timing.providerStart
         : null;
 
-    // 更新主表热数据（同步写入 token 统计列 + 时序列，避免聚合查询 JOIN details 表）
+    // 更新主表热数据（同步写入 token 统计列 + 时序列 + app_name，避免聚合查询 JOIN details 表）
     await db.query(
       `UPDATE request_logs
        SET status = 'completed',
@@ -109,7 +109,8 @@ export async function markCompleted(ctx: ModelHttpContext): Promise<void> {
            reasoning_tokens = $11,
            duration_ms = $12,
            ttft_ms = $13,
-           provider_duration_ms = $14
+           provider_duration_ms = $14,
+           app_name = $15
        WHERE id = $1`,
       [
         ctx.id,
@@ -126,6 +127,7 @@ export async function markCompleted(ctx: ModelHttpContext): Promise<void> {
         durationMs,
         ttftMs,
         providerDurationMs,
+        ctx.appName ?? null,
       ],
     );
 
@@ -191,7 +193,8 @@ export async function markError(ctx: ModelHttpContext, err: unknown): Promise<vo
            error_code = $6,
            error_type = $7,
            is_stream = COALESCE($8, is_stream),
-           duration_ms = COALESCE($9, duration_ms)
+           duration_ms = COALESCE($9, duration_ms),
+           app_name = COALESCE($10, app_name)
        WHERE id = $1`,
       [
         ctx.id,
@@ -203,6 +206,7 @@ export async function markError(ctx: ModelHttpContext, err: unknown): Promise<vo
         errorType,
         ctx.stream ?? null,
         errDurationMs,
+        ctx.appName ?? null,
       ],
     );
 
@@ -221,8 +225,8 @@ export async function markError(ctx: ModelHttpContext, err: unknown): Promise<vo
            (id, status, app_id, ip, is_stream, request_model,
             routed_model, provider_kind, provider_id,
             error_message, error_code, error_type,
-            user_format, duration_ms)
-         VALUES ($1, 'error', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+            user_format, duration_ms, app_name)
+         VALUES ($1, 'error', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
         [
           ctx.id,
           ctx.appId ?? null,
@@ -237,6 +241,7 @@ export async function markError(ctx: ModelHttpContext, err: unknown): Promise<vo
           errorType,
           ctx.userFormat,
           errDurationMs,
+          ctx.appName ?? null,
         ],
       );
 
