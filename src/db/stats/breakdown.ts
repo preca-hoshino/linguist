@@ -49,11 +49,10 @@ function mapBreakdownRow(row: BreakdownRow, providerNameOverride?: string | null
 /**
  * provider_model 分组
  *
- * 性能优化：
- * - total_tokens / avg_completion_tokens 直接读主表列，去掉 token 的 JSONB 提取
- * - provider_name 改用 LEFT JOIN 代替相关子查询（消灭 N+1）
- * - provider_model_id 改用 LEFT JOIN 代替相关子查询（消灭 N+1）
- * - timing 延迟计算仍需 JOIN details 表，保留
+ * 性能优化（全热表，零冷表 JOIN）：
+ * - 所有聚合列（token、延迟、cost）直接读热表独立列
+ * - provider_name / provider_model_id 仍需 JOIN model_providers（元数据表，极小，常驻内存）
+ * - 不再 JOIN request_log_details 冷表
  */
 async function breakdownByProviderModel(params: StatsQueryParams): Promise<StatsBreakdown> {
   const timeFilter = buildTimeFilter(params, 1);
@@ -62,9 +61,9 @@ async function breakdownByProviderModel(params: StatsQueryParams): Promise<Stats
   const rlTimeClause = timeFilter.clause.replaceAll(/\bcreated_at\b/g, 'rl.created_at');
   const rlValues = [...timeFilter.values, ...dimFilter.values];
 
-  const latExpr = latencyExpr('d');
-  const ttftEx = ttftExpr('d');
-  const itlEx = itlExpr('d', 'd');
+  const latExpr = latencyExpr('rl');
+  const ttftEx = ttftExpr('rl');
+  const itlEx = itlExpr('rl', 'rl');
 
   const sql = `
     SELECT
@@ -84,7 +83,6 @@ async function breakdownByProviderModel(params: StatsQueryParams): Promise<Stats
       AVG(rl.completion_tokens)::float AS avg_completion_tokens,
       COALESCE(SUM(rl.calculated_cost), 0.0)::float AS total_cost
     FROM request_logs rl
-    LEFT JOIN request_log_details d ON d.id = rl.id
     LEFT JOIN model_providers mp ON mp.id = rl.provider_id
     LEFT JOIN model_provider_models mpm
       ON mpm.provider_id = rl.provider_id AND mpm.name = rl.routed_model
@@ -105,7 +103,9 @@ async function breakdownByProviderModel(params: StatsQueryParams): Promise<Stats
 /**
  * app 分组
  *
- * 性能优化：total_tokens 直接读主表列，仅 appName/appId 标识字段仍需 JOIN details
+ * 性能优化（全热表，零冷表 JOIN）：
+ * - app_name / app_id 直接读热表列（migration 12 已提升），不再从 JSONB 提取
+ * - 延迟 / token 全部读热表列
  */
 async function breakdownByApp(params: StatsQueryParams): Promise<StatsBreakdown> {
   const timeFilter = buildTimeFilter(params, 1);
@@ -113,13 +113,13 @@ async function breakdownByApp(params: StatsQueryParams): Promise<StatsBreakdown>
   const rlTimeClause = timeFilter.clause.replaceAll(/\bcreated_at\b/g, 'r.created_at');
   const allValues = [...timeFilter.values, ...dimFilter.values];
 
-  const latExpr = latencyExpr('d');
-  const ttftEx = ttftExpr('d');
-  const itlEx = itlExpr('d', 'd');
+  const latExpr = latencyExpr('r');
+  const ttftEx = ttftExpr('r');
+  const itlEx = itlExpr('r', 'r');
 
   const sql = `
     SELECT
-      COALESCE(d.gateway_context->>'appName', d.gateway_context->>'appId', 'unknown') AS name,
+      COALESCE(r.app_name, r.app_id, 'unknown') AS name,
       NULL::text AS provider_name,
       COUNT(*)::int AS request_count,
       COALESCE(SUM(r.total_tokens), 0)::bigint AS total_tokens,
@@ -133,10 +133,9 @@ async function breakdownByApp(params: StatsQueryParams): Promise<StatsBreakdown>
       AVG(r.completion_tokens)::float AS avg_completion_tokens,
       COALESCE(SUM(r.calculated_cost), 0.0)::float AS total_cost
     FROM request_logs r
-    LEFT JOIN request_log_details d ON d.id = r.id
     WHERE ${rlTimeClause}
     ${dimFilter.clause}
-    GROUP BY d.gateway_context->>'appName', d.gateway_context->>'appId'
+    GROUP BY r.app_name, r.app_id
     ORDER BY request_count DESC
     LIMIT 50
   `;
@@ -151,9 +150,8 @@ async function breakdownByApp(params: StatsQueryParams): Promise<StatsBreakdown>
 /**
  * provider 分组
  *
- * 性能优化：
- * - total_tokens 直接读主表列
- * - provider_name 改用 LEFT JOIN 代替相关子查询
+ * 性能优化（全热表，零冷表 JOIN）：
+ * - 所有聚合列直接读热表，仅 provider_name 需 JOIN 元数据表
  */
 async function breakdownByProvider(params: StatsQueryParams): Promise<StatsBreakdown> {
   const timeFilter = buildTimeFilter(params, 1);
@@ -161,9 +159,9 @@ async function breakdownByProvider(params: StatsQueryParams): Promise<StatsBreak
   const rlTimeClause = timeFilter.clause.replaceAll(/\bcreated_at\b/g, 'r.created_at');
   const allValues = [...timeFilter.values, ...dimFilter.values];
 
-  const latExpr = latencyExpr('d');
-  const ttftEx = ttftExpr('d');
-  const itlEx = itlExpr('d', 'd');
+  const latExpr = latencyExpr('r');
+  const ttftEx = ttftExpr('r');
+  const itlEx = itlExpr('r', 'r');
 
   const sql = `
     SELECT
@@ -181,7 +179,6 @@ async function breakdownByProvider(params: StatsQueryParams): Promise<StatsBreak
       AVG(r.completion_tokens)::float AS avg_completion_tokens,
       COALESCE(SUM(r.calculated_cost), 0.0)::float AS total_cost
     FROM request_logs r
-    LEFT JOIN request_log_details d ON d.id = r.id
     LEFT JOIN model_providers mp ON mp.id = r.provider_id
     WHERE ${rlTimeClause}
     ${dimFilter.clause}
@@ -200,7 +197,9 @@ async function breakdownByProvider(params: StatsQueryParams): Promise<StatsBreak
 /**
  * 通用分组：virtual_model, error_type, user_format
  *
- * 性能优化：total_tokens / avg_completion_tokens 改为直接读主表列
+ * 性能优化（全热表，零冷表 JOIN）：
+ * - user_format 直接读热表列（migration 09 已提升），修复原来读 JSONB 的错误
+ * - 所有延迟 / token 指标全部读热表列
  */
 async function breakdownGeneric(
   params: StatsQueryParams,
@@ -211,17 +210,17 @@ async function breakdownGeneric(
   const rlTimeClause = timeFilter.clause.replaceAll(/\bcreated_at\b/g, 'r.created_at');
   const allValues = [...timeFilter.values, ...dimFilter.values];
 
-  // user_format 现在来自冷表 d.gateway_context；其他两列在热表 r 上
+  // 全部读热表列（user_format migration 09 已提升，修复原来错误读 JSONB 的问题）
   const columnMap: Record<typeof groupBy, string> = {
     virtual_model: 'r.request_model',
     error_type: 'r.error_type',
-    user_format: "d.gateway_context->>'userFormat'",
+    user_format: 'r.user_format',
   };
   const col = columnMap[groupBy];
 
-  const latExpr = latencyExpr('d');
-  const ttftEx = ttftExpr('d');
-  const itlEx = itlExpr('d', 'd');
+  const latExpr = latencyExpr('r');
+  const ttftEx = ttftExpr('r');
+  const itlEx = itlExpr('r', 'r');
 
   const sql = `
     SELECT
@@ -239,7 +238,6 @@ async function breakdownGeneric(
       AVG(r.completion_tokens)::float AS avg_completion_tokens,
       COALESCE(SUM(r.calculated_cost), 0.0)::float AS total_cost
     FROM request_logs r
-    LEFT JOIN request_log_details d ON d.id = r.id
     WHERE ${rlTimeClause}
     ${dimFilter.clause}
     GROUP BY ${col}

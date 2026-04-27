@@ -10,11 +10,10 @@ const logger = createLogger('Stats', logColors.bold + logColors.blue);
 /**
  * 获取概览统计数据
  *
- * 性能优化策略：
- * - stats_base CTE 直接读取 request_logs 主表的 token 统计列（prompt_tokens 等），
- *   无需 JOIN request_log_details，消除双分区扫描 + JSONB 解析开销。
- * - latency_sample 仍需 JOIN details 表（timing JSON），但限制 1000 条抽样，
- *   避免对全量数据执行 PERCENTILE_CONT 计算。
+ * 性能优化策略（全热表，零冷表 JOIN）：
+ * - stats_base / latency_sample 均直接读取 request_logs 主表的独立列，
+ *   无需 JOIN request_log_details，完全消除双分区扫描 + JSONB 解析开销。
+ * - latency_sample 限制 1000 条抽样，避免对全量数据执行 PERCENTILE_CONT 计算。
  */
 export async function getStatsOverview(params: StatsQueryParams): Promise<StatsOverview> {
   const minutes = getWindowMinutes(params);
@@ -44,10 +43,9 @@ export async function getStatsOverview(params: StatsQueryParams): Promise<StatsO
       ${dimFilter.clause}
     ),
     latency_sample AS (
-      -- 延迟百分位计算：仅取最近 1000 条，避免全量 JSONB 解析
-      SELECT d.timing, r.completion_tokens
+      -- 延迟百分位计算：直接读热表列，限 1000 条抽样
+      SELECT r.duration_ms, r.ttft_ms, r.completion_tokens, r.provider_duration_ms
       FROM request_logs r
-      JOIN request_log_details d ON r.id = d.id
       WHERE ${timeClauseAliased}
       ${dimFilter.clause}
       ORDER BY r.created_at DESC
@@ -55,38 +53,20 @@ export async function getStatsOverview(params: StatsQueryParams): Promise<StatsO
     ),
     latency_stats AS (
       SELECT
-        AVG(
-          CASE WHEN timing->>'end' IS NOT NULL AND timing->>'start' IS NOT NULL
-          THEN (timing->>'end')::float - (timing->>'start')::float END
-        )::float AS avg_latency_ms,
+        AVG(NULLIF(duration_ms, 0))::float AS avg_latency_ms,
         PERCENTILE_CONT(0.95) WITHIN GROUP (
-          ORDER BY CASE WHEN timing->>'end' IS NOT NULL AND timing->>'start' IS NOT NULL
-          THEN (timing->>'end')::float - (timing->>'start')::float END
+          ORDER BY NULLIF(duration_ms, 0)
         )::float AS p95_latency_ms,
+        AVG(NULLIF(provider_duration_ms, 0))::float AS avg_provider_latency_ms,
+        -- gateway overhead = duration - provider_duration
         AVG(
-          CASE WHEN timing->>'providerEnd' IS NOT NULL AND timing->>'providerStart' IS NOT NULL
-          THEN (timing->>'providerEnd')::float - (timing->>'providerStart')::float
-          END
-        )::float AS avg_provider_latency_ms,
-        AVG(
-          CASE
-            WHEN timing->>'start' IS NOT NULL
-              AND timing->>'providerStart' IS NOT NULL
-              AND timing->>'providerEnd' IS NOT NULL
-              AND timing->>'end' IS NOT NULL
-            THEN (
-              ((timing->>'providerStart')::float - (timing->>'start')::float)
-              + ((timing->>'end')::float - (timing->>'providerEnd')::float)
-            )
-          END
+          CASE WHEN duration_ms IS NOT NULL AND provider_duration_ms IS NOT NULL
+          THEN duration_ms - provider_duration_ms END
         )::float AS gateway_overhead_ms,
+        AVG(NULLIF(ttft_ms, 0))::float AS ttft_avg_ms,
         AVG(
-          CASE WHEN timing->>'ttft' IS NOT NULL AND timing->>'start' IS NOT NULL
-          THEN (timing->>'ttft')::float - (timing->>'start')::float END
-        )::float AS ttft_avg_ms,
-        AVG(
-          CASE WHEN timing->>'end' IS NOT NULL AND timing->>'ttft' IS NOT NULL AND completion_tokens IS NOT NULL
-          THEN ((timing->>'end')::float - (timing->>'ttft')::float) / NULLIF(completion_tokens, 0) END
+          CASE WHEN duration_ms IS NOT NULL AND ttft_ms IS NOT NULL AND completion_tokens IS NOT NULL AND completion_tokens > 0
+          THEN (duration_ms - ttft_ms)::float / completion_tokens END
         )::float AS itl_avg_ms
       FROM latency_sample
     )

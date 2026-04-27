@@ -48,6 +48,8 @@ export interface RequestLogListItem {
   duration_ms: number | null;
   /** 首 Token 延迟（热表列） */
   ttft_ms: number | null;
+  /** 提供商端耗时（热表列，migration 13 新增） */
+  provider_duration_ms: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -104,6 +106,6 @@ export const LIST_COLUMNS: string = `
   r.error_type, r.error_code, r.error_message,
   r.calculated_cost,
   r.prompt_tokens, r.completion_tokens, r.total_tokens, r.cached_tokens, r.reasoning_tokens,
-  r.duration_ms, r.ttft_ms,
+  r.duration_ms, r.ttft_ms, r.provider_duration_ms,
   r.created_at, r.updated_at
 `.trim();
