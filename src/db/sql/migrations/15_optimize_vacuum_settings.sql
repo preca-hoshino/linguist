@@ -7,10 +7,20 @@
 
 BEGIN;
 
--- 如果有按月分区的表，这个设置会自动应用到所有现存及新创建的分区（前提是 request_logs 是主分区表名）
-ALTER TABLE request_logs SET (
-  autovacuum_vacuum_scale_factor = 0.01,
-  autovacuum_analyze_scale_factor = 0.01
-);
+-- PostgreSQL 限制不能直接在 partitioned table 上设置 autovacuum
+-- 我们通过 DO 块遍历所有现存的分区子表并为其分别设置。
+-- （对于未来的新分区，如果对极致性能有要求，可以在按月建分区的脚本里带上这个参数）
+DO $$
+DECLARE
+    partition_name text;
+BEGIN
+    FOR partition_name IN
+        SELECT inhrelid::regclass::text
+        FROM pg_inherits
+        WHERE inhparent = 'request_logs'::regclass
+    LOOP
+        EXECUTE format('ALTER TABLE %I SET (autovacuum_vacuum_scale_factor = 0.01, autovacuum_analyze_scale_factor = 0.01);', partition_name);
+    END LOOP;
+END $$;
 
 COMMIT;
