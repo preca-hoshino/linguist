@@ -5,30 +5,37 @@ import type { StatsDimension, StatsInterval, StatsQueryParams, StatsRange } from
 // ==================== SQL 表达式构建器 ====================
 
 /**
- * 总延迟 SQL 表达式（从 timing JSON 计算，单位毫秒）
- * @param alias 可选表别名（如 'rl'），用于联表查询
+ * 总延迟 SQL 表达式（直接读热表列 duration_ms，无需 JOIN 冷表）
+ * @param alias 行表别名（如 'r'、'rl'），为空则无别名
  */
 export function latencyExpr(alias = ''): string {
-  const t = alias ? `${alias}.timing` : 'timing';
-  return `CASE WHEN ${t}->>'end' IS NOT NULL AND ${t}->>'start' IS NOT NULL
-    THEN (${t}->>'end')::float - (${t}->>'start')::float END`;
+  const col = alias ? `${alias}.duration_ms` : 'duration_ms';
+  return `NULLIF(${col}, 0)`;
 }
 
+/**
+ * 首 Token 延迟 SQL 表达式（直接读热表列 ttft_ms，无需 JOIN 冷表）
+ * @param alias 行表别名
+ */
 export function ttftExpr(alias = ''): string {
-  const t = alias ? `${alias}.timing` : 'timing';
-  return `CASE WHEN ${t}->>'ttft' IS NOT NULL AND ${t}->>'start' IS NOT NULL
-    THEN (${t}->>'ttft')::float - (${t}->>'start')::float END`;
+  const col = alias ? `${alias}.ttft_ms` : 'ttft_ms';
+  return `NULLIF(${col}, 0)`;
 }
 
-export function itlExpr(aliasTiming = '', aliasDetails = ''): string {
-  const t = aliasTiming ? `${aliasTiming}.timing` : 'timing';
-  // completion_tokens 已迁移至 request_log_details.gateway_context JSON，
-  // 不再存在于 request_logs 表的直接字段上
-  const c = aliasDetails
-    ? `(${aliasDetails}.gateway_context->'response'->'usage'->>'completion_tokens')::bigint`
-    : `(gateway_context->'response'->'usage'->>'completion_tokens')::bigint`;
-  return `CASE WHEN ${t}->>'end' IS NOT NULL AND ${t}->>'ttft' IS NOT NULL AND ${c} IS NOT NULL
-    THEN ((${t}->>'end')::float - (${t}->>'ttft')::float) / NULLIF(${c}, 0) END`;
+/**
+ * Inter-Token 延迟 SQL 表达式（全热表列，无需 JOIN 冷表）
+ *
+ * ITL = (duration_ms - ttft_ms) / completion_tokens
+ *
+ * @param aliasTiming    行表别名（用于 duration_ms / ttft_ms）
+ * @param aliasTokens    行表别名（用于 completion_tokens），通常与 aliasTiming 相同
+ */
+export function itlExpr(aliasTiming = '', aliasTokens = ''): string {
+  const dur = aliasTiming ? `${aliasTiming}.duration_ms` : 'duration_ms';
+  const ttft = aliasTiming ? `${aliasTiming}.ttft_ms` : 'ttft_ms';
+  const ct = aliasTokens ? `${aliasTokens}.completion_tokens` : 'completion_tokens';
+  return `CASE WHEN ${dur} IS NOT NULL AND ${ttft} IS NOT NULL AND ${ct} IS NOT NULL AND ${ct} > 0
+    THEN (${dur} - ${ttft})::float / ${ct} END`;
 }
 
 // ==================== 数值计算工具 ====================
