@@ -182,6 +182,10 @@ export async function markError(ctx: ModelHttpContext, err: unknown): Promise<vo
   try {
     const errTiming = ctx.timing;
     const errDurationMs = errTiming.end !== undefined ? errTiming.end - errTiming.start : null;
+    const errProviderDurationMs =
+      errTiming.providerEnd !== undefined && errTiming.providerStart !== undefined
+        ? errTiming.providerEnd - errTiming.providerStart
+        : null;
 
     const updateRes = await db.query(
       `UPDATE request_logs
@@ -194,7 +198,8 @@ export async function markError(ctx: ModelHttpContext, err: unknown): Promise<vo
            error_type = $7,
            is_stream = COALESCE($8, is_stream),
            duration_ms = COALESCE($9, duration_ms),
-           app_name = COALESCE($10, app_name)
+           provider_duration_ms = COALESCE($10, provider_duration_ms),
+           app_name = COALESCE($11, app_name)
        WHERE id = $1`,
       [
         ctx.id,
@@ -206,6 +211,7 @@ export async function markError(ctx: ModelHttpContext, err: unknown): Promise<vo
         errorType,
         ctx.stream ?? null,
         errDurationMs,
+        errProviderDurationMs,
         ctx.appName ?? null,
       ],
     );
@@ -225,8 +231,8 @@ export async function markError(ctx: ModelHttpContext, err: unknown): Promise<vo
            (id, status, app_id, ip, is_stream, request_model,
             routed_model, provider_kind, provider_id,
             error_message, error_code, error_type,
-            user_format, duration_ms, app_name)
-         VALUES ($1, 'error', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+            user_format, duration_ms, provider_duration_ms, app_name)
+         VALUES ($1, 'error', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
         [
           ctx.id,
           ctx.appId ?? null,
@@ -241,6 +247,7 @@ export async function markError(ctx: ModelHttpContext, err: unknown): Promise<vo
           errorType,
           ctx.userFormat,
           errDurationMs,
+          errProviderDurationMs,
           ctx.appName ?? null,
         ],
       );
