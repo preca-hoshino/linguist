@@ -1,18 +1,16 @@
 // src/db/stats/today.ts — 今日实时统计查询
 
 import { db } from '@/db/client';
-import { buildDimensionFilterAliased, latencyExpr, roundOrNull, safeRate } from './helpers';
+import { buildDimensionFilterAliased, roundOrNull, safeRate } from './helpers';
 import type { StatsDimension, StatsToday } from './types';
 
 /**
  * 获取今日实时统计（大数字卡片）
  * 同一次查询返回「今日累计」和「近期实时值」，前端轮询此端点刷新卡片。
  *
- * 性能优化策略：
- * - today / recent_1m / recent_5m CTE 中的 token 汇总直接读主表统计列（prompt_tokens 等），
- *   无需 JOIN request_log_details，大幅降低 I/O 和 JSONB 解析开销。
- * - today_latency_sample 仍需 JOIN details 表获取 timing JSON，但限 1000 条抽样。
- * - recent_5m 也需 JOIN details 以计算延迟均值（timing），其余字段走主表列。
+ * 性能优化策略（全热表，零冷表 JOIN）：
+ * - 所有 CTE 均直接读取主表 token 统计列和延迟列，无需 JOIN request_log_details。
+ * - today_latency_sample 限 1000 条抽样，避免对全量数据计算百分位。
  */
 export async function getStatsToday(dimension: StatsDimension, id?: string): Promise<StatsToday> {
   const dimFilter = buildDimensionFilterAliased(dimension, id, 1, 'r');
@@ -31,27 +29,20 @@ export async function getStatsToday(dimension: StatsDimension, id?: string): Pro
       ${dimFilter.clause}
     ),
     today_latency_sample AS (
-      -- 延迟百分位：仅需 timing JSON，限 1000 条抽样
-      SELECT d.timing, r.completion_tokens
+      -- 延迟百分位：直接读热表列，限 1000 条抽样
+      SELECT r.duration_ms, r.ttft_ms, r.completion_tokens
       FROM request_logs r
-      JOIN request_log_details d ON r.id = d.id
       WHERE r.created_at >= date_trunc('day', NOW())
       ${dimFilter.clause}
       ORDER BY r.created_at DESC LIMIT 1000
     ),
     today_latency AS (
       SELECT 
+        AVG(NULLIF(s.duration_ms, 0))::float AS today_avg_latency,
+        AVG(NULLIF(s.ttft_ms, 0))::float AS today_avg_ttft,
         AVG(
-          CASE WHEN s.timing->>'end' IS NOT NULL AND s.timing->>'start' IS NOT NULL
-          THEN (s.timing->>'end')::float - (s.timing->>'start')::float END
-        )::float AS today_avg_latency,
-        AVG(
-          CASE WHEN s.timing->>'ttft' IS NOT NULL AND s.timing->>'start' IS NOT NULL
-          THEN (s.timing->>'ttft')::float - (s.timing->>'start')::float END
-        )::float AS today_avg_ttft,
-        AVG(
-          CASE WHEN s.timing->>'end' IS NOT NULL AND s.timing->>'ttft' IS NOT NULL AND s.completion_tokens IS NOT NULL
-          THEN ((s.timing->>'end')::float - (s.timing->>'ttft')::float) / NULLIF(s.completion_tokens, 0) END
+          CASE WHEN s.duration_ms IS NOT NULL AND s.ttft_ms IS NOT NULL AND s.completion_tokens IS NOT NULL AND s.completion_tokens > 0
+          THEN (s.duration_ms - s.ttft_ms)::float / s.completion_tokens END
         )::float AS today_avg_itl
       FROM today_latency_sample s
     ),
@@ -65,16 +56,15 @@ export async function getStatsToday(dimension: StatsDimension, id?: string): Pro
       ${dimFilter.clause}
     ),
     recent_5m AS (
-      -- 近 5 分钟：token/cached/prompt 直接读主表列，JOIN details 仅用于计算延迟
+      -- 近 5 分钟：全部读热表列，包括延迟，无需 JOIN 冷表
       SELECT
-        AVG(${latencyExpr('d')})::float AS recent_avg_latency,
+        AVG(NULLIF(r.duration_ms, 0))::float AS recent_avg_latency,
         COUNT(*) FILTER (WHERE r.status = 'error')::int AS errors,
         COUNT(*)::int AS total,
         COALESCE(SUM(r.cached_tokens), 0)::bigint AS cached,
         COALESCE(SUM(r.prompt_tokens), 0)::bigint AS prompt,
         COALESCE(SUM(r.total_tokens), 0)::bigint AS tokens
       FROM request_logs r
-      LEFT JOIN request_log_details d ON r.id = d.id
       WHERE r.created_at >= NOW() - INTERVAL '5 minutes'
       ${dimFilter.clause}
     )
