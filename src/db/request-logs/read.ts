@@ -85,11 +85,25 @@ export async function queryRequestLogs(query: RequestLogQuery = {}): Promise<{
   const limit = Math.min(Math.max(query.limit ?? 50, 1), 200);
   const offset = Math.max(query.offset ?? 0, 0);
 
-  // 先查 total（窄表 COUNT，无 JOIN）
-  const countResult = await db.query<{ total: string }>(`SELECT COUNT(*) AS total FROM request_logs r ${whereClause}`, [
-    ...values,
-  ]);
-  const total = Number.parseInt(countResult.rows[0]?.total ?? '0', 10);
+  let total: number;
+  if (conditions.length === 0) {
+    // 极速估算：大表无条件全量 COUNT(*) 极慢，改用系统表 reltuples 估算
+    // 兼容分区表：统计主表及其底层分区，排除 request_log_details
+    const estResult = await db.query<{ total: string }>(`
+      SELECT COALESCE(SUM(reltuples)::bigint, 0) AS total 
+      FROM pg_class 
+      WHERE relname LIKE 'request_logs%' 
+        AND relname NOT LIKE '%details%'
+    `);
+    total = Number.parseInt(estResult.rows[0]?.total ?? '0', 10);
+  } else {
+    // 带过滤条件时，退化为精确查 total（窄表 COUNT）
+    const countResult = await db.query<{ total: string }>(
+      `SELECT COUNT(*) AS total FROM request_logs r ${whereClause}`,
+      [...values],
+    );
+    total = Number.parseInt(countResult.rows[0]?.total ?? '0', 10);
+  }
 
   // 分页查询（仅窄表，严禁 JOIN request_log_details）
   values.push(limit, offset);
