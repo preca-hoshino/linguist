@@ -7,6 +7,7 @@ dns.setDefaultResultOrder('ipv4first');
 import 'dotenv/config';
 import { configManager } from './config';
 import { closePool, countUsers, createUser, runMigrations } from './db';
+import { startStatsRefreshTask } from './db/stats/index';
 import { initMcpGateway, shutdownMcpGateway } from './mcp';
 import { app } from './server';
 import { setupWebSocket } from './socket';
@@ -77,6 +78,9 @@ async function start(): Promise<void> {
     setupWebSocket(server);
     initMcpGateway();
 
+    // 启动后台统计物化视图刷新任务
+    const refreshTask = startStatsRefreshTask();
+
     // 彻底取消网关层面的内置 HTTP 超时限制
     // 完全由提供商客户端内部的 AbortSignal（基于用户配置的 timeout_ms）来控制请求生命周期
     server.requestTimeout = 0;
@@ -100,6 +104,8 @@ async function start(): Promise<void> {
       await configManager.stopListening();
       logger.info('Config listener stopped');
       rateLimiter.stop();
+      clearInterval(refreshTask);
+      logger.info('Stats refresh task stopped');
       await shutdownMcpGateway();
       await closePool();
       logger.info('Database pool closed. Goodbye.');

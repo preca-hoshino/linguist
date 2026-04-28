@@ -22,7 +22,46 @@ export async function getStatsOverview(params: StatsQueryParams): Promise<StatsO
   const dimFilter = buildDimensionFilterAliased(params.dimension, params.id, timeFilter.nextIdx, 'r');
   const allValues = [...timeFilter.values, ...dimFilter.values];
 
-  const sql = `
+  let sql: string;
+
+  // 智能路由：如果跨度 >= 24小时，直接走物化视图，亿级数据耗时降至毫秒级
+  if (minutes >= 24 * 60) {
+    const mvTimeClause = timeFilter.clause.replaceAll('created_at', 'v.bucket_time');
+    const mvDimFilter = buildDimensionFilterAliased(params.dimension, params.id, timeFilter.nextIdx, 'v');
+    const mvValues = [...timeFilter.values, ...mvDimFilter.values];
+
+    // 物化视图不支持精确的 P95（需要保留原始分布），大跨度下直接返回 null
+    sql = `
+      SELECT
+        COALESCE(SUM(v.req_count), 0)::int AS total_requests,
+        COALESCE(SUM(v.sum_calculated_cost), 0.0)::float AS total_cost,
+        COALESCE(SUM(v.sum_prompt_tokens), 0)::bigint AS prompt_tokens,
+        COALESCE(SUM(v.sum_completion_tokens), 0)::bigint AS completion_tokens,
+        COALESCE(SUM(v.sum_total_tokens), 0)::bigint AS total_tokens,
+        COALESCE(SUM(v.sum_cached_tokens), 0)::bigint AS cached_tokens,
+        0::bigint AS reasoning_tokens, -- 预聚合暂未加入 reasoning_tokens
+        COALESCE(SUM(v.req_count) FILTER (WHERE v.status = 'error'), 0)::int AS error_count,
+        COALESCE(SUM(v.req_count) FILTER (WHERE v.error_type = 'rate_limit'), 0)::int AS rate_limit_error_count,
+        COALESCE(SUM(v.req_count) FILTER (WHERE v.error_type = 'timeout'), 0)::int AS timeout_error_count,
+        (SUM(v.sum_prompt_tokens) / NULLIF(SUM(v.req_count), 0))::float AS avg_input_tokens,
+        (SUM(v.sum_completion_tokens) / NULLIF(SUM(v.req_count), 0))::float AS avg_output_tokens,
+        (SUM(v.sum_duration_ms) / NULLIF(SUM(v.req_count), 0))::float AS avg_latency_ms,
+        NULL::float AS p95_latency_ms,
+        (SUM(v.sum_provider_duration_ms) / NULLIF(SUM(v.req_count), 0))::float AS avg_provider_latency_ms,
+        ((SUM(v.sum_duration_ms) - SUM(v.sum_provider_duration_ms)) / NULLIF(SUM(v.req_count), 0))::float AS gateway_overhead_ms,
+        (SUM(v.sum_ttft_ms) / NULLIF(SUM(v.req_count), 0))::float AS ttft_avg_ms,
+        ((SUM(v.sum_duration_ms) - SUM(v.sum_ttft_ms)) / NULLIF(SUM(v.sum_completion_tokens), 0))::float AS itl_avg_ms
+      FROM mv_stat_llm_hourly v
+      WHERE ${mvTimeClause}
+      ${mvDimFilter.clause}
+    `;
+
+    // 替换所有的值
+    allValues.length = 0;
+    allValues.push(...mvValues);
+  } else {
+    // 24小时内：维持热表 Index-Only Scan
+    sql = `
     WITH stats_base AS (
       -- 直接读取主表 token 列，单表扫描，无 JOIN，走覆盖索引
       SELECT
@@ -72,6 +111,7 @@ export async function getStatsOverview(params: StatsQueryParams): Promise<StatsO
     )
     SELECT * FROM stats_base CROSS JOIN latency_stats
   `;
+  }
 
   logger.debug({ params, sql: sql.trim().slice(0, 120) }, 'Querying stats overview');
 

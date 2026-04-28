@@ -7,3 +7,4 @@ export { getStatsTimeSeries } from './time-series';
 export { getStatsToday } from './today';
 export { getStatsTokens } from './tokens';
 export type { StatsBreakdownGroupBy, StatsDimension, StatsInterval, StatsRange } from './types';
+export { startStatsRefreshTask } from './refresh';
