@@ -1,50 +1,60 @@
-# Linguist — LLM Gateway 开发指南
+# Linguist — LLM Gateway 项目规范
 
-> **项目概述、快速启动、API 文档**：参见 [README.md](../README.md)
-> **开发流程与原子提交规范**：参见 [.agents/instructions.md](../.agents/instructions.md)
-> **各模块详细说明**：参见 `src/<module>/README.md`（每个二级目录均有）
+## 技术栈
+Node.js + Express 5 + TypeScript (CommonJS) + PostgreSQL (raw SQL) + Winston
 
----
+## 代码风格
+- 使用 `@/*` 绝对路径导入，禁止相对路径 `../../`
+- 所有 import 按层级分组：外部依赖 → 内部模块（config → db → middleware → model → types → utils）
+- 命名规范：文件名 kebab-case，函数 camelCase，类型/接口 PascalCase
+- 类型使用 `interface` 定义数据结构，`type` 定义联合/别名
 
-## 架构核心概念
+## 错误处理
+- **所有可预期的业务错误必须抛出 `GatewayError`**：`throw new GatewayError(statusCode, errorCode, message)`
+- `errorCode` 为机器可读标识符，必须从以下已定义集合中选择（禁止随意造新码）：
+  - **400**：`invalid_request`、`invalid_range`、`invalid_dimension`、`missing_id`、`invalid_interval`、`invalid_group_by`、`unknown_format`、`capability_not_supported`、`model_type_mismatch`、`stream_not_supported`、`invalid_model`、`bad_request`
+  - **401**：`unauthorized`、`invalid_api_key`
+  - **402**：`insufficient_balance`
+  - **403**：`forbidden`
+  - **404**：`not_found`、`model_not_found`
+  - **409**：`conflict`
+  - **500**：`internal_error`、`route_error`
+  - **503**：`no_backend_available`
+- 捕获未知错误时参数类型必须为 `unknown`，用 `instanceof GatewayError` 区分
+- 不要在中间件内部吞掉错误，统一在 endpoint handler 层用 `handleError()` 处理
 
-### GatewayContext 贯穿全生命周期
+## 日志规范
+- 使用 Winston `createLogger('ServiceName', color)` 创建彩色日志
+- 必须使用结构化日志：`logger.info({ requestId, ip }, '描述信息')`
+- 日志级别：debug（调试细节）、info（关键流程节点）、warn（GatewayError）、error（未预期错误）
+- 错误日志传入 `{ err }` 以自动提取 stack trace
 
-`GatewayContext` 是整个请求处理流程的唯一载体对象，所有阶段均通过读写 `ctx` 的字段完成工作：
+## 数据库
+- 使用 `db.query<T>(sql, params[])` 进行参数化查询，禁止拼接 SQL 字符串
+- 查询用户表必须使用安全列名常量（`SAFE_COLUMNS`），避免 `SELECT *` 泄露敏感字段
+- 事务使用 `withTransaction()` 工具函数
+- 迁移文件放在 `src/db/migrations/`，必须幂等（IF NOT EXISTS / IF EXISTS）
 
+## 中间件与请求处理
+- 自定义中间件签名为 `async (ctx: ModelHttpContext) => void`，通过修改 ctx 传递数据
+- 使用 `applyMiddlewares(ctx, middlewares[])` 顺序执行中间件链
+- Admin 路由使用 JWT 鉴权，通过 `res.locals.userId` 传递用户身份
+- 用户 API 路由使用 API Key 鉴权
+
+## API 设计
+- 支持三种 API 格式：OpenAI 兼容、Anthropic Messages、Google Gemini
+- 每种格式有独立的 auth 提取、请求解析、响应构建模块
+- 响应通过 `handleError()` 统一生成格式特定的错误 JSON
+
+## 测试
+- 使用 Jest + ts-node，测试文件与源文件同目录（`*.test.ts`）
+- Mock 使用 `jest.mock('@/module', ...)` ，类型断言使用 `jest.fn<ReturnType, Args>()`
+- 集成测试直接 mock Express Response 对象
+
+## 构建与运行
+```bash
+npm run dev          # 开发模式（ts-node 热加载）
+npm run build        # 构建（tsc + tsc-alias + 复制迁移文件）
+npm run check        # 全量检查（format + lint + types + deps + test）
+npm run db           # 运行数据库迁移
 ```
-创建 ctx → 用户适配(填充 ctx.request) → 请求中间件(ctx)
-  → 路由(填充 ctx.route) → 提供商请求适配(ctx.request + ctx.route.model)
-  → 提供商调用 → 提供商响应适配(填充 ctx.response)
-  → 响应中间件(ctx) → 用户响应适配(从 ctx 组装) → 发送
-```
-
-### 双层适配器模式
-
-- **用户适配器** (`src/users/`)：转换客户端格式 ↔ 内部类型。按外部格式顶级分类（如 `openaicompat/`、`gemini/`、`anthropic/`），内部再分 `chat/` 和 `embedding/` 模块及错误格式化。
-- **API 格式路由** (`src/api/`)：每种用户 API 格式独立定义端点和 model 提取逻辑，调用 `processChatCompletion` 将处理委托给核心流程。
-- **提供商适配器** (`src/providers/`)：转换内部类型 ↔ 厂商 API 格式。按厂商顶级分类（如 `deepseek/`、`gemini/`、`volcengine/`），内部包含 `error-mapping.ts` 和对应能力的适配（如 `chat/` 的请求/响应/客户端）。
-
-### 内部统一类型 (`src/types/`)
-
-所有模块间通信使用统一类型：
-- `GatewayContext` — 请求生命周期载体
-- `InternalChatRequest` / `InternalChatResponse` — 聊天请求/响应（无 `model`、无 `id`）
-- `InternalEmbeddingRequest` / `InternalEmbeddingResponse` — 嵌入请求/响应
-
----
-
-## 编码约定
-
-- 适配器文件统一命名：`request.adapter.ts`、`response.adapter.ts`、`client.ts`、`index.ts`
-- 每个适配器目录必须有 `index.ts` 简化导入路径
-- 接口定义放在对应分类的 `interface.ts` 中（如 `providers/chat/interface.ts`）
-- 错误统一由 `handleError(err, res, userFormat)` 捕获，抛出 `GatewayError(statusCode, errorCode, message)`
-- 核心流程编排在 `src/app/`（拆分为 `process.ts`、`stream.ts`、`helpers.ts`），入口在 `src/index.ts`，HTTP 配置在 `src/server.ts`，API 格式路由在 `src/api/`
-- `InternalRequest` 不含 `model` 字段，提供商适配器从 `ctx.route.model` 取实际模型名
-- 用户响应适配器接收 `GatewayContext`，从中取 `ctx.id`、`ctx.timestamp`、`ctx.requestModel`、`ctx.response` 组装最终响应
-- Chat 支持流式（SSE）和非流式两种响应模式；Embedding 仅支持非流式
-- **不需考虑向后兼容性**：项目尚未上线，可以自由修改现有接口或重构代码，无需保留旧版本兼容代码
-- **管理 API 变更必须同步 `admin.http`**：每次新增、修改或删除 `src/admin/` 下的路由，都必须同步更新项目根目录的 `admin.http` 文件；`admin.http` 中仅保留已实现适配器的提供商示例，不包含用户侧 API
-- **修改完成必须进行逐步的全面代码检查**：每次代码修改完成后，先使用 `npm run check` 的具体子脚本（如 `npm run check:lint`、`npm run check:types` 等）逐项进行检查，并结合命令参数（如特定文件或限制输出行数）进行分批、逐步的修复，避免被海量报错淹没；在逐步修复完毕后，**最后必须再次执行一次整体的 `npm run check`** 来处理漏网之鱼，确保没有任何错误和警告，全部通过时任务才算真正完成。
-
