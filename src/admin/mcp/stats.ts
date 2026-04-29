@@ -3,7 +3,13 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import type { McpStatsDimension, McpStatsInterval, McpStatsQueryParams, McpStatsRange } from '@/db/mcp-logs';
-import { getMcpMethodBreakdown, getMcpStatsOverview, getMcpStatsTimeSeries } from '@/db/mcp-logs';
+import {
+  getMcpMethodBreakdown,
+  getMcpStatsErrors,
+  getMcpStatsOverview,
+  getMcpStatsTimeSeries,
+  getMcpStatsToday,
+} from '@/db/mcp-logs';
 import { GatewayError } from '@/utils';
 import { handleAdminError } from '../error';
 
@@ -90,6 +96,27 @@ router.get('/methods', async (req: Request, res: Response) => {
     const params = parseMcpStatsParams(req);
     const result = await getMcpMethodBreakdown(params);
     res.json({ object: 'list', data: result });
+  } catch (error) {
+    handleAdminError(error, res);
+  }
+});
+
+// ==================== GET /admin/mcp-stats/today ====================
+router.get('/today', async (_req: Request, res: Response) => {
+  try {
+    const result = await getMcpStatsToday();
+    res.json(result);
+  } catch (error) {
+    handleAdminError(error, res);
+  }
+});
+
+// ==================== GET /admin/mcp-stats/errors ====================
+router.get('/errors', async (req: Request, res: Response) => {
+  try {
+    const params = parseMcpStatsParams(req);
+    const result = await getMcpStatsErrors(params);
+    res.json(result);
   } catch (error) {
     handleAdminError(error, res);
   }
