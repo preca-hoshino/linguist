@@ -4,6 +4,7 @@ import type { Request, Response } from 'express';
 import { Router } from 'express';
 import type { McpStatsDimension, McpStatsInterval, McpStatsQueryParams, McpStatsRange } from '@/db/mcp-logs';
 import {
+  getMcpDistribution,
   getMcpMethodBreakdown,
   getMcpStatsErrors,
   getMcpStatsOverview,
@@ -117,6 +118,22 @@ router.get('/errors', async (req: Request, res: Response) => {
     const params = parseMcpStatsParams(req);
     const result = await getMcpStatsErrors(params);
     res.json(result);
+  } catch (error) {
+    handleAdminError(error, res);
+  }
+});
+
+// ==================== GET /admin/mcp-stats/distribution ====================
+router.get('/distribution', async (req: Request, res: Response) => {
+  try {
+    const params = parseMcpStatsParams(req);
+    const rawGroupBy = req.query.groupBy;
+    const groupBy = typeof rawGroupBy === 'string' ? rawGroupBy : '';
+    if (groupBy !== 'virtual_mcp' && groupBy !== 'mcp_provider') {
+      throw new GatewayError(400, 'invalid_group_by', "groupBy must be 'virtual_mcp' or 'mcp_provider'");
+    }
+    const result = await getMcpDistribution(params, groupBy);
+    res.json({ object: 'list', data: result });
   } catch (error) {
     handleAdminError(error, res);
   }

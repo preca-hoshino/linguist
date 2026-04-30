@@ -285,6 +285,76 @@ export async function getMcpMethodBreakdown(params: McpStatsQueryParams): Promis
   }));
 }
 
+// ── MCP 分布排行统计 ─────────────────────────────────────────────────────────
+
+export interface McpStatsDistributionItem {
+  id: string | null;
+  name: string;
+  count: number;
+  error_count: number;
+  avg_duration_ms: number | null;
+}
+
+export async function getMcpDistribution(
+  params: McpStatsQueryParams,
+  groupBy: 'virtual_mcp' | 'mcp_provider',
+): Promise<McpStatsDistributionItem[]> {
+  const timePart = buildTimeClause(params, 1);
+  const dimPart = buildDimClause(params, timePart.nextIdx);
+  const values = [...timePart.values, ...dimPart.values];
+
+  let sql = '';
+  if (groupBy === 'virtual_mcp') {
+    sql = `
+      SELECT
+        m.virtual_mcp_id AS id,
+        COALESCE(v.name, m.virtual_mcp_id::text, 'unknown') AS name,
+        COUNT(*)::int                                       AS count,
+        COUNT(*) FILTER (WHERE m.status = 'error')::int     AS error_count,
+        AVG(m.duration_ms)                                  AS avg_duration_ms
+      FROM mcp_logs m
+      LEFT JOIN virtual_mcps v ON v.id = m.virtual_mcp_id
+      WHERE ${timePart.clause}
+      ${dimPart.clause}
+      GROUP BY m.virtual_mcp_id, v.name
+      ORDER BY count DESC
+      LIMIT 10
+    `;
+  } else {
+    sql = `
+      SELECT
+        m.mcp_provider_id AS id,
+        COALESCE(p.name, m.mcp_provider_id::text, 'unknown') AS name,
+        COUNT(*)::int                                        AS count,
+        COUNT(*) FILTER (WHERE m.status = 'error')::int      AS error_count,
+        AVG(m.duration_ms)                                   AS avg_duration_ms
+      FROM mcp_logs m
+      LEFT JOIN mcp_providers p ON p.id = m.mcp_provider_id
+      WHERE ${timePart.clause}
+      ${dimPart.clause}
+      GROUP BY m.mcp_provider_id, p.name
+      ORDER BY count DESC
+      LIMIT 10
+    `;
+  }
+
+  const result = await db.query<{
+    id: string | null;
+    name: string;
+    count: number;
+    error_count: number;
+    avg_duration_ms: number | null;
+  }>(sql, values);
+
+  return result.rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    count: r.count,
+    error_count: r.error_count,
+    avg_duration_ms: r.avg_duration_ms === null ? null : Math.round(r.avg_duration_ms),
+  }));
+}
+
 // ── 今日统计（单 CTE 多目标扫描） ────────────────────────────────────────────────
 
 export interface McpStatsToday {

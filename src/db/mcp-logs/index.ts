@@ -12,6 +12,7 @@ export type {
   McpStatsRange,
   McpStatsTimeSeriesPoint,
   McpStatsToday,
+  McpStatsDistributionItem,
 } from './stats';
 export {
   getMcpMethodBreakdown,
@@ -19,6 +20,7 @@ export {
   getMcpStatsOverview,
   getMcpStatsTimeSeries,
   getMcpStatsToday,
+  getMcpDistribution,
 } from './stats';
 export type {
   McpLogCreateInput,
