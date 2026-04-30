@@ -46,11 +46,6 @@ function inferChatCapabilities(req: InternalChatRequest): string[] {
     caps.push('thinking');
   }
 
-  // 检查是否为流式请求
-  if (req.stream) {
-    caps.push('stream');
-  }
-
   return caps;
 }
 

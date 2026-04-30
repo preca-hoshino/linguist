@@ -103,7 +103,7 @@ describe('Router', () => {
       expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', ['vision', 'tools', 'thinking'], []);
     });
 
-    it('should infer stream capability and required parameters', () => {
+    it('should not infer stream as a capability (transport concern, not model capability)', () => {
       (configManager.getVirtualModelConfig as jest.Mock).mockReturnValue({
         modelType: 'chat',
         backends: [],
@@ -118,7 +118,8 @@ describe('Router', () => {
       };
       mockCtx.request = req as unknown as any;
       route(mockCtx);
-      expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', ['stream'], ['temperature', 'top_p']);
+      // stream should NOT be in required capabilities — it's a transport preference
+      expect(configManager.resolveAllBackends).toHaveBeenCalledWith('test-model', [], ['temperature', 'top_p']);
     });
 
     it('should not infer vision if message content is string or text parts', () => {
