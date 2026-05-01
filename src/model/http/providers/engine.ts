@@ -16,6 +16,7 @@ import { createCachedLoggerFactory, GatewayError, logColors, parseSSEStream } fr
 import { fetchHeadersToRecord } from './http-utils';
 import { getProviderChatAdapterSet, getProviderEmbeddingAdapterSet } from './index';
 import type { ProviderChatStreamResponseAdapter } from './types';
+import { cacheReasoningContent } from './deepseek/reasoning-cache';
 
 // ========== 动态 Provider Logger ==========
 
@@ -36,6 +37,32 @@ const getProviderLogger = createCachedLoggerFactory(
 function sanitizeProviderError(detail: string): string {
   const stripped = detail.replace(/^\w[\w\s]* API returned \d+:\s*/i, '');
   return stripped.length > 0 ? stripped : 'Provider request failed';
+}
+
+// ========== 推理内容缓存 ==========
+
+/**
+ * 若当前请求属于 DeepSeek 推理模型且开启了 reasoning_content_backfill，
+ * 从响应中提取 reasoning_content 按 assistant content 缓存供后续多轮对话自动回填。
+ */
+export function cacheReasoningFromResponse(ctx: RoutedModelHttpContext): void {
+  if (ctx.route.providerKind !== 'deepseek') {
+    return;
+  }
+  if (ctx.route.modelConfig?.reasoning_content_backfill !== true) {
+    return;
+  }
+  const response = ctx.response as InternalChatResponse | undefined;
+  if (!response?.choices) {
+    return;
+  }
+  for (const choice of response.choices) {
+    const content = choice.message.content;
+    const reasoning = choice.message.reasoning_content;
+    if (typeof content === 'string' && typeof reasoning === 'string') {
+      cacheReasoningContent(content, reasoning);
+    }
+  }
 }
 
 // ========== 参数剥离 ==========
@@ -149,6 +176,9 @@ export async function callProvider<TReq, TRes extends InternalResponse>(
 
   ctx.response = responseAdapter.fromProviderResponse(result.body);
   providerLogger.debug({ requestId: ctx.id }, '[adapt] provider response → internal format');
+
+  // DeepSeek 推理模型：缓存 reasoning_content 供后续多轮对话自动回填
+  cacheReasoningFromResponse(ctx);
 }
 
 async function dispatchProvider<TReq, TRes extends InternalResponse>(

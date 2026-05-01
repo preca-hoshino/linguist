@@ -3,7 +3,7 @@
 import type { Response } from 'express';
 import type { Middleware } from '@/middleware';
 import { applyMiddlewares } from '@/middleware';
-import { dispatchChatProviderStream } from '@/model/http/providers/engine';
+import { cacheReasoningFromResponse, dispatchChatProviderStream } from '@/model/http/providers/engine';
 import { assertRouted } from '@/model/http/router';
 import { getUserChatAdapter } from '@/model/http/users';
 import type {
@@ -87,6 +87,9 @@ export async function processStreamSend(
 
   // 将流式 chunks 合并为完整响应，写入审计字段
   ctx.response = mergeStreamChunks(providerChunks);
+
+  // DeepSeek 推理模型：缓存 reasoning_content 供后续多轮对话自动回填
+  cacheReasoningFromResponse(ctx);
 
   // 响应中间件链（对流式路径，规范化中间件在 chunk 已单独处理故为 no-op）
   await applyMiddlewares(ctx, middlewares);
