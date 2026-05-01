@@ -33,12 +33,30 @@ export class VolcEngineChatClient implements ProviderChatClient {
     logger.debug({ baseUrl: this.baseUrl }, 'VolcEngine chat client initialized');
   }
 
+  /**
+   * 根据 endpoint_type 解析实际的 Chat API URL
+   * - 'coding_plan': 将 baseUrl 中的 /api/v3 替换为 /api/coding/v3
+   * - 其他（含 undefined）: 保持原有行为 ({baseUrl}/chat/completions)
+   */
+  private resolveEndpointUrl(endpointType?: string): string {
+    if (endpointType === 'coding_plan') {
+      if (this.baseUrl.endsWith('/api/v3')) {
+        return `${this.baseUrl.replace(/\/api\/v3$/, '/api/coding/v3')}/chat/completions`;
+      }
+      logger.warn(
+        { baseUrl: this.baseUrl, endpointType },
+        'coding_plan endpoint requested but baseUrl does not end with /api/v3, falling back to default',
+      );
+    }
+    return `${this.baseUrl}/chat/completions`;
+  }
+
   public async call(
     providerReq: Record<string, unknown>,
     model: string,
     options?: ProviderCallOptions,
   ): Promise<ProviderCallResult> {
-    const url = `${this.baseUrl}/chat/completions`;
+    const url = this.resolveEndpointUrl(options?.modelConfig?.endpoint_type as string | undefined);
     logger.debug({ url, model }, 'Calling VolcEngine API');
 
     const requestHeaders: Record<string, string> = {
@@ -85,7 +103,7 @@ export class VolcEngineChatClient implements ProviderChatClient {
     model: string,
     options?: ProviderCallOptions,
   ): Promise<ProviderStreamResult> {
-    const url = `${this.baseUrl}/chat/completions`;
+    const url = this.resolveEndpointUrl(options?.modelConfig?.endpoint_type as string | undefined);
     logger.debug({ url, model }, 'Calling VolcEngine API (stream)');
 
     const requestHeaders: Record<string, string> = {
