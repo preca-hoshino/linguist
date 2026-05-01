@@ -17,7 +17,11 @@ import type {
 // ============================================================================
 
 export interface ProviderChatRequestAdapter {
-  toProviderRequest: (internalReq: InternalChatRequest, routedModel: string) => Record<string, unknown>;
+  toProviderRequest: (
+    internalReq: InternalChatRequest,
+    routedModel: string,
+    modelConfig?: Record<string, unknown>,
+  ) => Record<string, unknown>;
 }
 
 export interface ProviderChatResponseAdapter {
@@ -61,7 +65,11 @@ export interface ProviderChatAdapterSet {
 // ============================================================================
 
 export interface ProviderEmbeddingRequestAdapter {
-  toProviderRequest: (internalReq: InternalEmbeddingRequest, routedModel: string) => Record<string, unknown>;
+  toProviderRequest: (
+    internalReq: InternalEmbeddingRequest,
+    routedModel: string,
+    modelConfig?: Record<string, unknown>,
+  ) => Record<string, unknown>;
 }
 
 export interface ProviderEmbeddingResponseAdapter {

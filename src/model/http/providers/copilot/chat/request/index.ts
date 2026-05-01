@@ -111,7 +111,11 @@ function normalizeTools(tools: ToolDefinition[]): ToolDefinition[] {
  * - response_format 支持全部 OpenAI 格式（包括 json_schema）
  */
 export class CopilotChatRequestAdapter implements ProviderChatRequestAdapter {
-  public toProviderRequest(internalReq: InternalChatRequest, routedModel: string): Record<string, unknown> {
+  public toProviderRequest(
+    internalReq: InternalChatRequest,
+    routedModel: string,
+    _modelConfig?: Record<string, unknown>,
+  ): Record<string, unknown> {
     logger.debug(
       {
         routedModel,

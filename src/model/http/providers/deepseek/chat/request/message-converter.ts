@@ -2,6 +2,7 @@
 
 import type { ContentPart, InternalMessage } from '@/types';
 import { createLogger, logColors } from '@/utils';
+import { getReasoningContent } from '../../reasoning-cache';
 
 const logger = createLogger('Provider:DeepSeek', logColors.bold + logColors.green);
 
@@ -55,11 +56,18 @@ function convertContent(content: string | ContentPart[]): string | Record<string
  *
  * 设计原则：忠实于统一数据类型 InternalMessage，由数据自身决定输出结构：
  * - assistant 消息若携带 reasoning_content，则原样传递给 DeepSeek（满足多轮对话需求）
- * - assistant 消息若不携带 reasoning_content，则不注入任何默认值（由提供商自然处理）
+ * - assistant 消息若不携带 reasoning_content 且 modelConfig.reasoning_content_backfill=true：
+ *   从缓存中查找该 content 对应的 reasoning_content 并注入（网关自动回填）
+ * - assistant 消息若不携带 reasoning_content 且未开启回填：不注入默认值
  * - content ContentPart[] → OpenAI image_url 格式
  * - 保留 tool_calls / tool_call_id / name 有效字段
  */
-export function normalizeMessages(messages: InternalMessage[]): Record<string, unknown>[] {
+export function normalizeMessages(
+  messages: InternalMessage[],
+  modelConfig?: Record<string, unknown>,
+): Record<string, unknown>[] {
+  const shouldBackfill = modelConfig?.reasoning_content_backfill === true;
+
   return messages.map((msg) => {
     const normalized: Record<string, unknown> = {
       role: msg.role,
@@ -69,9 +77,15 @@ export function normalizeMessages(messages: InternalMessage[]): Record<string, u
       normalized.name = msg.name;
     }
     if (msg.role === 'assistant') {
-      // 仅在消息本身携带推理内容时才传递，不注入默认空字符串
+      // 消息本身携带推理内容 → 原样传递
       if (typeof msg.reasoning_content === 'string') {
         normalized.reasoning_content = msg.reasoning_content;
+      } else if (shouldBackfill) {
+        // 消息缺少 reasoning_content 且开启回填 → 从缓存查找注入
+        const cached = getReasoningContent(typeof msg.content === 'string' ? msg.content : null);
+        if (cached !== undefined) {
+          normalized.reasoning_content = cached;
+        }
       }
       if (msg.tool_calls && msg.tool_calls.length > 0) {
         normalized.tool_calls = msg.tool_calls;

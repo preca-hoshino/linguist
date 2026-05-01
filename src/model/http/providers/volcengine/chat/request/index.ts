@@ -49,7 +49,11 @@ function normalizeTools(tools: ToolDefinition[]): ToolDefinition[] {
  * - top_k 支持：火山引擎额外支持 top_k 参数
  */
 export class VolcEngineChatRequestAdapter implements ProviderChatRequestAdapter {
-  public toProviderRequest(internalReq: InternalChatRequest, routedModel: string): Record<string, unknown> {
+  public toProviderRequest(
+    internalReq: InternalChatRequest,
+    routedModel: string,
+    _modelConfig?: Record<string, unknown>,
+  ): Record<string, unknown> {
     logger.debug(
       {
         routedModel,

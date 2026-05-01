@@ -88,6 +88,8 @@ export interface ModelHttpContext {
       | undefined;
     /** API 调用超时时间（毫秒）。undefined = 使用系统默认常量 */
     timeoutMs?: number | undefined;
+    /** 提供商模型级专属配置（来自 model_provider_models.model_config） */
+    modelConfig?: Record<string, unknown> | undefined;
   };
 
   // --- 核心载荷 (Payload) ---

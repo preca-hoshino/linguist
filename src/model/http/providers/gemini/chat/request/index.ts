@@ -24,7 +24,11 @@ const logger = createLogger('Provider:Gemini', logColors.bold + logColors.yellow
  * - assistant tool_calls → functionCall parts
  */
 export class GeminiChatRequestAdapter implements ProviderChatRequestAdapter {
-  public toProviderRequest(internalReq: InternalChatRequest, routedModel: string): Record<string, unknown> {
+  public toProviderRequest(
+    internalReq: InternalChatRequest,
+    routedModel: string,
+    _modelConfig?: Record<string, unknown>,
+  ): Record<string, unknown> {
     logger.debug(
       {
         routedModel,
