@@ -196,6 +196,7 @@ export function route(ctx: ModelHttpContext, expectedModelType?: ModelType): voi
     capabilities: requiredCaps,
     supportedParameters: selected.supportedParameters,
     timeoutMs: selected.timeoutMs,
+    modelConfig: selected.modelConfig,
   };
   ctx.timing.routed = Date.now();
 

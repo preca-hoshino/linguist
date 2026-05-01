@@ -281,6 +281,7 @@ export class ConfigManager {
       requestOverrides: backend.requestOverrides,
       routingStrategy: config.routingStrategy,
       timeoutMs: backend.timeoutMs,
+      modelConfig: backend.modelConfig,
     });
 
     if (config.routingStrategy === 'load_balance') {
