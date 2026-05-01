@@ -68,7 +68,11 @@ function supportsInstructions(model: string): boolean {
  * - task: 翻译为 instructions 字段（仅 doubao-embedding-vision-251215 及后续版本）
  */
 export class VolcEngineEmbeddingRequestAdapter implements ProviderEmbeddingRequestAdapter {
-  public toProviderRequest(internalReq: InternalEmbeddingRequest, routedModel: string): Record<string, unknown> {
+  public toProviderRequest(
+    internalReq: InternalEmbeddingRequest,
+    routedModel: string,
+    _modelConfig?: Record<string, unknown>,
+  ): Record<string, unknown> {
     const instructionsSupported = supportsInstructions(routedModel);
 
     logger.debug(

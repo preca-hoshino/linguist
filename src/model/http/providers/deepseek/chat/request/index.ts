@@ -46,9 +46,14 @@ function normalizeTools(tools: ToolDefinition[]): ToolDefinition[] {
  * 特殊处理：
  * - thinking 配置映射（内部 enabled:boolean → DeepSeek type:"enabled"/"disabled"）
  * - reasoner 模型的 assistant 消息必须包含 reasoning_content 字段
+ * - modelConfig 可用于控制 reasoning_content 回填行为
  */
 export class DeepSeekChatRequestAdapter implements ProviderChatRequestAdapter {
-  public toProviderRequest(internalReq: InternalChatRequest, routedModel: string): Record<string, unknown> {
+  public toProviderRequest(
+    internalReq: InternalChatRequest,
+    routedModel: string,
+    modelConfig?: Record<string, unknown>,
+  ): Record<string, unknown> {
     logger.debug(
       {
         routedModel,
@@ -60,7 +65,8 @@ export class DeepSeekChatRequestAdapter implements ProviderChatRequestAdapter {
     );
 
     // 消息列表导租：由数据自身决定是否携带 reasoning_content
-    const messages = normalizeMessages(internalReq.messages);
+    // modelConfig.reasoning_content_backfill=true 时自动从缓存注入缺失的 reasoning_content
+    const messages = normalizeMessages(internalReq.messages, modelConfig);
 
     const req: Record<string, unknown> = {
       model: routedModel,

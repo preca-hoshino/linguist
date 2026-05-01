@@ -94,7 +94,9 @@ function applyBodyOverrides(
 // ========== 框架引擎: 泛型内部实现 ==========
 
 interface AdapterSet<TReq, TRes> {
-  requestAdapter: { toProviderRequest: (req: TReq, model: string) => Record<string, unknown> };
+  requestAdapter: {
+    toProviderRequest: (req: TReq, model: string, modelConfig?: Record<string, unknown>) => Record<string, unknown>;
+  };
   responseAdapter: { fromProviderResponse: (res: unknown) => TRes };
   client: {
     call: (
@@ -118,7 +120,7 @@ export async function callProvider<TReq, TRes extends InternalResponse>(
   const { requestAdapter, responseAdapter, client } = getAdapterSet(ctx.route.providerKind, ctx.route.providerConfig);
   providerLogger.debug({ requestId: ctx.id }, `[dispatch] ${label.toLowerCase()} adapter initialized`);
 
-  const rawProviderReqBody = requestAdapter.toProviderRequest(request, ctx.route.model);
+  const rawProviderReqBody = requestAdapter.toProviderRequest(request, ctx.route.model, ctx.route.modelConfig);
   const providerReqBody = applyBodyOverrides(rawProviderReqBody, ctx.route.requestOverrides?.body);
   ctx.audit.providerRequest = { body: providerReqBody };
   providerLogger.debug({ requestId: ctx.id }, `[dispatch] ${label.toLowerCase()} request serialized`);
@@ -231,6 +233,7 @@ async function tryStreamConnect(
     providerKind: candidate.providerKind,
     providerId: candidate.providerId,
     providerConfig: candidate.provider,
+    modelConfig: candidate.modelConfig,
   };
 
   const providerLogger = getProviderLogger(ctx.route.providerKind);
@@ -241,7 +244,7 @@ async function tryStreamConnect(
   providerLogger.debug({ requestId: ctx.id }, '[dispatch] stream adapter initialized');
 
   const strippedRequest = stripUnsupportedChatParams(chatRequest, candidate.supportedParameters);
-  const rawProviderReqBody = requestAdapter.toProviderRequest(strippedRequest, ctx.route.model);
+  const rawProviderReqBody = requestAdapter.toProviderRequest(strippedRequest, ctx.route.model, candidate.modelConfig);
   const providerReqBody = applyBodyOverrides(rawProviderReqBody, candidate.requestOverrides?.body);
   ctx.audit.providerRequest = { body: providerReqBody };
   providerLogger.debug({ requestId: ctx.id }, '[dispatch] stream request serialized');

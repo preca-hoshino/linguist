@@ -11,7 +11,11 @@ const logger = createLogger('Provider:Copilot:Embedding', logColors.bold + logCo
  * 转换为兼容 OpenAI /v1/embeddings 格式的请求
  */
 export class CopilotEmbeddingRequestAdapter implements ProviderEmbeddingRequestAdapter {
-  public toProviderRequest(internalReq: InternalEmbeddingRequest, routedModel: string): Record<string, unknown> {
+  public toProviderRequest(
+    internalReq: InternalEmbeddingRequest,
+    routedModel: string,
+    _modelConfig?: Record<string, unknown>,
+  ): Record<string, unknown> {
     logger.debug(
       { routedModel, inputsCount: internalReq.input.length },
       'Adapting internal embedding request to Copilot format',

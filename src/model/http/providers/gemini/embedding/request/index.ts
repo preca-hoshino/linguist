@@ -20,7 +20,11 @@ const logger = createLogger('Provider:Gemini:Embedding', logColors.bold + logCol
  * - 内部 dimensions → Gemini outputDimensionality
  */
 export class GeminiEmbeddingRequestAdapter implements ProviderEmbeddingRequestAdapter {
-  public toProviderRequest(internalReq: InternalEmbeddingRequest, routedModel: string): Record<string, unknown> {
+  public toProviderRequest(
+    internalReq: InternalEmbeddingRequest,
+    routedModel: string,
+    _modelConfig?: Record<string, unknown>,
+  ): Record<string, unknown> {
     // 用户端点仅产生 EmbeddingTextInput，直接断言类型并映射为 Gemini parts
     const parts = (internalReq.input as EmbeddingTextInput[]).map((item) => ({ text: item.text }));
 
