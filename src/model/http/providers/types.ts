@@ -38,6 +38,8 @@ export interface ProviderCallOptions {
   timeoutMs?: number | undefined;
   /** 模型请求级别的自定义请求头覆盖 */
   headers?: Record<string, string | null> | undefined;
+  /** 提供商模型级配置 blob（从 model_config JSONB 列透传），各提供商自行解析 */
+  modelConfig?: Record<string, unknown> | undefined;
 }
 
 export interface ProviderChatClient {

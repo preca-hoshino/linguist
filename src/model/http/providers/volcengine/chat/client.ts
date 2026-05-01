@@ -33,12 +33,45 @@ export class VolcEngineChatClient implements ProviderChatClient {
     logger.debug({ baseUrl: this.baseUrl }, 'VolcEngine chat client initialized');
   }
 
+  /**
+   * 根据 endpoint_type 解析实际的 Chat API URL
+   *
+   * 火山引擎有两种 API 基础路径:
+   *   标准:   https://{host}/api/v3/chat/completions
+   *   Coding Plan: https://{host}/api/coding/v3/chat/completions
+   *
+   * 用户可自定义 baseUrl，需要兼容以下场景:
+   *   1. baseUrl 已是 Coding Plan 地址（以 /api/coding/v3 结尾）→ 直接使用
+   *   2. baseUrl 以 /api/v3 结尾 → 替换为 /api/coding/v3
+   *   3. baseUrl 不含上述路径 → 记录 warning，按标准路径请求
+   *
+   * @param endpointType 'coding_plan' | 'normal' | undefined
+   */
+  private resolveEndpointUrl(endpointType?: string): string {
+    if (endpointType === 'coding_plan') {
+      // 场景 1: baseUrl 已指向 Coding Plan（如用户手动配置了 coding 地址）
+      if (this.baseUrl.endsWith('/api/coding/v3')) {
+        return `${this.baseUrl}/chat/completions`;
+      }
+      // 场景 2: baseUrl 为标准火山引擎格式，替换路径片段
+      if (this.baseUrl.endsWith('/api/v3')) {
+        return `${this.baseUrl.replace(/\/api\/v3$/, '/api/coding/v3')}/chat/completions`;
+      }
+      // 场景 3: 无法识别的自定义 baseUrl，无法安全推断 Coding Plan 端点
+      logger.warn(
+        { baseUrl: this.baseUrl, endpointType },
+        'coding_plan endpoint requested but baseUrl does not match /api/v3 or /api/coding/v3 suffix, using baseUrl as-is',
+      );
+    }
+    return `${this.baseUrl}/chat/completions`;
+  }
+
   public async call(
     providerReq: Record<string, unknown>,
     model: string,
     options?: ProviderCallOptions,
   ): Promise<ProviderCallResult> {
-    const url = `${this.baseUrl}/chat/completions`;
+    const url = this.resolveEndpointUrl(options?.modelConfig?.endpoint_type as string | undefined);
     logger.debug({ url, model }, 'Calling VolcEngine API');
 
     const requestHeaders: Record<string, string> = {
@@ -85,7 +118,7 @@ export class VolcEngineChatClient implements ProviderChatClient {
     model: string,
     options?: ProviderCallOptions,
   ): Promise<ProviderStreamResult> {
-    const url = `${this.baseUrl}/chat/completions`;
+    const url = this.resolveEndpointUrl(options?.modelConfig?.endpoint_type as string | undefined);
     logger.debug({ url, model }, 'Calling VolcEngine API (stream)');
 
     const requestHeaders: Record<string, string> = {
