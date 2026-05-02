@@ -54,8 +54,9 @@ router.get('/', async (req: Request, res: Response) => {
       );
     }
 
-    const limitNum = typeof limit === 'string' && limit !== '' ? Number.parseInt(limit, 10) : undefined;
-    const offsetNum = typeof offset === 'string' && offset !== '' ? Number.parseInt(offset, 10) : undefined;
+    const limitNum =
+      typeof limit === 'string' && limit !== '' ? Math.min(Math.max(Number.parseInt(limit, 10), 1), 100) : 10;
+    const offsetNum = typeof offset === 'string' && offset !== '' ? Math.max(Number.parseInt(offset, 10), 0) : 0;
 
     const result = await queryRequestLogs({
       status: typeof status === 'string' && status !== '' ? (status as RequestLogStatus) : undefined,
