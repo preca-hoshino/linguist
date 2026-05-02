@@ -1,5 +1,5 @@
 // src/admin/apps.ts — 应用（App）管理 API（Stripe 风格）
-// 嵌套资源：Apps + Keys，游标分页，POST 更新
+// 嵌套资源：Apps + Keys，offset 分页，PATCH 更新
 
 import type { Request, Response } from 'express';
 import { Router } from 'express';
