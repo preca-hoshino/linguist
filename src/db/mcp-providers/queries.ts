@@ -1,5 +1,5 @@
 // src/db/mcp-providers/queries.ts — 提供商 MCP CRUD 查询
-// Stripe 风格游标分页
+// offset 分页
 
 import { db, withTransaction } from '@/db/client';
 import { generateShortId } from '@/db/id-generator';
@@ -41,7 +41,7 @@ export async function createMcpProvider(input: McpProviderCreateInput): Promise<
 }
 
 /**
- * 列出提供商 MCP（Stripe 风格游标分页）
+ * 列出提供商 MCP（offset 分页）
  */
 export async function listMcpProviders(options?: {
   limit?: number;

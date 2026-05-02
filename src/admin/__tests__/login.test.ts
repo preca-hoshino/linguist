@@ -39,7 +39,7 @@ describe('POST /api/login', () => {
   it('should return 400 if email or password is missing', async () => {
     const res1 = await request(app).post('/api/login').send({ email: 'admin@example.com' });
     expect(res1.status).toBe(400);
-    expect((res1.body as { error: { code: string } }).error.code).toBe('bad_request');
+    expect((res1.body as { error: { code: string } }).error.code).toBe('invalid_request');
 
     const res2 = await request(app).post('/api/login').send({ password: 'password123' });
     expect(res2.status).toBe(400);

@@ -117,7 +117,7 @@ router.get('/overview', async (req: Request, res: Response) => {
     const params = await parseStatsParams(req);
     logger.debug(params, 'Querying stats overview');
     const result = await getStatsOverview(params);
-    res.json(result);
+    res.json({ object: 'stats_overview', ...result });
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -134,7 +134,13 @@ router.get('/time-series', async (req: Request, res: Response) => {
     }
     logger.debug({ ...params, interval }, 'Querying stats time-series');
     const result = await getStatsTimeSeries(params, interval);
-    res.json(result);
+    res.json({
+      object: 'list',
+      url: '/admin/model/stats/time-series',
+      data: result.series,
+      total: result.series.length,
+      has_more: false,
+    });
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -146,7 +152,7 @@ router.get('/errors', async (req: Request, res: Response) => {
     const params = await parseStatsParams(req);
     logger.debug(params, 'Querying stats errors');
     const result = await getStatsErrors(params);
-    res.json(result);
+    res.json({ object: 'stats_errors', ...result });
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -158,7 +164,7 @@ router.get('/tokens', async (req: Request, res: Response) => {
     const params = await parseStatsParams(req);
     logger.debug(params, 'Querying stats tokens');
     const result = await getStatsTokens(params);
-    res.json(result);
+    res.json({ object: 'stats_tokens', ...result });
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -170,7 +176,7 @@ router.get('/today', async (req: Request, res: Response) => {
     const params = await parseStatsParams(req);
     logger.debug({ dimension: params.dimension, id: params.id }, 'Querying stats today');
     const result = await getStatsToday(params.dimension, params.id);
-    res.json(result);
+    res.json({ object: 'stats_today', ...result });
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -194,7 +200,13 @@ router.get('/breakdown', async (req: Request, res: Response) => {
     }
     logger.debug({ ...params, groupBy }, 'Querying stats breakdown');
     const result = await getStatsBreakdown(params, groupBy);
-    res.json(result);
+    res.json({
+      object: 'list',
+      url: '/admin/model/stats/breakdown',
+      data: result.items,
+      total: result.items.length,
+      has_more: false,
+    });
   } catch (error) {
     handleAdminError(error, res);
   }

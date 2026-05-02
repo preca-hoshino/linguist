@@ -42,7 +42,7 @@ router.get('/', async (req: Request, res: Response) => {
 
     const { data, has_more, total } = await listVirtualMcps(opts);
 
-    res.json({ object: 'list', data, total, has_more });
+    res.json({ object: 'list', url: '/admin/mcp/virtual-mcps', data, total, has_more });
   } catch (error) {
     handleAdminError(error, res);
   }

@@ -8,7 +8,7 @@ import { createLogger, logColors } from '../utils';
 const logger = createLogger('Admin:Idempotency', logColors.magenta);
 
 export async function idempotencyMiddleware(req: Request, res: Response, next: NextFunction): Promise<void> {
-  const idempotencyKey = req.header('idempotency-key');
+  const idempotencyKey = req.header('Idempotency-Key');
 
   if (req.method !== 'POST' || idempotencyKey === undefined || idempotencyKey === '') {
     next();

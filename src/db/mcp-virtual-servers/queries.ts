@@ -1,5 +1,5 @@
 // src/db/mcp-virtual-servers/queries.ts — 虚拟 MCP CRUD 查询
-// 表名: virtual_mcps；Stripe 风格游标分页
+// 表名: virtual_mcps；offset 分页
 
 import { db, withTransaction } from '@/db/client';
 import { generateShortId } from '@/db/id-generator';
@@ -33,7 +33,7 @@ export async function createVirtualMcp(input: VirtualMcpCreateInput): Promise<Vi
 }
 
 /**
- * 列出虚拟 MCP（Stripe 风格游标分页）
+ * 列出虚拟 MCP（offset 分页）
  */
 export async function listVirtualMcps(options?: {
   limit?: number;

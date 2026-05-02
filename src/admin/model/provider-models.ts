@@ -287,7 +287,13 @@ router.get('/', async (req: Request, res: Response) => {
     });
 
     logger.debug({ count: data.length, total, has_more: offsetNum + data.length < total }, 'Provider models listed');
-    res.json({ object: 'list', url: '/admin/provider-models', data, total, has_more: offsetNum + data.length < total });
+    res.json({
+      object: 'list',
+      url: '/admin/model/provider-models',
+      data,
+      total,
+      has_more: offsetNum + data.length < total,
+    });
   } catch (error) {
     handleAdminError(error, res);
   }

@@ -155,8 +155,14 @@ export async function callProvider<TReq, TRes extends InternalResponse>(
   ctx.timing.providerStart = Date.now();
   providerLogger.debug({ requestId: ctx.id, model: ctx.route.model }, '[dispatch] forwarding to upstream');
   const callOptions =
-    ctx.route.timeoutMs !== undefined || ctx.route.requestOverrides?.headers !== undefined || ctx.route.modelConfig !== undefined
-      ? { timeoutMs: ctx.route.timeoutMs, headers: ctx.route.requestOverrides?.headers, modelConfig: ctx.route.modelConfig }
+    ctx.route.timeoutMs !== undefined ||
+    ctx.route.requestOverrides?.headers !== undefined ||
+    ctx.route.modelConfig !== undefined
+      ? {
+          timeoutMs: ctx.route.timeoutMs,
+          headers: ctx.route.requestOverrides?.headers,
+          modelConfig: ctx.route.modelConfig,
+        }
       : undefined;
   const result = await client.call(providerReqBody, ctx.route.model, callOptions);
   ctx.timing.providerEnd = Date.now();
@@ -283,8 +289,14 @@ async function tryStreamConnect(
   providerLogger.debug({ requestId: ctx.id, model: ctx.route.model }, '[dispatch] forwarding to upstream (stream)');
 
   const streamOptions =
-    candidate.timeoutMs !== undefined || candidate.requestOverrides?.headers !== undefined || candidate.modelConfig !== undefined
-      ? { timeoutMs: candidate.timeoutMs, headers: candidate.requestOverrides?.headers, modelConfig: candidate.modelConfig }
+    candidate.timeoutMs !== undefined ||
+    candidate.requestOverrides?.headers !== undefined ||
+    candidate.modelConfig !== undefined
+      ? {
+          timeoutMs: candidate.timeoutMs,
+          headers: candidate.requestOverrides?.headers,
+          modelConfig: candidate.modelConfig,
+        }
       : undefined;
   const { response, requestHeaders: providerReqHeaders } = await client.callStream(
     providerReqBody,

@@ -1,5 +1,5 @@
 // src/db/apps/queries.ts — 应用（App）CRUD 查询
-// Stripe 风格游标分页、嵌套白名单管理
+// offset 分页、嵌套白名单管理
 
 import { db, withTransaction } from '@/db/client';
 import { generateShortId } from '@/db/id-generator';

@@ -39,7 +39,7 @@ router.get('/', async (req: Request, res: Response) => {
 
     const { data, has_more, total } = await listMcpProviders(opts);
 
-    res.json({ object: 'list', data, total, has_more });
+    res.json({ object: 'list', url: '/admin/mcp/provider-mcps', data, total, has_more });
   } catch (error) {
     handleAdminError(error, res);
   }

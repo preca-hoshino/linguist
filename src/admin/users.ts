@@ -93,8 +93,8 @@ usersRouter.post('/', async (req: Request, res: Response) => {
   }
 });
 
-/** POST /api/users/:id — 通用用户更新（支持部分字段） */
-usersRouter.post('/:id', async (req: Request, res: Response) => {
+/** PATCH /api/users/:id — 通用用户更新（支持部分字段） */
+usersRouter.patch('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const { username, email, password, avatar_data, is_active } = req.body as {

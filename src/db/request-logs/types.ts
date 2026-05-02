@@ -86,7 +86,7 @@ export interface RequestLogQuery {
   user_format?: string | string[] | undefined;
   is_stream?: string | string[] | boolean | undefined;
   app_id?: string | string[] | undefined;
-  /** Offset 分页（替代游标分页） */
+  /** offset 分页 */
   offset?: number | undefined;
   limit?: number | undefined;
 }

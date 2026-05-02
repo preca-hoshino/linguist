@@ -25,7 +25,7 @@ function mockReq(opts?: { method?: string; idempotencyKey?: string; path?: strin
     method: opts?.method ?? 'POST',
     path: opts?.path ?? '/api/test',
     header: jest.fn((name: string) => {
-      if (name === 'idempotency-key') {
+      if (name === 'Idempotency-Key') {
         return opts?.idempotencyKey ?? undefined;
       }
       return undefined;
