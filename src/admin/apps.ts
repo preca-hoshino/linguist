@@ -76,7 +76,11 @@ router.post('/', async (req: Request, res: Response) => {
     const { name, allowed_model_ids, allowed_mcp_ids } = body;
 
     if (typeof name !== 'string' || name === '') {
-      throw new GatewayError(400, 'invalid_request', 'Field "name" is required and must be a non-empty string');
+      throw new GatewayError(
+        400,
+        'invalid_request',
+        'Field "name" is required and must be a non-empty string',
+      ).withParam('name');
     }
 
     logger.debug({ name }, 'Creating app');
