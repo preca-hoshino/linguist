@@ -77,7 +77,7 @@ router.get('/', async (req: Request, res: Response) => {
     );
     res.json({
       object: 'list',
-      url: '/admin/request-logs',
+      url: '/admin/model/logs',
       data: result.data,
       total: result.total,
       has_more: result.has_more,
