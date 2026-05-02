@@ -92,7 +92,7 @@ router.get('/', async (req: Request, res: Response) => {
 
     res.json({
       object: 'list',
-      url: '/admin/providers',
+      url: '/admin/model/providers',
       data: data.map(injectSupportedModelTypes),
       total,
       has_more: offsetNum + data.length < total,
