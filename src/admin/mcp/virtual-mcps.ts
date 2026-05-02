@@ -79,7 +79,7 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     if (!MCP_NAME_REGEX.test(body.name)) {
-      throw new GatewayError(400, 'invalid_request', MCP_NAME_FORMAT_ERROR);
+      throw new GatewayError(400, 'invalid_request', MCP_NAME_FORMAT_ERROR).withParam('name');
     }
 
     const created = await createVirtualMcp(body);
@@ -97,7 +97,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
 
     // 若包含 name 字段，校验格式（不允许空格）
     if (typeof body.name === 'string' && body.name !== '' && !MCP_NAME_REGEX.test(body.name)) {
-      throw new GatewayError(400, 'invalid_request', MCP_NAME_FORMAT_ERROR);
+      throw new GatewayError(400, 'invalid_request', MCP_NAME_FORMAT_ERROR).withParam('name');
     }
 
     const updated = await updateVirtualMcp(id, body);
