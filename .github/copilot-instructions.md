@@ -32,14 +32,15 @@ npm run db           # 运行数据库迁移
 
 ## 细分规范索引
 
-| 领域     | 文件                                                  | 覆盖范围                              |
-| -------- | ----------------------------------------------------- | ------------------------------------- |
-| 工作流   | `.github/instructions/git-workflow.instructions.md`   | 分支策略、原子提交、PR 闭环           |
-| 代码风格 | `.github/instructions/code-style.instructions.md`     | 导入路径、命名、类型声明              |
-| 错误处理 | `.github/instructions/error-handling.instructions.md` | GatewayError、错误码、handleError     |
-| 日志规范 | `.github/instructions/logging.instructions.md`        | Winston 彩色日志、结构化记录、脱敏    |
-| 数据库   | `.github/instructions/database.instructions.md`       | 参数化查询、事务、迁移、查询组织      |
-| 中间件   | `.github/instructions/middleware.instructions.md`     | 中间件类型、执行链、鉴权模式          |
-| API 设计 | `.github/instructions/api-design.instructions.md`     | 多格式适配器、路由解析、流式处理      |
-| 管理 API | `.github/instructions/admin-api.instructions.md`      | REST 惯例、响应格式、幂等性、嵌套资源 |
-| 测试     | `.github/instructions/testing.instructions.md`        | Jest、Mock、集成测试、覆盖率          |
+| 领域            | 文件                                                    |
+| --------------- | ------------------------------------------------------- |
+| 工作流          | `.github/instructions/git-workflow.instructions.md`     |
+| 代码风格        | `.github/instructions/code-style.instructions.md`       |
+| 错误处理        | `.github/instructions/error-handling.instructions.md`   |
+| 日志            | `.github/instructions/logging.instructions.md`          |
+| 数据库          | `.github/instructions/database.instructions.md`         |
+| 中间件          | `.github/instructions/middleware.instructions.md`       |
+| API 设计        | `.github/instructions/api-design.instructions.md`       |
+| 管理 API (REST) | `.github/instructions/admin-api-rest.instructions.md`   |
+| 管理 API (参数) | `.github/instructions/admin-api-params.instructions.md` |
+| 测试            | `.github/instructions/testing.instructions.md`          |
