@@ -63,7 +63,11 @@ describe('App Queries', () => {
       });
 
       expect(mockGenerateShortId).toHaveBeenCalledWith('apps');
-      expect(txQuery).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO apps'), ['app_xyz123', 'Test App']);
+      expect(txQuery).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO apps'), [
+        'app_xyz123',
+        'Test App',
+        '{}',
+      ]);
       expect(txQuery).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO app_allowed_models'), [
         'app_xyz123',
         'vm_1',
