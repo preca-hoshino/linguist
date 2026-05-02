@@ -20,7 +20,7 @@ loginRouter.post('/login', async (req: Request, res: Response) => {
     if (email === undefined || email === '' || password === undefined || password === '') {
       const body: ApiErrorResponse = {
         error: {
-          code: 'bad_request',
+          code: 'invalid_request',
           message: 'email and password are required',
           type: 'invalid_request_error',
           param: null,
