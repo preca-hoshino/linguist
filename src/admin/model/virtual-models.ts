@@ -13,6 +13,7 @@ import {
   rateLimiter,
 } from '@/utils';
 import { handleAdminError } from '../error';
+import { validateMetadata } from '../metadata-validator';
 
 const logger = createLogger('Admin:VirtualModels', logColors.bold + logColors.blue);
 
@@ -63,6 +64,7 @@ interface VirtualModelBody {
   backends?: BackendInput[] | undefined;
   rpm_limit?: number | null | undefined;
   tpm_limit?: number | null | undefined;
+  metadata?: Record<string, string> | undefined;
 }
 
 const VALID_STRATEGIES = new Set(['load_balance', 'failover']);
@@ -304,12 +306,14 @@ router.get('/:id', async (req: Request, res: Response) => {
 router.post('/', async (req: Request, res: Response) => {
   try {
     const body = req.body as VirtualModelBody;
-    const { name, description, model_type, routing_strategy, backends, rpm_limit, tpm_limit } = body;
+    const { name, description, model_type, routing_strategy, backends, rpm_limit, tpm_limit, metadata } = body;
     logger.debug({ name, model_type, routingStrategy: routing_strategy }, 'Creating virtual model');
 
     if (typeof name !== 'string' || name === '') {
       throw new GatewayError(400, 'invalid_request', 'Field name is required').withParam('name');
     }
+
+    validateMetadata(metadata);
 
     if (typeof model_type !== 'string' || !['chat', 'embedding'].includes(model_type)) {
       throw new GatewayError(
@@ -387,8 +391,11 @@ router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const body = req.body as VirtualModelBody;
-    const { name, description, model_type, routing_strategy, backends, is_active, rpm_limit, tpm_limit } = body;
+    const { name, description, model_type, routing_strategy, backends, is_active, rpm_limit, tpm_limit, metadata } =
+      body;
     logger.debug({ id }, 'Updating virtual model');
+
+    validateMetadata(metadata);
 
     // 检查虚拟模型是否存在
     const existCheck = await db.query<{ id: string; model_type: string }>(
