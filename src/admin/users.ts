@@ -15,11 +15,13 @@ export const publicUsersRouter: Router = Router();
 /** GET /api/users — 列出所有用户 */
 usersRouter.get('/', async (req: Request, res: Response) => {
   try {
-    const { search, limit, offset } = req.query;
+    const { search, limit, offset, is_active } = req.query;
     const limitNum =
       typeof limit === 'string' && limit !== '' ? Math.min(Math.max(Number.parseInt(limit, 10), 1), 100) : 10;
     const offsetNum = typeof offset === 'string' && offset !== '' ? Math.max(Number.parseInt(offset, 10), 0) : 0;
     const searchStr = typeof search === 'string' ? search : undefined;
+    const isActiveParam =
+      typeof is_active === 'string' && is_active !== '' ? is_active.toLowerCase() === 'true' : undefined;
 
     const {
       data: users,
@@ -29,6 +31,7 @@ usersRouter.get('/', async (req: Request, res: Response) => {
       limit: limitNum,
       offset: offsetNum,
       ...(searchStr === undefined ? {} : { search: searchStr }),
+      ...(isActiveParam === undefined ? {} : { is_active: isActiveParam }),
     });
 
     // 对外暴露时将 avatar_data 替换为 avatar_url 路由地址
