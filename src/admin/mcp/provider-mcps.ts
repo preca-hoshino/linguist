@@ -22,8 +22,9 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const { search, limit, offset, is_active, kind } = req.query;
 
-    const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : 10;
-    const offsetNum = typeof offset === 'string' && offset !== '' ? Number.parseInt(offset, 10) : 0;
+    const limitNum =
+      typeof limit === 'string' && limit !== '' ? Math.min(Math.max(Number.parseInt(limit, 10), 1), 100) : 10;
+    const offsetNum = typeof offset === 'string' && offset !== '' ? Math.max(Number.parseInt(offset, 10), 0) : 0;
     const isActiveParsed = typeof is_active === 'string' ? is_active === 'true' : undefined;
 
     const opts: Parameters<typeof listMcpProviders>[0] = { limit: limitNum, offset: offsetNum };
