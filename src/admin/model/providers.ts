@@ -8,6 +8,7 @@ import type { ProviderAdvancedConfig } from '@/types';
 import { DEFAULT_PROVIDER_CONFIG } from '@/types';
 import { buildInClause, buildUpdateSet, createLogger, GatewayError, logColors } from '@/utils';
 import { handleAdminError } from '../error';
+import { validateMetadata } from '../metadata-validator';
 
 const logger = createLogger('Admin:Providers', logColors.bold + logColors.blue);
 
@@ -26,11 +27,13 @@ interface ProviderBody {
   rpm_limit?: number | null | undefined;
   /** 提供商级别全局 TPM 限制（null = 不限制） */
   tpm_limit?: number | null | undefined;
+  /** 自定义元数据 */
+  metadata?: Record<string, string> | undefined;
 }
 
 /** SELECT 列常量（不含 is_active） */
 const SELECT_COLUMNS =
-  'id, name, kind, base_url, credential_type, credential, config, rpm_limit, tpm_limit, created_at, updated_at';
+  'id, name, kind, base_url, credential_type, credential, config, rpm_limit, tpm_limit, metadata, created_at, updated_at';
 
 /**
  * 向 provider 行数据注入插件声明的 supported_model_types（即时计算，不入库）。
@@ -123,7 +126,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 router.post('/', async (req: Request, res: Response) => {
   try {
     const body = req.body as ProviderBody;
-    const { name, kind, base_url, credential_type, credential, config, rpm_limit, tpm_limit } = body;
+    const { name, kind, base_url, credential_type, credential, config, rpm_limit, tpm_limit, metadata } = body;
     logger.debug({ name, kind }, 'Creating provider');
 
     if (typeof name !== 'string' || name === '' || typeof kind !== 'string' || kind === '') {
@@ -133,6 +136,8 @@ router.post('/', async (req: Request, res: Response) => {
     if (typeof base_url !== 'string' || (base_url === '' && kind !== 'copilot')) {
       throw new GatewayError(400, 'invalid_request', 'Field base_url is required').withParam('base_url');
     }
+
+    validateMetadata(metadata);
 
     const validKinds = getRegisteredProviderKinds();
     if (!validKinds.has(kind)) {
@@ -151,8 +156,8 @@ router.post('/', async (req: Request, res: Response) => {
     const finalConfig: ProviderAdvancedConfig = { ...DEFAULT_PROVIDER_CONFIG, ...config };
 
     const result = await db.query(
-      `INSERT INTO model_providers (id, name, kind, base_url, credential_type, credential, config, rpm_limit, tpm_limit)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO model_providers (id, name, kind, base_url, credential_type, credential, config, rpm_limit, tpm_limit, metadata)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb)
        RETURNING ${SELECT_COLUMNS}`,
       [
         await generateShortId('model_providers'),
@@ -164,6 +169,7 @@ router.post('/', async (req: Request, res: Response) => {
         JSON.stringify(finalConfig),
         rpm_limit ?? null,
         tpm_limit ?? null,
+        JSON.stringify(metadata ?? {}),
       ],
     );
 
@@ -182,8 +188,10 @@ router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const body = req.body as ProviderBody;
-    const { name, kind, base_url, credential_type, credential, config, rpm_limit, tpm_limit } = body;
+    const { name, kind, base_url, credential_type, credential, config, rpm_limit, tpm_limit, metadata } = body;
     logger.debug({ id }, 'Updating provider');
+
+    validateMetadata(metadata);
 
     // 凭证防破坏处理：防止前端传回占位符覆盖真实的 credential
     let finalCredential = credential;
@@ -204,6 +212,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
       config: config === undefined ? undefined : JSON.stringify({ ...DEFAULT_PROVIDER_CONFIG, ...config }),
       rpm_limit: rpm_limit === undefined ? undefined : rpm_limit,
       tpm_limit: tpm_limit === undefined ? undefined : tpm_limit,
+      metadata: metadata === undefined ? undefined : JSON.stringify(metadata),
     });
 
     if (!update) {
