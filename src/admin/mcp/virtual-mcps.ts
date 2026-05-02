@@ -12,6 +12,7 @@ import {
 import type { VirtualMcpCreateInput, VirtualMcpUpdateInput } from '@/db/mcp-virtual-servers/types';
 import { GatewayError } from '@/utils';
 import { handleAdminError } from '../error';
+import { validateMetadata } from '../metadata-validator';
 
 const router: Router = Router();
 
@@ -78,6 +79,8 @@ router.post('/', async (req: Request, res: Response) => {
       throw new GatewayError(400, 'invalid_request', 'Fields name, mcp_provider_id are required');
     }
 
+    validateMetadata(body.metadata);
+
     if (!MCP_NAME_REGEX.test(body.name)) {
       throw new GatewayError(400, 'invalid_request', MCP_NAME_FORMAT_ERROR).withParam('name');
     }
@@ -99,6 +102,8 @@ router.patch('/:id', async (req: Request, res: Response) => {
     if (typeof body.name === 'string' && body.name !== '' && !MCP_NAME_REGEX.test(body.name)) {
       throw new GatewayError(400, 'invalid_request', MCP_NAME_FORMAT_ERROR).withParam('name');
     }
+
+    validateMetadata(body.metadata);
 
     const updated = await updateVirtualMcp(id, body);
     if (!updated) {

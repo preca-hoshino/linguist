@@ -14,6 +14,7 @@ import type { McpToolInfo } from '@/mcp/providers/base-client';
 import { mcpConnectionManager } from '@/mcp/providers/connection-manager';
 import { GatewayError } from '@/utils';
 import { handleAdminError } from '../error';
+import { validateMetadata } from '../metadata-validator';
 
 const router: Router = Router();
 
@@ -109,6 +110,8 @@ router.post('/', async (req: Request, res: Response) => {
       throw new GatewayError(400, 'invalid_request', 'Fields name, kind are required');
     }
 
+    validateMetadata(body.metadata);
+
     const created = await createMcpProvider(body);
     res.status(201).json({ object: 'mcp_provider', ...created });
   } catch (error) {
@@ -121,6 +124,8 @@ router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const body = req.body as McpProviderUpdateInput;
+
+    validateMetadata(body.metadata);
 
     const updated = await updateMcpProvider(id, body);
     if (!updated) {
