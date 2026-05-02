@@ -469,11 +469,15 @@ router.patch('/:id', async (req: Request, res: Response) => {
     });
 
     const result = await loadVirtualModelWithBackends(id);
+    if (!result) {
+      logger.error({ id }, 'Virtual model updated but failed to reload backends');
+      throw new GatewayError(500, 'internal_error', 'Virtual model updated but failed to reload');
+    }
     logger.info(
       { id, fieldsUpdated: update?.values.length ?? 0, backendsReplaced: backends !== undefined },
       'Virtual model updated',
     );
-    res.json(result ? withThroughput(withObjectType(result)) : null);
+    res.json(withThroughput(withObjectType(result)));
   } catch (error) {
     handleAdminError(error, res);
   }
