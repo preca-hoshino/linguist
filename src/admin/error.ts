@@ -39,7 +39,7 @@ export function handleAdminError(err: unknown, res: Response): void {
         code: err.errorCode,
         message: err.message,
         type: toErrorType(err.statusCode),
-        param: null,
+        param: err.errorParam ?? null,
       },
     };
     res.status(err.statusCode).json(body);

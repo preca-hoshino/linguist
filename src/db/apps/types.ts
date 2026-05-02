@@ -17,6 +17,7 @@ export interface AppCreateInput {
   name: string;
   allowed_model_ids?: string[] | undefined;
   allowed_mcp_ids?: string[] | undefined;
+  metadata?: Record<string, string> | undefined;
 }
 
 /** API 更新输入 */
@@ -25,4 +26,5 @@ export interface AppUpdateInput {
   is_active?: boolean | undefined;
   allowed_model_ids?: string[] | undefined;
   allowed_mcp_ids?: string[] | undefined;
+  metadata?: Record<string, string> | undefined;
 }

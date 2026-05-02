@@ -47,6 +47,7 @@ export interface McpProviderCreateInput {
   credential_type?: string | undefined;
   credential?: string[] | undefined;
   config?: McpProviderConfig | undefined;
+  metadata?: Record<string, string> | undefined;
 }
 
 /** 更新输入 */
@@ -58,4 +59,5 @@ export interface McpProviderUpdateInput {
   credential?: string[] | undefined;
   config?: McpProviderConfig | undefined;
   is_active?: boolean | undefined;
+  metadata?: Record<string, string> | undefined;
 }

@@ -2,8 +2,8 @@
 // 基于 Stripe API 设计哲学实现幂等性
 
 import type { NextFunction, Request, Response } from 'express';
-import { db } from '../db';
-import { createLogger, logColors } from '../utils';
+import { db } from '@/db';
+import { createLogger, logColors } from '@/utils';
 
 const logger = createLogger('Admin:Idempotency', logColors.magenta);
 

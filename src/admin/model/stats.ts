@@ -51,7 +51,7 @@ async function parseStatsParams(req: Request): Promise<{
   const to = typeof rawTo === 'string' && rawTo !== '' ? rawTo : undefined;
 
   if ((from !== undefined && to === undefined) || (from === undefined && to !== undefined)) {
-    throw new GatewayError(400, 'invalid_range', "Both 'from' and 'to' must be provided together");
+    throw new GatewayError(400, 'invalid_range', "Both 'from' and 'to' must be provided together").withParam('from');
   }
 
   let range: StatsRange | undefined;
@@ -59,7 +59,9 @@ async function parseStatsParams(req: Request): Promise<{
     const rawRange = req.query.range;
     const r = (typeof rawRange === 'string' && rawRange !== '' ? rawRange : '1h') as StatsRange;
     if (!VALID_RANGES.includes(r)) {
-      throw new GatewayError(400, 'invalid_range', `Invalid range. Valid values: ${VALID_RANGES.join(', ')}`);
+      throw new GatewayError(400, 'invalid_range', `Invalid range. Valid values: ${VALID_RANGES.join(', ')}`).withParam(
+        'range',
+      );
     }
     range = r;
   }
@@ -69,13 +71,19 @@ async function parseStatsParams(req: Request): Promise<{
     typeof rawDimension === 'string' && rawDimension !== '' ? rawDimension : 'global'
   ) as StatsDimension;
   if (!VALID_DIMENSIONS.includes(dimension)) {
-    throw new GatewayError(400, 'invalid_dimension', `Invalid dimension. Valid values: ${VALID_DIMENSIONS.join(', ')}`);
+    throw new GatewayError(
+      400,
+      'invalid_dimension',
+      `Invalid dimension. Valid values: ${VALID_DIMENSIONS.join(', ')}`,
+    ).withParam('dimension');
   }
 
   const rawId = req.query.id;
   let id = typeof rawId === 'string' && rawId !== '' ? rawId : undefined;
   if (dimension !== 'global' && id === undefined) {
-    throw new GatewayError(400, 'missing_id', `Parameter 'id' is required when dimension is '${dimension}'`);
+    throw new GatewayError(400, 'missing_id', `Parameter 'id' is required when dimension is '${dimension}'`).withParam(
+      'id',
+    );
   }
 
   // provider_model: id 是 provider_models.id → 需转换为 provider_models.name (= routed_model)
@@ -130,7 +138,11 @@ router.get('/time-series', async (req: Request, res: Response) => {
     const rawInterval = req.query.interval;
     const interval = typeof rawInterval === 'string' && rawInterval !== '' ? (rawInterval as StatsInterval) : undefined;
     if (interval !== undefined && !VALID_INTERVALS.includes(interval)) {
-      throw new GatewayError(400, 'invalid_interval', `Invalid interval. Valid values: ${VALID_INTERVALS.join(', ')}`);
+      throw new GatewayError(
+        400,
+        'invalid_interval',
+        `Invalid interval. Valid values: ${VALID_INTERVALS.join(', ')}`,
+      ).withParam('interval');
     }
     logger.debug({ ...params, interval }, 'Querying stats time-series');
     const result = await getStatsTimeSeries(params, interval);
@@ -196,7 +208,11 @@ router.get('/breakdown', async (req: Request, res: Response) => {
     }
     const groupBy = rawGroupBy as StatsBreakdownGroupBy;
     if (!VALID_GROUP_BY.includes(groupBy)) {
-      throw new GatewayError(400, 'invalid_group_by', `Invalid group_by. Valid values: ${VALID_GROUP_BY.join(', ')}`);
+      throw new GatewayError(
+        400,
+        'invalid_group_by',
+        `Invalid group_by. Valid values: ${VALID_GROUP_BY.join(', ')}`,
+      ).withParam('group_by');
     }
     logger.debug({ ...params, groupBy }, 'Querying stats breakdown');
     const result = await getStatsBreakdown(params, groupBy);

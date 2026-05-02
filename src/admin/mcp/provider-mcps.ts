@@ -14,6 +14,7 @@ import type { McpToolInfo } from '@/mcp/providers/base-client';
 import { mcpConnectionManager } from '@/mcp/providers/connection-manager';
 import { GatewayError } from '@/utils';
 import { handleAdminError } from '../error';
+import { validateMetadata } from '../metadata-validator';
 
 const router: Router = Router();
 
@@ -22,8 +23,9 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const { search, limit, offset, is_active, kind } = req.query;
 
-    const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : 10;
-    const offsetNum = typeof offset === 'string' && offset !== '' ? Number.parseInt(offset, 10) : 0;
+    const limitNum =
+      typeof limit === 'string' && limit !== '' ? Math.min(Math.max(Number.parseInt(limit, 10), 1), 100) : 10;
+    const offsetNum = typeof offset === 'string' && offset !== '' ? Math.max(Number.parseInt(offset, 10), 0) : 0;
     const isActiveParsed = typeof is_active === 'string' ? is_active === 'true' : undefined;
 
     const opts: Parameters<typeof listMcpProviders>[0] = { limit: limitNum, offset: offsetNum };
@@ -108,6 +110,8 @@ router.post('/', async (req: Request, res: Response) => {
       throw new GatewayError(400, 'invalid_request', 'Fields name, kind are required');
     }
 
+    validateMetadata(body.metadata);
+
     const created = await createMcpProvider(body);
     res.status(201).json({ object: 'mcp_provider', ...created });
   } catch (error) {
@@ -120,6 +124,8 @@ router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const body = req.body as McpProviderUpdateInput;
+
+    validateMetadata(body.metadata);
 
     const updated = await updateMcpProvider(id, body);
     if (!updated) {

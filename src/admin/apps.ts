@@ -6,6 +6,7 @@ import { Router } from 'express';
 import { createApp, deleteApp, getAppById, listApps, rotateAppKey, updateApp } from '@/db/apps';
 import { createLogger, GatewayError, logColors } from '@/utils';
 import { handleAdminError } from './error';
+import { validateMetadata } from './metadata-validator';
 
 const logger = createLogger('Admin:Apps', logColors.bold + logColors.blue);
 
@@ -72,15 +73,26 @@ router.get('/:id', async (req: Request<{ id: string }>, res: Response) => {
 // POST /api/apps
 router.post('/', async (req: Request, res: Response) => {
   try {
-    const body = req.body as { name?: string; allowed_model_ids?: string[]; allowed_mcp_ids?: string[] };
-    const { name, allowed_model_ids, allowed_mcp_ids } = body;
+    const body = req.body as {
+      name?: string;
+      allowed_model_ids?: string[];
+      allowed_mcp_ids?: string[];
+      metadata?: Record<string, string>;
+    };
+    const { name, allowed_model_ids, allowed_mcp_ids, metadata } = body;
 
     if (typeof name !== 'string' || name === '') {
-      throw new GatewayError(400, 'invalid_request', 'Field "name" is required and must be a non-empty string');
+      throw new GatewayError(
+        400,
+        'invalid_request',
+        'Field "name" is required and must be a non-empty string',
+      ).withParam('name');
     }
 
+    validateMetadata(metadata);
+
     logger.debug({ name }, 'Creating app');
-    const app = await createApp({ name, allowed_model_ids, allowed_mcp_ids });
+    const app = await createApp({ name, allowed_model_ids, allowed_mcp_ids, metadata });
     logger.info({ id: app.id, name }, 'App created via admin API');
     res.status(201).json({ object: 'app', ...app });
   } catch (error) {
@@ -98,7 +110,10 @@ router.patch('/:id', async (req: Request<{ id: string }>, res: Response) => {
       is_active?: boolean;
       allowed_model_ids?: string[];
       allowed_mcp_ids?: string[];
+      metadata?: Record<string, string>;
     };
+
+    validateMetadata(body.metadata);
 
     logger.debug({ id }, 'Updating app');
     const app = await updateApp(id, body);
@@ -138,8 +153,8 @@ router.delete('/:id', async (req: Request<{ id: string }>, res: Response) => {
 // ====================================================================
 
 // ==================== 轮换应用 API Key ====================
-// POST /api/apps/:id/rotate-key
-router.post('/:id/rotate-key', async (req: Request<{ id: string }>, res: Response) => {
+// POST /api/apps/:id/key
+router.post('/:id/key', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const { id } = req.params;
     logger.debug({ id }, 'Rotating app API key');

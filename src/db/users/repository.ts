@@ -46,6 +46,7 @@ export async function listUsers(options?: {
   limit?: number;
   offset?: number;
   search?: string;
+  is_active?: boolean;
 }): Promise<{ data: UserRow[]; has_more: boolean; total: number }> {
   const limitNum = typeof options?.limit === 'number' ? Math.min(Math.max(options.limit, 1), 100) : 10;
   const offsetNum = typeof options?.offset === 'number' ? Math.max(options.offset, 0) : 0;
@@ -54,6 +55,12 @@ export async function listUsers(options?: {
   const conditions: string[] = [];
   const values: unknown[] = [];
   let paramIdx = 1;
+
+  if (typeof options?.is_active === 'boolean') {
+    conditions.push(`is_active = $${String(paramIdx)}`);
+    values.push(options.is_active);
+    paramIdx++;
+  }
 
   if (typeof search === 'string' && search.trim() !== '') {
     conditions.push(`(username ILIKE $${String(paramIdx)} OR email ILIKE $${String(paramIdx)})`);

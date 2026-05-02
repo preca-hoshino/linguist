@@ -37,7 +37,11 @@ export async function createApp(input: AppCreateInput): Promise<AppRow> {
   const { name, allowed_model_ids: allowedModelIds = [], allowed_mcp_ids: allowedMcpIds = [] } = input;
 
   return await withTransaction(async (tx) => {
-    await tx.query(`INSERT INTO apps (id, name) VALUES ($1, $2)`, [id, name]);
+    await tx.query(`INSERT INTO apps (id, name, metadata) VALUES ($1, $2, $3)`, [
+      id,
+      name,
+      JSON.stringify(input.metadata ?? {}),
+    ]);
 
     // 批量插入白名单
     if (allowedModelIds.length > 0) {
@@ -152,6 +156,7 @@ export async function updateApp(id: string, updates: AppUpdateInput): Promise<Ap
     const update = buildUpdateSet({
       name: fieldUpdates.name,
       is_active: fieldUpdates.is_active,
+      metadata: fieldUpdates.metadata === undefined ? undefined : JSON.stringify(fieldUpdates.metadata),
     });
 
     if (update) {

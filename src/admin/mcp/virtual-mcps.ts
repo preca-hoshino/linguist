@@ -12,6 +12,7 @@ import {
 import type { VirtualMcpCreateInput, VirtualMcpUpdateInput } from '@/db/mcp-virtual-servers/types';
 import { GatewayError } from '@/utils';
 import { handleAdminError } from '../error';
+import { validateMetadata } from '../metadata-validator';
 
 const router: Router = Router();
 
@@ -25,8 +26,9 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const { search, limit, offset, is_active, mcp_provider_id } = req.query;
 
-    const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : 10;
-    const offsetNum = typeof offset === 'string' && offset !== '' ? Number.parseInt(offset, 10) : 0;
+    const limitNum =
+      typeof limit === 'string' && limit !== '' ? Math.min(Math.max(Number.parseInt(limit, 10), 1), 100) : 10;
+    const offsetNum = typeof offset === 'string' && offset !== '' ? Math.max(Number.parseInt(offset, 10), 0) : 0;
     const isActiveParsed = typeof is_active === 'string' ? is_active === 'true' : undefined;
 
     const opts: Parameters<typeof listVirtualMcps>[0] = { limit: limitNum, offset: offsetNum };
@@ -77,8 +79,10 @@ router.post('/', async (req: Request, res: Response) => {
       throw new GatewayError(400, 'invalid_request', 'Fields name, mcp_provider_id are required');
     }
 
+    validateMetadata(body.metadata);
+
     if (!MCP_NAME_REGEX.test(body.name)) {
-      throw new GatewayError(400, 'invalid_request', MCP_NAME_FORMAT_ERROR);
+      throw new GatewayError(400, 'invalid_request', MCP_NAME_FORMAT_ERROR).withParam('name');
     }
 
     const created = await createVirtualMcp(body);
@@ -96,8 +100,10 @@ router.patch('/:id', async (req: Request, res: Response) => {
 
     // 若包含 name 字段，校验格式（不允许空格）
     if (typeof body.name === 'string' && body.name !== '' && !MCP_NAME_REGEX.test(body.name)) {
-      throw new GatewayError(400, 'invalid_request', MCP_NAME_FORMAT_ERROR);
+      throw new GatewayError(400, 'invalid_request', MCP_NAME_FORMAT_ERROR).withParam('name');
     }
+
+    validateMetadata(body.metadata);
 
     const updated = await updateVirtualMcp(id, body);
     if (!updated) {

@@ -27,7 +27,7 @@ function parseMcpStatsParams(req: Request): McpStatsQueryParams {
   const to = typeof rawTo === 'string' && rawTo !== '' ? rawTo : undefined;
 
   if ((from !== undefined && to === undefined) || (from === undefined && to !== undefined)) {
-    throw new GatewayError(400, 'invalid_range', "Both 'from' and 'to' must be provided together");
+    throw new GatewayError(400, 'invalid_range', "Both 'from' and 'to' must be provided together").withParam('from');
   }
 
   let range: McpStatsRange | undefined;
@@ -35,7 +35,9 @@ function parseMcpStatsParams(req: Request): McpStatsQueryParams {
     const rawRange = req.query.range;
     const r = (typeof rawRange === 'string' && rawRange !== '' ? rawRange : '1h') as McpStatsRange;
     if (!VALID_RANGES.includes(r)) {
-      throw new GatewayError(400, 'invalid_range', `Invalid range. Valid values: ${VALID_RANGES.join(', ')}`);
+      throw new GatewayError(400, 'invalid_range', `Invalid range. Valid values: ${VALID_RANGES.join(', ')}`).withParam(
+        'range',
+      );
     }
     range = r;
   }
@@ -45,13 +47,19 @@ function parseMcpStatsParams(req: Request): McpStatsQueryParams {
     typeof rawDimension === 'string' && rawDimension !== '' ? rawDimension : 'global'
   ) as McpStatsDimension;
   if (!VALID_DIMENSIONS.includes(dimension)) {
-    throw new GatewayError(400, 'invalid_dimension', `Invalid dimension. Valid values: ${VALID_DIMENSIONS.join(', ')}`);
+    throw new GatewayError(
+      400,
+      'invalid_dimension',
+      `Invalid dimension. Valid values: ${VALID_DIMENSIONS.join(', ')}`,
+    ).withParam('dimension');
   }
 
   const rawId = req.query.id;
   const id = typeof rawId === 'string' && rawId !== '' ? rawId : undefined;
   if (dimension !== 'global' && id === undefined) {
-    throw new GatewayError(400, 'missing_id', `Parameter 'id' is required when dimension is '${dimension}'`);
+    throw new GatewayError(400, 'missing_id', `Parameter 'id' is required when dimension is '${dimension}'`).withParam(
+      'id',
+    );
   }
 
   return {
@@ -82,7 +90,11 @@ router.get('/time-series', async (req: Request, res: Response) => {
     const interval =
       typeof rawInterval === 'string' && rawInterval !== '' ? (rawInterval as McpStatsInterval) : undefined;
     if (interval !== undefined && !VALID_INTERVALS.includes(interval)) {
-      throw new GatewayError(400, 'invalid_interval', `Invalid interval. Valid values: ${VALID_INTERVALS.join(', ')}`);
+      throw new GatewayError(
+        400,
+        'invalid_interval',
+        `Invalid interval. Valid values: ${VALID_INTERVALS.join(', ')}`,
+      ).withParam('interval');
     }
     const result = await getMcpStatsTimeSeries(params, interval);
     res.json({
@@ -136,7 +148,9 @@ router.get('/distribution', async (req: Request, res: Response) => {
     const rawGroupBy = req.query.groupBy;
     const groupBy = typeof rawGroupBy === 'string' ? rawGroupBy : '';
     if (groupBy !== 'virtual_mcp' && groupBy !== 'mcp_provider') {
-      throw new GatewayError(400, 'invalid_group_by', "groupBy must be 'virtual_mcp' or 'mcp_provider'");
+      throw new GatewayError(400, 'invalid_group_by', "groupBy must be 'virtual_mcp' or 'mcp_provider'").withParam(
+        'groupBy',
+      );
     }
     const result = await getMcpDistribution(params, groupBy);
     res.json({

@@ -5,6 +5,7 @@ import { Router } from 'express';
 import { db, generateShortId } from '@/db';
 import { buildInClause, buildUpdateSet, createLogger, GatewayError, logColors, rateLimiter } from '@/utils';
 import { handleAdminError } from '../error';
+import { validateMetadata } from '../metadata-validator';
 
 const logger = createLogger('Admin:ProviderModels', logColors.bold + logColors.blue);
 
@@ -78,6 +79,8 @@ interface ProviderModelBody {
   tpm_limit?: number | null | undefined;
   /** API 调用超时时间（毫秒）。null = 使用系统默认超时 */
   timeout_ms?: number | null | undefined;
+  /** 自定义元数据 */
+  metadata?: Record<string, string> | undefined;
 }
 
 /**
@@ -350,8 +353,11 @@ router.post('/', async (req: Request, res: Response) => {
       rpm_limit,
       tpm_limit,
       timeout_ms,
+      metadata,
     } = body;
     logger.debug({ provider_id, name, model_type }, 'Creating provider model');
+
+    validateMetadata(metadata);
 
     if (
       typeof provider_id !== 'string' ||
@@ -365,7 +371,11 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     if (!['chat', 'embedding', 'rerank', 'image', 'audio'].includes(model_type)) {
-      throw new GatewayError(400, 'invalid_request', 'model_type must be one of chat, embedding, rerank, image, audio');
+      throw new GatewayError(
+        400,
+        'invalid_request',
+        'model_type must be one of chat, embedding, rerank, image, audio',
+      ).withParam('model_type');
     }
 
     // 校验模型能力标识
@@ -437,11 +447,18 @@ router.patch('/:id', async (req: Request, res: Response) => {
       rpm_limit,
       tpm_limit,
       timeout_ms,
+      metadata,
     } = body;
     logger.debug({ id }, 'Updating provider model');
 
+    validateMetadata(metadata);
+
     if (model_type !== undefined && !['chat', 'embedding', 'rerank', 'image', 'audio'].includes(model_type)) {
-      throw new GatewayError(400, 'invalid_request', 'model_type must be one of chat, embedding, rerank, image, audio');
+      throw new GatewayError(
+        400,
+        'invalid_request',
+        'model_type must be one of chat, embedding, rerank, image, audio',
+      ).withParam('model_type');
     }
 
     let effectiveType = model_type;

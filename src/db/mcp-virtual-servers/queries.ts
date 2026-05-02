@@ -17,10 +17,17 @@ export async function createVirtualMcp(input: VirtualMcpCreateInput): Promise<Vi
   const id = await generateShortId('virtual_mcps');
 
   const result = await db.query<VirtualMcpRow>(
-    `INSERT INTO virtual_mcps (id, name, description, mcp_provider_id, config)
-     VALUES ($1, $2, $3, $4, $5::jsonb)
+    `INSERT INTO virtual_mcps (id, name, description, mcp_provider_id, config, metadata)
+     VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb)
      RETURNING *`,
-    [id, input.name, input.description ?? '', input.mcp_provider_id, JSON.stringify(input.config ?? {})],
+    [
+      id,
+      input.name,
+      input.description ?? '',
+      input.mcp_provider_id,
+      JSON.stringify(input.config ?? {}),
+      JSON.stringify(input.metadata ?? {}),
+    ],
   );
 
   const row = result.rows[0];
@@ -129,6 +136,9 @@ export async function updateVirtualMcp(id: string, updates: VirtualMcpUpdateInpu
     }
     if (updates.is_active !== undefined) {
       fieldUpdates.is_active = updates.is_active;
+    }
+    if (updates.metadata !== undefined) {
+      fieldUpdates.metadata = JSON.stringify(updates.metadata);
     }
 
     const update = buildUpdateSet(fieldUpdates);
