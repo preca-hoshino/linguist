@@ -3,8 +3,8 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { findByEmail } from '@/db';
-import type { ApiErrorResponse } from '@/types/api';
-import { createLogger, logColors, signToken, verifyPassword } from '@/utils';
+import { createLogger, GatewayError, logColors, signToken, verifyPassword } from '@/utils';
+import { handleAdminError } from './error';
 
 const logger = createLogger('Admin:Login', logColors.bold + logColors.cyan);
 
@@ -18,55 +18,24 @@ loginRouter.post('/login', async (req: Request, res: Response) => {
     const { email, password } = req.body as { email?: string; password?: string };
 
     if (email === undefined || email === '' || password === undefined || password === '') {
-      const body: ApiErrorResponse = {
-        error: {
-          code: 'invalid_request',
-          message: 'email and password are required',
-          type: 'invalid_request_error',
-          param: null,
-        },
-      };
-      res.status(400).json(body);
-      return;
+      throw new GatewayError(400, 'invalid_request', 'email and password are required').withParam('email');
     }
 
     const jwtSecret = process.env.JWT_SECRET ?? '';
     if (jwtSecret === '') {
       logger.error('JWT_SECRET environment variable is not configured');
-      const body: ApiErrorResponse = {
-        error: { code: 'config_error', message: 'JWT_SECRET not configured', type: 'server_error', param: null },
-      };
-      res.status(500).json(body);
-      return;
+      throw new GatewayError(500, 'config_error', 'JWT_SECRET not configured');
     }
 
     const user = await findByEmail(email);
     if (!user?.is_active) {
       logger.warn({ ip: req.ip, email }, 'Login failed: user not found or inactive');
-      const body: ApiErrorResponse = {
-        error: {
-          code: 'invalid_credentials',
-          message: 'Invalid credentials',
-          type: 'authentication_error',
-          param: null,
-        },
-      };
-      res.status(401).json(body);
-      return;
+      throw new GatewayError(401, 'invalid_credentials', 'Invalid credentials');
     }
 
     if (!verifyPassword(password, user.password_hash)) {
       logger.warn({ ip: req.ip, email }, 'Login failed: wrong password');
-      const body: ApiErrorResponse = {
-        error: {
-          code: 'invalid_credentials',
-          message: 'Invalid credentials',
-          type: 'authentication_error',
-          param: null,
-        },
-      };
-      res.status(401).json(body);
-      return;
+      throw new GatewayError(401, 'invalid_credentials', 'Invalid credentials');
     }
 
     const token = signToken({ sub: user.id }, jwtSecret, TOKEN_EXPIRES_IN);
@@ -74,16 +43,13 @@ loginRouter.post('/login', async (req: Request, res: Response) => {
     logger.info({ userId: user.id, username: user.username }, 'Login successful');
 
     res.json({
+      object: 'access_token',
       access_token: token,
       expires_in: TOKEN_EXPIRES_IN,
       token_type: 'Bearer',
     });
   } catch (error) {
-    logger.error(error instanceof Error ? error : new Error(String(error)), 'Login error');
-    const body: ApiErrorResponse = {
-      error: { code: 'internal_error', message: 'Internal server error', type: 'server_error', param: null },
-    };
-    res.status(500).json(body);
+    handleAdminError(error, res);
   }
 });
 
