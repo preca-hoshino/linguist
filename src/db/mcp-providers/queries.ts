@@ -17,8 +17,8 @@ export async function createMcpProvider(input: McpProviderCreateInput): Promise<
   const id = await generateShortId('mcp_providers');
 
   const result = await db.query<McpProviderRow>(
-    `INSERT INTO mcp_providers (id, name, kind, base_url, credential_type, credential, config)
-     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb)
+    `INSERT INTO mcp_providers (id, name, kind, base_url, credential_type, credential, config, metadata)
+     VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7::jsonb, $8::jsonb)
      RETURNING *`,
     [
       id,
@@ -28,6 +28,7 @@ export async function createMcpProvider(input: McpProviderCreateInput): Promise<
       input.credential_type ?? 'api_key',
       JSON.stringify(input.credential ?? []),
       JSON.stringify(input.config ?? {}),
+      JSON.stringify(input.metadata ?? {}),
     ],
   );
 
@@ -130,6 +131,9 @@ export async function updateMcpProvider(id: string, updates: McpProviderUpdateIn
     }
     if (updates.is_active !== undefined) {
       fieldUpdates.is_active = updates.is_active;
+    }
+    if (updates.metadata !== undefined) {
+      fieldUpdates.metadata = JSON.stringify(updates.metadata);
     }
 
     const update = buildUpdateSet(fieldUpdates);
