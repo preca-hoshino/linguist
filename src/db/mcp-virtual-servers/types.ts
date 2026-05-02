@@ -28,6 +28,7 @@ export interface VirtualMcpCreateInput {
   description?: string | undefined;
   mcp_provider_id: string;
   config?: VirtualMcpConfig | undefined;
+  metadata?: Record<string, string> | undefined;
 }
 
 /** 更新输入 */
@@ -37,4 +38,5 @@ export interface VirtualMcpUpdateInput {
   mcp_provider_id?: string | undefined;
   config?: VirtualMcpConfig | undefined;
   is_active?: boolean | undefined;
+  metadata?: Record<string, string> | undefined;
 }
