@@ -308,21 +308,29 @@ router.post('/', async (req: Request, res: Response) => {
     logger.debug({ name, model_type, routingStrategy: routing_strategy }, 'Creating virtual model');
 
     if (typeof name !== 'string' || name === '') {
-      throw new GatewayError(400, 'invalid_request', 'Field name is required');
+      throw new GatewayError(400, 'invalid_request', 'Field name is required').withParam('name');
     }
 
     if (typeof model_type !== 'string' || !['chat', 'embedding'].includes(model_type)) {
-      throw new GatewayError(400, 'invalid_request', 'Field model_type is required and must be "chat" or "embedding"');
+      throw new GatewayError(
+        400,
+        'invalid_request',
+        'Field model_type is required and must be "chat" or "embedding"',
+      ).withParam('model_type');
     }
 
     const strategy =
       typeof routing_strategy === 'string' && routing_strategy !== '' ? routing_strategy : 'load_balance';
     if (!VALID_STRATEGIES.has(strategy)) {
-      throw new GatewayError(400, 'invalid_request', 'routing_strategy must be one of: load_balance, failover');
+      throw new GatewayError(
+        400,
+        'invalid_request',
+        'routing_strategy must be one of: load_balance, failover',
+      ).withParam('routing_strategy');
     }
 
     if (!Array.isArray(backends) || backends.length === 0) {
-      throw new GatewayError(400, 'invalid_request', 'At least one backend is required');
+      throw new GatewayError(400, 'invalid_request', 'At least one backend is required').withParam('backends');
     }
 
     // 校验所有 provider_model_id 存在且 model_type 一致
@@ -392,12 +400,14 @@ router.patch('/:id', async (req: Request, res: Response) => {
     }
 
     if (model_type !== undefined && !['chat', 'embedding'].includes(model_type)) {
-      throw new GatewayError(400, 'invalid_request', 'model_type must be "chat" or "embedding"');
+      throw new GatewayError(400, 'invalid_request', 'model_type must be "chat" or "embedding"').withParam(
+        'model_type',
+      );
     }
 
     // 更新虚拟模型基本字段
     if (routing_strategy !== undefined && !VALID_STRATEGIES.has(routing_strategy)) {
-      throw new GatewayError(400, 'invalid_request', 'Invalid routing_strategy');
+      throw new GatewayError(400, 'invalid_request', 'Invalid routing_strategy').withParam('routing_strategy');
     }
 
     // 确定生效的 model_type（取更新值或现有值）
@@ -416,7 +426,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
     // 如果提供了后端列表，则替换
     if (backends !== undefined) {
       if (!Array.isArray(backends) || backends.length === 0) {
-        throw new GatewayError(400, 'invalid_request', 'At least one backend is required');
+        throw new GatewayError(400, 'invalid_request', 'At least one backend is required').withParam('backends');
       }
 
       // 校验 provider_model_id 存在且 model_type 一致
