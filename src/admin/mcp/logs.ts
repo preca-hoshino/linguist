@@ -14,8 +14,9 @@ router.get('/', async (req: Request, res: Response) => {
   try {
     const { limit, offset, virtual_mcp_id, mcp_provider_id, method, status, tool_name } = req.query;
 
-    const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : 20;
-    const offsetNum = typeof offset === 'string' && offset !== '' ? Number.parseInt(offset, 10) : 0;
+    const limitNum =
+      typeof limit === 'string' && limit !== '' ? Math.min(Math.max(Number.parseInt(limit, 10), 1), 100) : 10;
+    const offsetNum = typeof offset === 'string' && offset !== '' ? Math.max(Number.parseInt(offset, 10), 0) : 0;
 
     const opts: McpLogQuery = { limit: limitNum, offset: offsetNum };
     if (typeof virtual_mcp_id === 'string' && virtual_mcp_id !== '') {
