@@ -6,6 +6,7 @@ import type { UserUpdateData } from '@/db';
 import { createUser, deleteUser, getUserAvatarData, listUsers, updateUser } from '@/db';
 import { createLogger, GatewayError, logColors } from '@/utils';
 import { handleAdminError } from './error';
+import { validateMetadata } from './metadata-validator';
 
 const logger = createLogger('Admin:Users', logColors.bold + logColors.magenta);
 
@@ -55,11 +56,12 @@ usersRouter.get('/', async (req: Request, res: Response) => {
 /** POST /api/users — 创建用户 */
 usersRouter.post('/', async (req: Request, res: Response) => {
   try {
-    const { username, email, password, avatar_data } = req.body as {
+    const { username, email, password, avatar_data, metadata } = req.body as {
       username?: string;
       email?: string;
       password?: string;
       avatar_data?: string;
+      metadata?: Record<string, string>;
     };
 
     if (
@@ -72,6 +74,8 @@ usersRouter.post('/', async (req: Request, res: Response) => {
     ) {
       throw new GatewayError(400, 'invalid_request', 'username, email and password are required');
     }
+
+    validateMetadata(metadata);
 
     const user = await createUser({ username, email, password, avatar_data: avatar_data ?? '' });
     logger.info({ userId: user.id, username }, 'User created');
@@ -100,12 +104,13 @@ usersRouter.post('/', async (req: Request, res: Response) => {
 usersRouter.patch('/:id', async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
-    const { username, email, password, avatar_data, is_active } = req.body as {
+    const { username, email, password, avatar_data, is_active, metadata } = req.body as {
       username?: string;
       email?: string;
       password?: string;
       avatar_data?: string;
       is_active?: boolean;
+      metadata?: Record<string, string>;
     };
 
     const data: UserUpdateData = {};
@@ -124,6 +129,8 @@ usersRouter.patch('/:id', async (req: Request, res: Response) => {
     if (is_active !== undefined) {
       data.is_active = is_active;
     }
+
+    validateMetadata(metadata);
 
     const user = await updateUser(id, data);
     if (!user) {
