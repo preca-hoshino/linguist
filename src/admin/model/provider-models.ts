@@ -365,7 +365,11 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     if (!['chat', 'embedding', 'rerank', 'image', 'audio'].includes(model_type)) {
-      throw new GatewayError(400, 'invalid_request', 'model_type must be one of chat, embedding, rerank, image, audio');
+      throw new GatewayError(
+        400,
+        'invalid_request',
+        'model_type must be one of chat, embedding, rerank, image, audio',
+      ).withParam('model_type');
     }
 
     // 校验模型能力标识
@@ -441,7 +445,11 @@ router.patch('/:id', async (req: Request, res: Response) => {
     logger.debug({ id }, 'Updating provider model');
 
     if (model_type !== undefined && !['chat', 'embedding', 'rerank', 'image', 'audio'].includes(model_type)) {
-      throw new GatewayError(400, 'invalid_request', 'model_type must be one of chat, embedding, rerank, image, audio');
+      throw new GatewayError(
+        400,
+        'invalid_request',
+        'model_type must be one of chat, embedding, rerank, image, audio',
+      ).withParam('model_type');
     }
 
     let effectiveType = model_type;
