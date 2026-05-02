@@ -131,7 +131,7 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     if (typeof base_url !== 'string' || (base_url === '' && kind !== 'copilot')) {
-      throw new GatewayError(400, 'invalid_request', 'Field base_url is required');
+      throw new GatewayError(400, 'invalid_request', 'Field base_url is required').withParam('base_url');
     }
 
     const validKinds = getRegisteredProviderKinds();
