@@ -200,7 +200,7 @@ router.get('/', async (req: Request, res: Response) => {
     const hasMore = offsetNum + dataRows.length < total;
 
     if (dataRows.length === 0) {
-      res.json({ object: 'list', url: '/admin/virtual-models', data: [], total, has_more: false });
+      res.json({ object: 'list', url: '/admin/model/virtual-models', data: [], total, has_more: false });
       return;
     }
 
@@ -255,7 +255,7 @@ router.get('/', async (req: Request, res: Response) => {
     );
 
     logger.debug({ count: finalData.length, total, has_more: hasMore }, 'Virtual models listed');
-    res.json({ object: 'list', url: '/admin/virtual-models', data: finalData, total, has_more: hasMore });
+    res.json({ object: 'list', url: '/admin/model/virtual-models', data: finalData, total, has_more: hasMore });
   } catch (error) {
     handleAdminError(error, res);
   }
