@@ -87,6 +87,7 @@ describe('POST /api/login', () => {
     expect(signToken).toHaveBeenCalledWith({ sub: 'user-123' }, 'test-secret', 86_400);
     expect(res.status).toBe(200);
     expect(res.body).toEqual({
+      object: 'access_token',
       access_token: 'mock-jwt-token',
       expires_in: 86_400,
       token_type: 'Bearer',
