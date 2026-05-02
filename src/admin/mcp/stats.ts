@@ -68,7 +68,7 @@ router.get('/overview', async (req: Request, res: Response) => {
   try {
     const params = parseMcpStatsParams(req);
     const result = await getMcpStatsOverview(params);
-    res.json(result);
+    res.json({ object: 'stats_overview', ...result });
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -85,7 +85,13 @@ router.get('/time-series', async (req: Request, res: Response) => {
       throw new GatewayError(400, 'invalid_interval', `Invalid interval. Valid values: ${VALID_INTERVALS.join(', ')}`);
     }
     const result = await getMcpStatsTimeSeries(params, interval);
-    res.json({ object: 'list', data: result });
+    res.json({
+      object: 'list',
+      url: '/admin/mcp/stats/time-series',
+      data: result,
+      total: result.length,
+      has_more: false,
+    });
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -96,7 +102,7 @@ router.get('/methods', async (req: Request, res: Response) => {
   try {
     const params = parseMcpStatsParams(req);
     const result = await getMcpMethodBreakdown(params);
-    res.json({ object: 'list', data: result });
+    res.json({ object: 'list', url: '/admin/mcp/stats/methods', data: result, total: result.length, has_more: false });
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -106,7 +112,7 @@ router.get('/methods', async (req: Request, res: Response) => {
 router.get('/today', async (_req: Request, res: Response) => {
   try {
     const result = await getMcpStatsToday();
-    res.json(result);
+    res.json({ object: 'stats_today', ...result });
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -117,7 +123,7 @@ router.get('/errors', async (req: Request, res: Response) => {
   try {
     const params = parseMcpStatsParams(req);
     const result = await getMcpStatsErrors(params);
-    res.json(result);
+    res.json({ object: 'stats_errors', ...result });
   } catch (error) {
     handleAdminError(error, res);
   }
@@ -133,7 +139,13 @@ router.get('/distribution', async (req: Request, res: Response) => {
       throw new GatewayError(400, 'invalid_group_by', "groupBy must be 'virtual_mcp' or 'mcp_provider'");
     }
     const result = await getMcpDistribution(params, groupBy);
-    res.json({ object: 'list', data: result });
+    res.json({
+      object: 'list',
+      url: '/admin/mcp/stats/distribution',
+      data: result,
+      total: result.length,
+      has_more: false,
+    });
   } catch (error) {
     handleAdminError(error, res);
   }
