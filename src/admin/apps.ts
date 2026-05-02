@@ -138,8 +138,8 @@ router.delete('/:id', async (req: Request<{ id: string }>, res: Response) => {
 // ====================================================================
 
 // ==================== 轮换应用 API Key ====================
-// POST /api/apps/:id/rotate-key
-router.post('/:id/rotate-key', async (req: Request<{ id: string }>, res: Response) => {
+// POST /api/apps/:id/key
+router.post('/:id/key', async (req: Request<{ id: string }>, res: Response) => {
   try {
     const { id } = req.params;
     logger.debug({ id }, 'Rotating app API key');
