@@ -3,6 +3,7 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { db, generateShortId } from '@/db';
+import { getProviderSupportedChatParameters, getProviderSupportedEmbeddingParameters } from '@/model/http/providers';
 import { buildInClause, buildUpdateSet, createLogger, GatewayError, logColors, rateLimiter } from '@/utils';
 import { handleAdminError } from '../error';
 import { validateMetadata } from '../metadata-validator';
@@ -33,16 +34,27 @@ const CAPABILITIES_BY_TYPE: Record<string, readonly string[]> = {
   audio: AUDIO_CAPABILITIES,
 };
 
+/**
+ * Chat 模型可声明的调优参数白名单
+ * 必须与 engine.ts 中 FILTERABLE_CHAT_PARAMS 保持同步。
+ * 新增参数需同时加入 InternalChatRequest 类型定义和所有提供商适配器。
+ */
 const CHAT_PARAMETERS = [
   'temperature',
   'top_p',
   'top_k',
+  'max_tokens',
   'frequency_penalty',
   'presence_penalty',
   'stop',
-  'logprobs',
 ] as const;
-const EMBEDDING_PARAMETERS = ['dimensions', 'encoding_format', 'truncation'] as const;
+
+/**
+ * Embedding 模型可声明的调优参数白名单
+ * 必须与 engine.ts 中 FILTERABLE_EMBEDDING_PARAMS 保持同步。
+ * 新增参数需同时加入 InternalEmbeddingRequest 类型定义和所有提供商适配器。
+ */
+const EMBEDDING_PARAMETERS = ['dimensions', 'encoding_format'] as const;
 const RERANK_PARAMETERS = ['top_n', 'return_documents'] as const;
 const IMAGE_PARAMETERS = ['steps', 'guidance_scale', 'width', 'height', 'seed'] as const;
 const AUDIO_PARAMETERS = ['speed', 'pitch', 'sample_rate'] as const;
@@ -196,6 +208,43 @@ function validateSupportedParameters(modelType: string, parameters: string[]): v
       400,
       'invalid_request',
       `Invalid ${modelType} supported parameters: ${invalid.join(', ')}. Allowed: ${allowed.join(', ')}`,
+    );
+  }
+}
+
+/**
+ * 按提供商 kind 交叉校验 supported_parameters 与适配器实际能力
+ *
+ * 在 model_type 白名单校验通过后调用，确保配置的参数不会被
+ * 提供商适配器静默忽略或报错。
+ */
+function validateSupportedParametersAgainstProviderKind(
+  providerKind: string,
+  modelType: string,
+  parameters: string[],
+): void {
+  const isChat = modelType === 'chat';
+  const isEmbedding = modelType === 'embedding';
+
+  if (!isChat && !isEmbedding) {
+    return; // rerank/image/audio 尚无提供商级参数声明
+  }
+
+  const pluginParams: readonly string[] = isChat
+    ? getProviderSupportedChatParameters(providerKind)
+    : getProviderSupportedEmbeddingParameters(providerKind);
+
+  if (pluginParams.length === 0) {
+    return; // 提供商未声明参数能力，不做交叉校验（向后兼容未来新增的提供商）
+  }
+
+  const incompatible = parameters.filter((p) => !pluginParams.includes(p));
+  if (incompatible.length > 0) {
+    throw new GatewayError(
+      400,
+      'invalid_request',
+      `Provider "${providerKind}" (${modelType}) does not natively support: ${incompatible.join(', ')}. ` +
+        `Supported by provider: ${pluginParams.join(', ')}`,
     );
   }
 }
@@ -395,9 +444,18 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     // 校验 provider 存在
-    const providerCheck = await db.query('SELECT id FROM model_providers WHERE id = $1', [provider_id]);
+    const providerCheck = await db.query<{ id: string; kind: string }>(
+      'SELECT id, kind FROM model_providers WHERE id = $1',
+      [provider_id],
+    );
     if (providerCheck.rowCount === 0) {
       throw new GatewayError(404, 'not_found', `Provider ${provider_id} not found`);
+    }
+    const providerKind = providerCheck.rows[0]?.kind ?? '';
+
+    // 按提供商 kind 交叉校验 supported_parameters 与适配器实际能力
+    if (Array.isArray(supported_parameters) && supported_parameters.length > 0) {
+      validateSupportedParametersAgainstProviderKind(providerKind, model_type, supported_parameters);
     }
 
     const result = await db.query(
@@ -477,6 +535,19 @@ router.patch('/:id', async (req: Request, res: Response) => {
       }
       if (Array.isArray(supported_parameters) && supported_parameters.length > 0) {
         validateSupportedParameters(effectiveType, supported_parameters);
+
+        // 按提供商 kind 交叉校验 supported_parameters 与适配器实际能力
+        const pmRow = await db.query<{ provider_id: string; kind: string }>(
+          `SELECT pm.provider_id, p.kind
+           FROM model_provider_models pm
+           JOIN model_providers p ON pm.provider_id = p.id
+           WHERE pm.id = $1`,
+          [id],
+        );
+        const providerKind = pmRow.rows[0]?.kind;
+        if (providerKind !== undefined && providerKind !== '') {
+          validateSupportedParametersAgainstProviderKind(providerKind, effectiveType, supported_parameters);
+        }
       }
     }
 
