@@ -38,7 +38,7 @@ export interface WsSessionUpdate {
     /** 温度参数 */
     temperature?: number | undefined;
     /** 最大输出 Token */
-    max_response_output_tokens?: number   | undefined;
+    max_response_output_tokens?: number | undefined;
     /** 其他扩展配置 */
     [key: string]: unknown;
   };
