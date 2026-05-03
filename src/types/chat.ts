@@ -126,6 +126,7 @@ export type FinishReason =
   | 'tool_calls'
   | 'content_filter'
   | 'insufficient_system_resource'
+  | 'repetition_truncation'
   | 'unknown';
 
 /**

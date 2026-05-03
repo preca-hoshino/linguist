@@ -87,6 +87,14 @@ CREATE TABLE IF NOT EXISTS app_allowed_models (
     PRIMARY KEY (app_id, virtual_model_id)
 );
 
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+    idempotency_key TEXT         PRIMARY KEY,
+    request_path    TEXT         NOT NULL,
+    response_code   INTEGER      NOT NULL,
+    response_body   JSONB        NOT NULL,
+    created_at      TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS request_logs (
     id                      VARCHAR(36)    NOT NULL,
     status                  VARCHAR(20)    NOT NULL DEFAULT 'processing'

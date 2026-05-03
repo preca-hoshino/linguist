@@ -39,6 +39,7 @@ function mapFinishReason(reason: FinishReason): string {
     }
     case 'content_filter':
     case 'insufficient_system_resource':
+    case 'repetition_truncation':
     case 'unknown': {
       return 'end_turn';
     }
