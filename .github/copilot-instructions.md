@@ -32,15 +32,16 @@ npm run db           # 运行数据库迁移
 
 ## 细分规范索引
 
-| 领域            | 文件                                                    |
-| --------------- | ------------------------------------------------------- |
-| 工作流          | `.github/instructions/git-workflow.instructions.md`     |
-| 代码风格        | `.github/instructions/code-style.instructions.md`       |
-| 错误处理        | `.github/instructions/error-handling.instructions.md`   |
-| 日志            | `.github/instructions/logging.instructions.md`          |
-| 数据库          | `.github/instructions/database.instructions.md`         |
-| 中间件          | `.github/instructions/middleware.instructions.md`       |
-| API 设计        | `.github/instructions/api-design.instructions.md`       |
-| 管理 API (REST) | `.github/instructions/admin-api-rest.instructions.md`   |
-| 管理 API (参数) | `.github/instructions/admin-api-params.instructions.md` |
-| 测试            | `.github/instructions/testing.instructions.md`          |
+| 领域            | 文件                                                     |
+| --------------- | -------------------------------------------------------- |
+| 工作流          | `.github/instructions/git-workflow.instructions.md`      |
+| 代码风格        | `.github/instructions/code-style.instructions.md`        |
+| 错误处理        | `.github/instructions/error-handling.instructions.md`    |
+| 日志            | `.github/instructions/logging.instructions.md`           |
+| 数据库          | `.github/instructions/database.instructions.md`          |
+| 中间件          | `.github/instructions/middleware.instructions.md`        |
+| 目录结构        | `.github/instructions/project-structure.instructions.md` |
+| API 设计        | `.github/instructions/api-design.instructions.md`        |
+| 管理 API (REST) | `.github/instructions/admin-api-rest.instructions.md`    |
+| 管理 API (参数) | `.github/instructions/admin-api-params.instructions.md`  |
+| 测试            | `.github/instructions/testing.instructions.md`           |
