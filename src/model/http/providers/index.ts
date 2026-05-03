@@ -8,6 +8,7 @@ import { deepseekPlugin } from './deepseek';
 import { geminiPlugin } from './gemini';
 import type { ProviderChatAdapterSet, ProviderEmbeddingAdapterSet, ProviderPlugin } from './types';
 import { volcenginePlugin } from './volcengine';
+import { mimoPlugin } from './mimo';
 
 const logger = createLogger('Providers', logColors.bold + logColors.green);
 
@@ -30,6 +31,7 @@ registerPlugin(deepseekPlugin);
 registerPlugin(geminiPlugin);
 registerPlugin(volcenginePlugin);
 registerPlugin(copilotPlugin);
+registerPlugin(mimoPlugin);
 
 /**
  * 获取注册的插件对象

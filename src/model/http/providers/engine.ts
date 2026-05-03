@@ -30,6 +30,7 @@ const getProviderLogger = createCachedLoggerFactory(
     gemini: { label: 'Provider:Gemini', color: logColors.bold + logColors.yellow },
     volcengine: { label: 'Provider:VolcEngine', color: logColors.bold + logColors.magenta },
     copilot: { label: 'Provider:Copilot', color: logColors.bold + logColors.cyan },
+    mimo: { label: 'Provider:MiMo', color: logColors.bold + logColors.blue },
   },
   'Provider',
   logColors.bold + logColors.white,
