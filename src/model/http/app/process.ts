@@ -17,7 +17,7 @@ import { dispatchChatProvider, dispatchEmbeddingProvider } from '@/model/http/pr
 import { assertRouted, route } from '@/model/http/router';
 import { buildErrorResponseBody, getUserChatAdapter, getUserEmbeddingAdapter, handleError } from '@/model/http/users';
 import type { HttpHeaders, InternalChatRequest, InternalEmbeddingRequest, ModelHttpContext } from '@/types';
-import { GatewayError } from '@/utils';
+import { GatewayError, injectResponseHeaders } from '@/utils';
 import { v4 as uuidv4 } from '@/utils/uuid';
 import { expressHeadersToRecord, finalizeError, finalizeSuccess, sanitizeHeaders } from './helpers';
 import { processStreamSend } from './stream';
@@ -108,6 +108,9 @@ async function processRequest(
   };
 
   logger.info({ requestId: ctx.id, model: modelName, endpoint: req.path, ip: ctx.ip }, `${label} request received`);
+
+  // 注入应用层响应头（与 MCP 路径保持一致）
+  injectResponseHeaders(res, { requestId: ctx.id, startTime: ctx.timing.start });
 
   try {
     // 2. 提取 API Key（在 try 内，异常携带 requestId 可被追踪）
