@@ -3,7 +3,10 @@
 
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
+import { createLogger, logColors } from '@/utils';
 import { McpProviderClient, replaceApiKeyInObject, replaceApiKeyMarker } from './base-client';
+
+const stderrLogger = createLogger('McpStdio', logColors.cyan);
 
 /**
  * Stdio 传输方式的 MCP Provider 客户端
@@ -34,10 +37,30 @@ export class StdioMcpClient extends McpProviderClient {
       mergedEnv[key] = value;
     }
 
-    return new StdioClientTransport({
+    const transport = new StdioClientTransport({
       command,
       args,
       env: mergedEnv,
+      stderr: 'pipe',
     });
+
+    // 将子进程 stderr 路由到 Winston，避免直接印到终端
+    // PassThrough 流在构造函数中即创建，可在 start() 前安全监听
+    const stderrStream = transport.stderr;
+    if (stderrStream) {
+      const providerId = this.provider.id;
+      const providerName = this.provider.name;
+      stderrStream.on('data', (chunk: Buffer) => {
+        const text = chunk.toString('utf-8').trimEnd();
+        if (text) {
+          stderrLogger.info({ providerId, providerName, text }, 'stdio stderr');
+        }
+      });
+      stderrStream.on('error', (err: Error) => {
+        stderrLogger.warn({ providerId, providerName, err: err.message }, 'stdio stderr stream error');
+      });
+    }
+
+    return transport;
   }
 }
