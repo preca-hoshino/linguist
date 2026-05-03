@@ -3,7 +3,7 @@
 import { createLogger, logColors } from '@/utils';
 import { mcpConnectionManager } from './providers/connection-manager';
 
-export { handleMcpMessage, handleMcpSseConnect } from './virtual/server';
+export { createMcpSession, getSession, handleMcpRequest } from './virtual/server';
 
 const logger = createLogger('McpGateway', logColors.blue);
 
