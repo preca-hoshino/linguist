@@ -8,5 +8,6 @@ export { createCachedLoggerFactory, createLogger, logColors } from './logger';
 export * from './media';
 export * from './query-builder';
 export { rateLimiter } from './rate-limiter';
+export * from './response-headers';
 export * from './sse';
 export * from './tool-id';

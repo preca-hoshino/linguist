@@ -1,10 +1,11 @@
 // src/api/http/mcp/index.ts — MCP 网关 HTTP 路由处理（Streamable HTTP）
 
+import * as crypto from 'node:crypto';
 import type { NextFunction, Request, Response } from 'express';
 import { Router } from 'express';
 import { getVirtualMcpByName } from '@/db/mcp-virtual-servers';
 import { createMcpSession, getSession, handleMcpRequest } from '@/mcp';
-import { GatewayError } from '@/utils';
+import { GatewayError, injectResponseHeaders } from '@/utils';
 import { validateApiKeyFromRequest } from '../auth-helper';
 
 export const mcpRouter: Router = Router();
@@ -18,12 +19,17 @@ export const mcpRouter: Router = Router();
  * - 外部调用方通过 X-Mcp-Name header 指定虚拟 MCP 名字
  */
 mcpRouter.all('/mcp/sse', async (req: Request, res: Response, next: NextFunction) => {
+  const requestId = crypto.randomUUID();
+  const startTime = Date.now();
+  injectResponseHeaders(res, { requestId, startTime });
+
   try {
     // 1. 有 mcp-session-id → 复用已有会话
     const sessionId = req.headers['mcp-session-id'];
     if (typeof sessionId === 'string' && sessionId) {
       const session = getSession(sessionId);
       if (session) {
+        (req as unknown as Record<string, unknown>).mcpRequestId = requestId;
         await handleMcpRequest(req, res, session);
         return;
       }
@@ -69,6 +75,7 @@ mcpRouter.all('/mcp/sse', async (req: Request, res: Response, next: NextFunction
       }
     }
 
+    (req as unknown as Record<string, unknown>).mcpRequestId = requestId;
     await createMcpSession(req, res, virtualMcp, appEntry?.id);
   } catch (err) {
     next(err);

@@ -28,6 +28,8 @@ export interface MCPRequestAuth {
   allowedTools: string[];
   provider: McpProviderRow;
   sessionId: string;
+  /** HTTP 请求追踪 ID（由路由层注入，与 X-Request-Id 响应头一致） */
+  requestId: string;
 }
 
 /** 会话管理 */
@@ -66,7 +68,7 @@ function buildAuditContext(
   toolName?: string,
 ): McpGatewayContext {
   return {
-    id: crypto.randomUUID(),
+    id: auth.requestId,
     virtualMcpId: auth.virtualMcpId,
     virtualMcpName: auth.virtualMcpName,
     mcpProviderId: auth.mcpProviderId,
@@ -182,6 +184,7 @@ export async function createMcpSession(
   const allowedTools: string[] = virtualMcp.config.tools ?? [];
 
   // 会话上下文 sessionId 将在 transport 初始化后回填
+  const requestId = (req as unknown as Record<string, unknown>).mcpRequestId as string | undefined;
   const auth: MCPRequestAuth = {
     virtualMcpId: virtualMcp.id,
     virtualMcpName: virtualMcp.name,
@@ -190,6 +193,7 @@ export async function createMcpSession(
     allowedTools,
     provider,
     sessionId: '',
+    requestId: requestId ?? crypto.randomUUID(),
   };
 
   const server = createMcpServerInstance();
@@ -230,7 +234,12 @@ export async function createMcpSession(
  * 处理已有会话的后续请求（GET / POST / DELETE）。
  */
 export async function handleMcpRequest(req: Request, res: Response, session: McpSession): Promise<void> {
-  (req as unknown as Record<string, unknown>).auth = session.auth;
+  // 按请求覆盖 requestId（同一会话的每次 HTTP 请求有独立追踪 ID）
+  const requestId = (req as unknown as Record<string, unknown>).mcpRequestId as string | undefined;
+  (req as unknown as Record<string, unknown>).auth = {
+    ...session.auth,
+    ...(requestId !== undefined ? { requestId } : {}),
+  };
   await session.transport.handleRequest(req, res, req.body);
 }
 
