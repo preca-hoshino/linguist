@@ -12,13 +12,16 @@ import type {
   ResolvedRoute,
   RoutedModelHttpContext,
 } from '@/types';
-import { createCachedLoggerFactory, GatewayError, logColors, parseSSEStream } from '@/utils';
+import { createCachedLoggerFactory, createLogger, GatewayError, logColors, parseSSEStream } from '@/utils';
 import { fetchHeadersToRecord } from './http-utils';
 import { getProviderChatAdapterSet, getProviderEmbeddingAdapterSet } from './index';
 import type { ProviderChatStreamResponseAdapter } from './types';
 import { cacheReasoningContent } from './deepseek/reasoning-cache';
 
 // ========== 动态 Provider Logger ==========
+
+/** 模块级剥离日志器 */
+const stripLogger = createLogger('Provider:Strip', logColors.bold + logColors.gray);
 
 /** 根据 providerKind 获取（或创建）对应的 Logger */
 const getProviderLogger = createCachedLoggerFactory(
@@ -68,30 +71,92 @@ export function cacheReasoningFromResponse(ctx: RoutedModelHttpContext): void {
 // ========== 参数剥离 ==========
 
 /**
+ * Chat 请求中可按 supported_parameters 声明剥离的调优参数列表
+ *
+ * ⚠️ 必须与 admin/model/provider-models.ts 中的 CHAT_PARAMETERS 白名单保持同步。
+ * 新增参数需同时满足：
+ *   1. 存在于 InternalChatRequest 类型定义中
+ *   2. 加入此常量
+ *   3. 加入 admin 白名单 CHAT_PARAMETERS
+ */
+const FILTERABLE_CHAT_PARAMS: ReadonlyArray<keyof InternalChatRequest> = [
+  'temperature',
+  'top_p',
+  'top_k',
+  'max_tokens',
+  'frequency_penalty',
+  'presence_penalty',
+  'stop',
+] as const;
+
+/**
+ * Embedding 请求中可按 supported_parameters 声明剥离的调优参数列表
+ *
+ * ⚠️ 必须与 admin/model/provider-models.ts 中的 EMBEDDING_PARAMETERS 白名单保持同步。
+ */
+const FILTERABLE_EMBEDDING_PARAMS: ReadonlyArray<keyof InternalEmbeddingRequest> = [
+  'dimensions',
+  'encoding_format',
+] as const;
+
+/**
  * 按后端声明的 supported_parameters 静默剥离 InternalChatRequest 中不支持的调优参数
  * 用于在适配器序列化前清理请求，避免不支持的参数被透传到提供商 API
  */
-function stripUnsupportedChatParams(req: InternalChatRequest, supportedParameters: string[] = []): InternalChatRequest {
+function stripUnsupportedChatParams(
+  req: InternalChatRequest,
+  supportedParameters: string[] = [],
+  requestId?: string,
+): InternalChatRequest {
   // 若后端未声明任何 supported_parameters，不做过滤（向后兼容）
   if (supportedParameters.length === 0) {
     return req;
   }
 
-  const FILTERABLE_PARAMS: ReadonlyArray<keyof InternalChatRequest> = [
-    'temperature',
-    'top_p',
-    'top_k',
-    'frequency_penalty',
-    'presence_penalty',
-    'stop',
-  ] as const;
-
   const filtered: InternalChatRequest = { ...req };
-  for (const field of FILTERABLE_PARAMS) {
+  const stripped: string[] = [];
+  for (const field of FILTERABLE_CHAT_PARAMS) {
     if (!supportedParameters.includes(field as string) && field in filtered) {
       // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
       delete (filtered as unknown as Record<string, unknown>)[field];
+      stripped.push(field as string);
     }
+  }
+  if (stripped.length > 0) {
+    stripLogger.debug(
+      { requestId, strippedParams: stripped, supportedParameters },
+      '[strip] removed unsupported chat params from request',
+    );
+  }
+  return filtered;
+}
+
+/**
+ * 按后端声明的 supported_parameters 静默剥离 InternalEmbeddingRequest 中不支持的调优参数
+ */
+function stripUnsupportedEmbeddingParams(
+  req: InternalEmbeddingRequest,
+  supportedParameters: string[] = [],
+  requestId?: string,
+): InternalEmbeddingRequest {
+  if (supportedParameters.length === 0) {
+    return req;
+  }
+
+  const filtered: InternalEmbeddingRequest = { ...req };
+  const stripped: string[] = [];
+  for (const field of FILTERABLE_EMBEDDING_PARAMS) {
+    if (!supportedParameters.includes(field as string) && field in filtered) {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete (filtered as unknown as Record<string, unknown>)[field];
+      stripped.push(field as string);
+    }
+  }
+  if (stripped.length > 0) {
+    stripLogger.debug(
+      { requestId, strippedParams: stripped, supportedParameters },
+      '[strip] removed unsupported embedding params from request',
+    );
   }
   return filtered;
 }
@@ -228,7 +293,7 @@ export async function dispatchChatProvider(
   chatRequest: InternalChatRequest,
   executor: typeof callProvider = callProvider,
 ): Promise<void> {
-  const strippedRequest = stripUnsupportedChatParams(chatRequest, ctx.route.supportedParameters);
+  const strippedRequest = stripUnsupportedChatParams(chatRequest, ctx.route.supportedParameters, ctx.id);
   await dispatchProvider<InternalChatRequest, InternalChatResponse>(
     ctx,
     strippedRequest,
@@ -243,9 +308,10 @@ export async function dispatchEmbeddingProvider(
   embeddingRequest: InternalEmbeddingRequest,
   executor: typeof callProvider = callProvider,
 ): Promise<void> {
+  const strippedRequest = stripUnsupportedEmbeddingParams(embeddingRequest, ctx.route.supportedParameters, ctx.id);
   await dispatchProvider<InternalEmbeddingRequest, InternalEmbeddingResponse>(
     ctx,
-    embeddingRequest,
+    strippedRequest,
     getProviderEmbeddingAdapterSet,
     'Embedding',
     executor,
@@ -279,7 +345,7 @@ async function tryStreamConnect(
   );
   providerLogger.debug({ requestId: ctx.id }, '[dispatch] stream adapter initialized');
 
-  const strippedRequest = stripUnsupportedChatParams(chatRequest, candidate.supportedParameters);
+  const strippedRequest = stripUnsupportedChatParams(chatRequest, candidate.supportedParameters, ctx.id);
   const rawProviderReqBody = requestAdapter.toProviderRequest(strippedRequest, ctx.route.model, candidate.modelConfig);
   const providerReqBody = applyBodyOverrides(rawProviderReqBody, candidate.requestOverrides?.body);
   ctx.audit.providerRequest = { body: providerReqBody };
