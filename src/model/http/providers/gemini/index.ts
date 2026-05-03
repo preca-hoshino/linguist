@@ -14,6 +14,8 @@ import { mapGeminiError } from './error-mapping';
 export const geminiPlugin: ProviderPlugin = {
   kind: 'gemini',
   supportedModelTypes: ['chat', 'embedding'],
+  supportedChatParameters: ['temperature', 'top_p', 'top_k', 'max_tokens', 'stop'] as const,
+  supportedEmbeddingParameters: ['dimensions', 'encoding_format'] as const,
 
   getChatAdapterSet: (config) => ({
     requestAdapter: new GeminiChatRequestAdapter(),

@@ -58,6 +58,22 @@ export function getProviderSupportedModelTypes(kind: string): string[] {
 }
 
 /**
+ * 获取指定 kind 提供商聊天适配器原生支持的参数列表。
+ * 若该 kind 尚未注册或无聊天能力，返回空数组。
+ */
+export function getProviderSupportedChatParameters(kind: string): readonly string[] {
+  return registry.get(kind)?.supportedChatParameters ?? [];
+}
+
+/**
+ * 获取指定 kind 提供商嵌入适配器原生支持的参数列表。
+ * 若该 kind 尚未注册或无嵌入能力，返回空数组。
+ */
+export function getProviderSupportedEmbeddingParameters(kind: string): readonly string[] {
+  return registry.get(kind)?.supportedEmbeddingParameters ?? [];
+}
+
+/**
  * 按提供商 kind 获取聊天适配器集合 (提供给 engine 使用)
  */
 export function getProviderChatAdapterSet(providerKind: string, config: ProviderConfig): ProviderChatAdapterSet {

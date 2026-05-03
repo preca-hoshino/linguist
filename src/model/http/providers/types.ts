@@ -121,6 +121,20 @@ export interface ProviderPlugin {
    */
   supportedModelTypes: ModelType[];
 
+  /**
+   * 该厂商聊天适配器原生支持的调优参数列表（由代码实现决定）。
+   *
+   * 用于管理 API 交叉校验：配置 provider model 的 supported_parameters
+   * 时，系统会提示哪些参数被提供商适配器支持但未声明，以及哪些
+   * 参数不被适配器支持却被管理员配置了。
+   */
+  supportedChatParameters?: readonly string[] | undefined;
+
+  /**
+   * 该厂商嵌入适配器原生支持的调优参数列表（由代码实现决定）。
+   */
+  supportedEmbeddingParameters?: readonly string[] | undefined;
+
   /** 获取聊天功能集合 (如果该厂商支持聊天) */
   getChatAdapterSet?: (config: ProviderConfig) => ProviderChatAdapterSet;
 
