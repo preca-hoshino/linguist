@@ -14,6 +14,16 @@ import { mapVolcEngineError } from './error-mapping';
 export const volcenginePlugin: ProviderPlugin = {
   kind: 'volcengine',
   supportedModelTypes: ['chat', 'embedding'],
+  supportedChatParameters: [
+    'temperature',
+    'top_p',
+    'top_k',
+    'max_tokens',
+    'frequency_penalty',
+    'presence_penalty',
+    'stop',
+  ] as const,
+  supportedEmbeddingParameters: ['dimensions', 'encoding_format'] as const,
 
   getChatAdapterSet: (config) => ({
     requestAdapter: new VolcEngineChatRequestAdapter(),
