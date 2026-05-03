@@ -1,48 +1,56 @@
-// src/api/http/mcp/index.ts — MCP 网关 HTTP 路由处理
+// src/api/http/mcp/index.ts — MCP 网关 HTTP 路由处理（Streamable HTTP）
 
 import type { NextFunction, Request, Response } from 'express';
 import { Router } from 'express';
 import { getVirtualMcpByName } from '@/db/mcp-virtual-servers';
-import { handleMcpMessage, handleMcpSseConnect } from '@/mcp';
+import { createMcpSession, getSession, handleMcpRequest } from '@/mcp';
 import { GatewayError } from '@/utils';
 import { validateApiKeyFromRequest } from '../auth-helper';
 
 export const mcpRouter: Router = Router();
 
-interface AuthenticatedRequest extends Request {
-  appId?: string;
-}
-
-// ==========================================
-// Virtual MCP Endpoints
-// ==========================================
-
 /**
- * 建立 SSE 连接 (MCP Server 规范)
- * GET /mcp/sse
+ * 统一 MCP Streamable HTTP 端点。
+ * ALL /mcp/sse — 同时处理 GET（SSE 流）、POST（JSON-RPC 消息）和 DELETE（终止会话）。
  *
- * 外部调用方通过 X-Mcp-Name header 指定虚拟 MCP 的用户自定义名字，
- * 与虚拟模型通过 body.model 传名字的心智模型保持一致。
- * 路由层负责：name → 内部 ID 解析、活跃性检查、App 白名单校验。
+ * - 首次请求（无 mcp-session-id header）：鉴权 → 创建会话 → 处理 initialize
+ * - 后续请求（有 mcp-session-id header）：复用已有会话
+ * - 外部调用方通过 X-Mcp-Name header 指定虚拟 MCP 名字
  */
-mcpRouter.get('/mcp/sse', async (req: Request, res: Response, next: NextFunction) => {
+mcpRouter.all('/mcp/sse', async (req: Request, res: Response, next: NextFunction) => {
   try {
-    // 1. 从 Header 读取虚拟 MCP 名字（外部调用用名字，不暴露内部 ID）
+    // 1. 有 mcp-session-id → 复用已有会话
+    const sessionId = req.headers['mcp-session-id'];
+    if (typeof sessionId === 'string' && sessionId) {
+      const session = getSession(sessionId);
+      if (session) {
+        await handleMcpRequest(req, res, session);
+        return;
+      }
+      res.status(404).json({
+        error: { code: 'session_not_found', message: 'Session not found or expired' },
+      });
+      return;
+    }
+
+    // 2. 无 session → 鉴权 + 创建新会话
     const mcpNameRaw = req.headers['x-mcp-name'];
     const mcpName = typeof mcpNameRaw === 'string' ? mcpNameRaw.trim() : '';
     if (!mcpName) {
-      res.status(400).json({ error: { code: 'invalid_request', message: 'X-Mcp-Name header is required' } });
+      res.status(400).json({
+        error: { code: 'invalid_request', message: 'X-Mcp-Name header is required' },
+      });
       return;
     }
 
-    // 2. 通过名字反查虚拟 MCP（含活跃性过滤）
     const virtualMcp = await getVirtualMcpByName(mcpName);
     if (!virtualMcp) {
-      res.status(404).json({ error: { code: 'not_found', message: `Virtual MCP not found: ${mcpName}` } });
+      res.status(404).json({
+        error: { code: 'not_found', message: `Virtual MCP not found: ${mcpName}` },
+      });
       return;
     }
 
-    // 3. 验证 API Key 并获取 App 信息
     const appEntry = await validateApiKeyFromRequest(req, (r) => {
       const authHeader = r.headers.authorization;
       if (authHeader?.startsWith('Bearer ')) {
@@ -54,29 +62,15 @@ mcpRouter.get('/mcp/sse', async (req: Request, res: Response, next: NextFunction
       return undefined;
     });
 
-    // 4. 白名单校验：用内部 ID 比对（AppCacheEntry.allowedMcpIds 存内部 ID）
     const requireApiKey = process.env.REQUIRE_API_KEY !== 'false';
     if (requireApiKey && appEntry !== undefined) {
       if (!appEntry.allowedMcpIds.includes(virtualMcp.id)) {
         throw new GatewayError(403, 'forbidden', `App does not have access to virtual MCP: ${mcpName}`);
       }
-      // 将 appId 注入 request 提供给下游处理逻辑和日志
-      (req as AuthenticatedRequest).appId = appEntry.id;
     }
 
-    // 5. 建立连接（传入预解析好的 virtualMcp，避免 server.ts 重复查询）
-    await handleMcpSseConnect(req, res, virtualMcp);
+    await createMcpSession(req, res, virtualMcp, appEntry?.id);
   } catch (err) {
     next(err);
   }
-});
-
-/**
- * 接收 JSON-RPC 消息 (MCP Server 规范)
- * POST /mcp/sse?sessionId=...
- * 注：Session 已在建立连接时与 appId 及 virtualMcpId 绑定，这里无需再次鉴权
- * 注：Cherry Studio 等客户端会将消息 POST 回原始 SSE URL 而非单独的消息端点
- */
-mcpRouter.post('/mcp/sse', (req: Request, res: Response, next: NextFunction) => {
-  handleMcpMessage(req, res).catch(next);
 });
