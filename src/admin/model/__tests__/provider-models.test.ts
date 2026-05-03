@@ -37,21 +37,16 @@ describe('Provider Models API Integration', () => {
     name: 'Test Chat Model',
     model_type: 'chat',
     capabilities: ['stream', 'cache', 'vision', 'tools', 'thinking', 'structured_output'],
-    supported_parameters: [
-      'temperature',
-      'top_p',
-      'top_k',
-      'frequency_penalty',
-      'presence_penalty',
-      'stop',
-      'logprobs',
-    ],
+    supported_parameters: ['temperature', 'top_p', 'max_tokens', 'frequency_penalty', 'presence_penalty', 'stop'],
     max_tokens: 8192,
   };
 
   it('should successfully create a new provider model', async () => {
-    // 1. Mock DB check for provider existence
-    (db.query as jest.Mock).mockResolvedValueOnce({ rowCount: 1 });
+    // 1. Mock DB check for provider existence (returns kind for cross-validation)
+    (db.query as jest.Mock).mockResolvedValueOnce({
+      rowCount: 1,
+      rows: [{ id: 'provider-123', kind: 'deepseek' }],
+    });
     // 2. Mock DB insertion
     (generateShortId as jest.Mock).mockResolvedValue('short-id-123');
     (db.query as jest.Mock).mockResolvedValueOnce({
@@ -75,17 +70,19 @@ describe('Provider Models API Integration', () => {
     expect(res.body.supported_parameters).toEqual([
       'temperature',
       'top_p',
-      'top_k',
+      'max_tokens',
       'frequency_penalty',
       'presence_penalty',
       'stop',
-      'logprobs',
     ]);
     expect(res.body.capabilities).toEqual(['stream', 'cache', 'vision', 'tools', 'thinking', 'structured_output']);
   });
 
   it('should successfully create an embedding model with specific capabilities and parameters', async () => {
-    (db.query as jest.Mock).mockResolvedValueOnce({ rowCount: 1 });
+    (db.query as jest.Mock).mockResolvedValueOnce({
+      rowCount: 1,
+      rows: [{ id: 'provider-123', kind: 'gemini' }],
+    });
     (generateShortId as jest.Mock).mockResolvedValue('short-id-embed');
     (db.query as jest.Mock).mockResolvedValueOnce({
       rows: [
@@ -136,10 +133,36 @@ describe('Provider Models API Integration', () => {
     expect(db.query).not.toHaveBeenCalled();
   });
 
+  it('should fail with 400 when supported_parameter conflicts with provider capabilities', async () => {
+    // Gemini does not support presence_penalty or frequency_penalty
+    const conflictingPayload = {
+      ...validPayload,
+      supported_parameters: ['temperature', 'presence_penalty'],
+    };
+
+    // Mock DB check for provider existence (Gemini)
+    (db.query as jest.Mock).mockResolvedValueOnce({
+      rowCount: 1,
+      rows: [{ id: 'provider-123', kind: 'gemini' }],
+    });
+
+    const res = await request(app).post('/api/model/provider-models').send(conflictingPayload);
+
+    expect(res.status).toBe(400);
+    expect((res.body as any).error.code).toBe('invalid_request');
+    expect((res.body as any).error.message).toContain('does not natively support');
+    expect((res.body as any).error.message).toContain('presence_penalty');
+  });
+
   it('should successfully update a provider model with new parameters', async () => {
     // 1. Mock DB read for model_type
     (db.query as jest.Mock).mockResolvedValueOnce({ rows: [{ model_type: 'embedding' }] });
-    // 2. Mock DB update
+    // 2. Mock DB read for provider kind (cross-validation)
+    (db.query as jest.Mock).mockResolvedValueOnce({
+      rowCount: 1,
+      rows: [{ provider_id: 'provider-123', kind: 'gemini' }],
+    });
+    // 3. Mock DB update
     (db.query as jest.Mock).mockResolvedValueOnce({
       rowCount: 1,
       rows: [
