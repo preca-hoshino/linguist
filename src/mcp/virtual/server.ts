@@ -1,12 +1,13 @@
-// src/mcp/virtual/server.ts — 虚拟 MCP Server 聚合层
+// src/mcp/virtual/server.ts — 虚拟 MCP Server 聚合层（Streamable HTTP）
 
 import * as crypto from 'node:crypto';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
-import { SSEServerTransport } from '@modelcontextprotocol/sdk/server/sse.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import type { Request, Response } from 'express';
 import { insertMcpLog } from '@/db/mcp-logs';
 import { getMcpProviderById } from '@/db/mcp-providers';
+import type { McpProviderRow } from '@/db/mcp-providers/types';
 import type { VirtualMcpRow } from '@/db/mcp-virtual-servers';
 import type { McpGatewayContext } from '@/types';
 import { createLogger, logColors } from '@/utils';
@@ -15,20 +16,34 @@ import { filterTools, isToolAllowed } from './tool-registry';
 
 const logger = createLogger('VirtualMcpServer', logColors.blue);
 
+/**
+ * 每次请求携带的会话上下文。
+ * 注入到 req.auth，由 transport 通过 extra.authInfo 传递至 Server handler。
+ */
+export interface MCPRequestAuth {
+  virtualMcpId: string;
+  virtualMcpName: string;
+  mcpProviderId: string;
+  appId?: string | undefined;
+  allowedTools: string[];
+  provider: McpProviderRow;
+  sessionId: string;
+}
+
 /** 会话管理 */
 export interface McpSession {
   sessionId: string;
   virtualMcpId: string;
-  // eslint-disable-next-line @typescript-eslint/no-deprecated
-  transport: SSEServerTransport;
-  // eslint-disable-next-line @typescript-eslint/no-deprecated
+  transport: StreamableHTTPServerTransport;
+  // eslint-disable-next-line @typescript-eslint/no-deprecated -- Server 用于低级别 JSON-RPC handler 注册，非 McpServer 高级 API 场景
   server: Server;
+  auth: MCPRequestAuth;
   createdAt: number;
 }
 
 const activeSessions = new Map<string, McpSession>();
 
-/** 会话清理超时（小时） */
+/** 会话清理超时（2 小时） */
 const SESSION_CLEANUP_MS = 2 * 60 * 60 * 1000;
 setInterval(
   () => {
@@ -42,171 +57,186 @@ setInterval(
   60 * 60 * 1000,
 ).unref();
 
-interface AuthenticatedRequest extends Request {
-  appId?: string;
+/**
+ * 创建工具审计上下文
+ */
+function buildAuditContext(
+  auth: MCPRequestAuth,
+  method: 'tools/list' | 'tools/call',
+  toolName?: string,
+): McpGatewayContext {
+  return {
+    id: crypto.randomUUID(),
+    virtualMcpId: auth.virtualMcpId,
+    virtualMcpName: auth.virtualMcpName,
+    mcpProviderId: auth.mcpProviderId,
+    appId: auth.appId,
+    sessionId: auth.sessionId,
+    method,
+    toolName,
+    status: 'completed',
+    audit: {
+      userRequest: { body: { method } },
+      providerRequest: { body: { method } },
+    },
+    timing: { start: Date.now() },
+  };
 }
 
 /**
- * 处理客户端通过 SSE 建立连接请求
- * virtualMcp 由路由层预先解析并校验（含存活性检查），此处直接使用
+ * 为新连接创建 MCP Server 实例并注册 tools/list / tools/call 处理程序。
+ * 所有运行时上下文（virtualMcpId、allowedTools 等）通过 extra.authInfo 获取，
+ * 不再通过闭包捕获 req 对象。
  */
-export async function handleMcpSseConnect(req: Request, res: Response, virtualMcp: VirtualMcpRow): Promise<void> {
-  // 验证关联的 Provider 是否有效
+// eslint-disable-next-line @typescript-eslint/no-deprecated -- 低级别 JSON-RPC handler 注册场景，需直接使用 Server
+function createMcpServerInstance(): Server {
+  // eslint-disable-next-line @typescript-eslint/no-deprecated
+  const server = new Server({ name: 'linguist-virtual', version: '1.0.0' }, { capabilities: { tools: {} } });
+
+  // tools/list 处理程序
+  server.setRequestHandler(ListToolsRequestSchema, async (_request, extra) => {
+    const auth = (extra as Record<string, unknown> | undefined)?.authInfo as MCPRequestAuth | undefined;
+    if (auth === undefined) {
+      throw new Error('Missing session auth context');
+    }
+
+    const ctx = buildAuditContext(auth, 'tools/list');
+
+    try {
+      const client = await mcpConnectionManager.getClient(auth.provider);
+      const tools = await client.listTools();
+      const filtered = filterTools(tools, auth.allowedTools);
+      const result = { tools: filtered };
+
+      ctx.audit.providerResponse = { body: { tools } };
+      ctx.audit.userResponse = { body: result };
+      ctx.timing.end = Date.now();
+      await insertMcpLog(ctx);
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      ctx.status = 'error';
+      ctx.errorMessage = message;
+      ctx.audit.userResponse = { body: { error: { message } } };
+      ctx.timing.end = Date.now();
+      await insertMcpLog(ctx);
+      throw err;
+    }
+  });
+
+  // tools/call 处理程序
+  // @ts-expect-error SDK type signature expects ServerResult but we return custom object
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+    const auth = (extra as Record<string, unknown> | undefined)?.authInfo as MCPRequestAuth | undefined;
+    if (auth === undefined) {
+      throw new Error('Missing session auth context');
+    }
+
+    const name = request.params.name;
+    const args = request.params.arguments;
+    const ctx = buildAuditContext(auth, 'tools/call', name);
+
+    try {
+      if (!isToolAllowed(name, auth.allowedTools)) {
+        throw new Error(`Tool call denied by ACL: ${name}`);
+      }
+
+      const client = await mcpConnectionManager.getClient(auth.provider);
+      const result = await client.callTool(name, args as Record<string, unknown>);
+
+      ctx.audit.providerResponse = { body: result as unknown as Record<string, unknown> };
+      ctx.audit.userResponse = { body: result as unknown as Record<string, unknown> };
+      ctx.timing.end = Date.now();
+      await insertMcpLog(ctx);
+      return result;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      ctx.status = 'error';
+      ctx.errorMessage = message;
+      ctx.audit.userResponse = { body: { error: { message } } };
+      ctx.timing.end = Date.now();
+      await insertMcpLog(ctx);
+      throw err;
+    }
+  });
+
+  return server;
+}
+
+/**
+ * 创建新的 MCP 会话并处理首次请求。
+ * 鉴权与白名单校验由路由层完成，本函数专注于 Server / Transport 生命周期。
+ */
+export async function createMcpSession(
+  req: Request,
+  res: Response,
+  virtualMcp: VirtualMcpRow,
+  appId: string | undefined,
+): Promise<void> {
   const provider = await getMcpProviderById(virtualMcp.mcp_provider_id);
   if (!provider) {
     res.status(500).json({ error: 'Associated MCP provider not found' });
     return;
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-deprecated
-  const transport = new SSEServerTransport('/mcp/sse', res);
-  // transport provides its own generated session ID
-  const sessionId = transport.sessionId;
+  const allowedTools: string[] = virtualMcp.config.tools ?? [];
 
-  // 2. 建立 SDK Server 实例
-  // eslint-disable-next-line @typescript-eslint/no-deprecated -- 忽略由 SDK 引发的弃用警告
-  const server = new Server(
-    { name: `linguist-virtual/${virtualMcp.name}`, version: '1.0.0' },
-    { capabilities: { tools: {} } },
-  );
-
-  // 工具白名单来自 virtualMcp.config.tools（config JSONB 字段）
-  const allowedTools = virtualMcp.config.tools ?? [];
-
-  // 3. 注册 tools/list 处理程序
-  server.setRequestHandler(ListToolsRequestSchema, async () => {
-    const start = Date.now();
-    const ctx: McpGatewayContext = {
-      id: crypto.randomUUID(),
-      virtualMcpId: virtualMcp.id,
-      virtualMcpName: virtualMcp.name,
-      mcpProviderId: provider.id,
-      appId: (req as AuthenticatedRequest).appId,
-      sessionId,
-      method: 'tools/list',
-      status: 'completed',
-      audit: {
-        userRequest: { body: { method: 'tools/list' } },
-        providerRequest: { body: { method: 'tools/list' } },
-      },
-      timing: { start },
-    };
-
-    try {
-      const client = await mcpConnectionManager.getClient(provider);
-      const tools = await client.listTools();
-
-      // 根据 ACL 过滤
-      const filtered = filterTools(tools, allowedTools);
-      const result = { tools: filtered };
-
-      ctx.audit.providerResponse = { body: { tools } };
-      ctx.audit.userResponse = { body: result };
-      ctx.timing.end = Date.now();
-
-      await insertMcpLog(ctx);
-      return result;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      ctx.status = 'error';
-      ctx.errorMessage = message;
-      ctx.audit.userResponse = { body: { error: { message } } };
-      ctx.timing.end = Date.now();
-
-      await insertMcpLog(ctx);
-      throw err;
-    }
-  });
-
-  // 4. 注册 tools/call 处理程序
-  // @ts-expect-error SDK type signature expects ServerResult but we return custom object
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const start = Date.now();
-    const name = request.params.name;
-    const args = request.params.arguments;
-
-    const ctx: McpGatewayContext = {
-      id: crypto.randomUUID(),
-      virtualMcpId: virtualMcp.id,
-      virtualMcpName: virtualMcp.name,
-      mcpProviderId: provider.id,
-      appId: (req as AuthenticatedRequest).appId,
-      sessionId,
-      method: 'tools/call',
-      toolName: name,
-      status: 'completed',
-      audit: {
-        userRequest: { body: { method: 'tools/call', params: { name, arguments: args } } },
-        providerRequest: { body: { method: 'tools/call', params: { name, arguments: args } } },
-      },
-      timing: { start },
-    };
-
-    try {
-      // 检查 ACL 是否允许
-      if (!isToolAllowed(name, allowedTools)) {
-        throw new Error(`Tool call denied by ACL: ${name}`);
-      }
-
-      const client = await mcpConnectionManager.getClient(provider);
-      const result = await client.callTool(name, args as Record<string, unknown>);
-
-      ctx.audit.providerResponse = { body: result as unknown as Record<string, unknown> };
-      ctx.audit.userResponse = { body: result as unknown as Record<string, unknown> };
-      ctx.timing.end = Date.now();
-
-      await insertMcpLog(ctx);
-      return result;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      ctx.status = 'error';
-      ctx.errorMessage = message;
-      ctx.audit.userResponse = { body: { error: { message } } };
-      ctx.timing.end = Date.now();
-
-      await insertMcpLog(ctx);
-      throw err;
-    }
-  });
-
-  // Store in cache BEFORE connecting so that if client connects quickly, it doesn't 404
-  activeSessions.set(sessionId, {
-    sessionId,
+  // 会话上下文 sessionId 将在 transport 初始化后回填
+  const auth: MCPRequestAuth = {
     virtualMcpId: virtualMcp.id,
-    transport,
-    server,
-    createdAt: Date.now(),
+    virtualMcpName: virtualMcp.name,
+    mcpProviderId: provider.id,
+    appId,
+    allowedTools,
+    provider,
+    sessionId: '',
+  };
+
+  const server = createMcpServerInstance();
+
+  const transport = new StreamableHTTPServerTransport({
+    sessionIdGenerator: (): string => crypto.randomUUID(),
+    onsessioninitialized: (sessionId: string): void => {
+      auth.sessionId = sessionId;
+      activeSessions.set(sessionId, {
+        sessionId,
+        virtualMcpId: virtualMcp.id,
+        transport,
+        server,
+        auth,
+        createdAt: Date.now(),
+      });
+      logger.info({ virtualMcpId: virtualMcp.id, sessionId }, 'MCP session initialized');
+    },
   });
 
-  await server.connect(transport);
+  transport.onclose = (): void => {
+    const sid = transport.sessionId;
+    if (sid !== undefined && sid !== '') {
+      activeSessions.delete(sid);
+      logger.info({ sessionId: sid }, 'MCP session closed');
+    }
+  };
 
-  logger.info({ virtualMcpId: virtualMcp.id, sessionId }, 'Virtual MCP SSE session established');
+  await server.connect(transport as unknown as Parameters<typeof server.connect>[0]);
+
+  // 注入会话上下文至 req.auth，由 transport 通过 extra.authInfo → Server handler
+  (req as unknown as Record<string, unknown>).auth = auth;
+
+  await transport.handleRequest(req, res, req.body);
 }
 
 /**
- * 接收客户端发送的 JSON-RPC 消息
+ * 处理已有会话的后续请求（GET / POST / DELETE）。
  */
-export async function handleMcpMessage(req: Request, res: Response): Promise<void> {
-  const sessionId = req.query.sessionId as string | undefined;
-  if (sessionId === undefined || sessionId === '') {
-    res.status(400).json({ error: 'sessionId query parameter is required' });
-    return;
-  }
+export async function handleMcpRequest(req: Request, res: Response, session: McpSession): Promise<void> {
+  (req as unknown as Record<string, unknown>).auth = session.auth;
+  await session.transport.handleRequest(req, res, req.body);
+}
 
-  const session = activeSessions.get(sessionId);
-  if (!session) {
-    res.status(404).json({ error: 'Session not found' });
-    return;
-  }
-
-  if (req.body === undefined) {
-    res.status(500).json({ error: 'req.body is undefined' });
-    return;
-  }
-  try {
-    await session.transport.handlePostMessage(req, res, req.body);
-  } catch (err) {
-    logger.error({ err, sessionId }, 'Error handling MCP message');
-    res.status(500).json({ error: 'Internal Server Error' });
-  }
+/**
+ * 按 sessionId 查找活跃会话。
+ */
+export function getSession(sessionId: string): McpSession | undefined {
+  return activeSessions.get(sessionId);
 }
