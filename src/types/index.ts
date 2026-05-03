@@ -6,3 +6,5 @@ export type * from './context';
 export type * from './embedding';
 export type * from './mcp-context';
 export type * from './provider';
+export type * from './realtime';
+export type * from './session';
