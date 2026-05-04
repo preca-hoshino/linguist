@@ -1,4 +1,4 @@
-// src/utils/response-headers.ts — 响应头注入工具
+// src/utils/http/response-headers.ts — 响应头注入工具
 
 import type { Response } from 'express';
 
