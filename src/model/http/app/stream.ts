@@ -16,8 +16,7 @@ import type {
   ModelHttpContext,
   ToolCall,
 } from '@/types';
-import { normalizeStreamChunkToolCallIds } from '@/utils';
-import { expressHeadersToRecord } from './helpers';
+import { normalizeStreamChunkToolCallIds, expressHeadersToRecord } from '@/utils';
 
 // ========== 流式发送阶段（chat 专属） ==========
 
