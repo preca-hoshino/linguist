@@ -1,4 +1,4 @@
-import { hashPassword, verifyPassword } from '../hash';
+import { hashPassword, verifyPassword } from '../crypto/hash';
 
 describe('hash util', () => {
   describe('hashPassword', () => {

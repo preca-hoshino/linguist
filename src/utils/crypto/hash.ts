@@ -1,4 +1,4 @@
-// src/utils/hash.ts — 密码哈希工具（crypto.scryptSync，零依赖）
+// src/utils/crypto/hash.ts — 密码哈希工具（crypto.scryptSync，零依赖）
 
 import crypto from 'node:crypto';
 

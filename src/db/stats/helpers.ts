@@ -38,22 +38,9 @@ export function itlExpr(aliasTiming = '', aliasTokens = ''): string {
     THEN (${dur} - ${ttft})::float / ${ct} END`;
 }
 
-// ==================== 数值计算工具 ====================
+// ==================== 数值计算工具（统一来源：src/utils/math.ts） ====================
 
-/** 四舍五入到 2 位小数 */
-export function roundRate(value: number): number {
-  return Math.round(value * 100) / 100;
-}
-
-/** 安全比率计算（避免除零），保留 4 位小数 */
-export function safeRate(numerator: number, denominator: number): number {
-  return denominator > 0 ? Math.round((numerator / denominator) * 10_000) / 10_000 : 0;
-}
-
-/** 四舍五入 number | null */
-export function roundOrNull(v: number | null): number | null {
-  return v === null ? null : Math.round(v);
-}
+export { roundRate, safeRate, roundOrNull } from '@/utils';
 
 // ==================== 时间范围工具 ====================
 

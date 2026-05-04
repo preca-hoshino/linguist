@@ -1,4 +1,4 @@
-// src/utils/query-builder.ts — SQL 动态查询构建工具
+// src/utils/sql/query-builder.ts — SQL 动态查询构建工具
 
 /**
  * 动态构建 UPDATE SET 子句

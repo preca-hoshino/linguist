@@ -1,4 +1,4 @@
-import { buildBatchInsert, buildInClause, buildUpdateSet } from '../query-builder';
+import { buildBatchInsert, buildInClause, buildUpdateSet } from '../sql/query-builder';
 
 describe('buildUpdateSet', () => {
   it('should build SET clause with given updates', () => {

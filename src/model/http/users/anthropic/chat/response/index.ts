@@ -3,7 +3,7 @@
 import type { UserChatResponseAdapter } from '@/model/http/users/types';
 import type { FinishReason, InternalChatResponse, ModelHttpContext } from '@/types';
 import { createLogger, logColors } from '@/utils';
-import { v4 as uuidv4 } from '@/utils/uuid';
+import { v4 as uuidv4 } from '@/utils/crypto';
 import { convertUsage } from './usage-converter';
 
 const logger = createLogger('User:Anthropic', logColors.bold + logColors.magenta);

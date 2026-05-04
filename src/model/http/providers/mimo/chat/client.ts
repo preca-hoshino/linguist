@@ -88,7 +88,7 @@ export class MiMoChatClient implements ProviderChatClient {
     if (!response.ok) {
       const errorText = await response.text().catch(() => '');
       // 解析错误响应体并调用 mapMimoError
-      const parsed = (() => {
+      const parsed: unknown = ((): unknown => {
         try {
           return JSON.parse(errorText) as unknown;
         } catch {
@@ -101,9 +101,9 @@ export class MiMoChatClient implements ProviderChatClient {
       };
       // 提取错误信息用于日志
       let errorMessage = errorText;
-      if (parsed && typeof parsed === 'object') {
+      if (typeof parsed === 'object' && parsed !== null) {
         const err = (parsed as Record<string, unknown>).error;
-        if (err && typeof err === 'object') {
+        if (typeof err === 'object' && err !== null) {
           const msg = (err as Record<string, unknown>).message;
           if (typeof msg === 'string') {
             errorMessage = msg;

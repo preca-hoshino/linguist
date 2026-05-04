@@ -17,9 +17,9 @@ import { dispatchChatProvider, dispatchEmbeddingProvider } from '@/model/http/pr
 import { assertRouted, route } from '@/model/http/router';
 import { buildErrorResponseBody, getUserChatAdapter, getUserEmbeddingAdapter, handleError } from '@/model/http/users';
 import type { HttpHeaders, InternalChatRequest, InternalEmbeddingRequest, ModelHttpContext } from '@/types';
-import { GatewayError, injectResponseHeaders } from '@/utils';
-import { v4 as uuidv4 } from '@/utils/uuid';
-import { expressHeadersToRecord, finalizeError, finalizeSuccess, sanitizeHeaders } from './helpers';
+import { GatewayError, injectResponseHeaders, sanitizeHeaders, expressHeadersToRecord } from '@/utils';
+import { v4 as uuidv4 } from '@/utils/crypto';
+import { finalizeError, finalizeSuccess } from './helpers';
 import { processStreamSend } from './stream';
 
 // 中间件列表

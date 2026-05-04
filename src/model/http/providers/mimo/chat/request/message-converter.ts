@@ -30,11 +30,8 @@ function convertContentPart(part: ContentPart): Record<string, unknown> | null {
     logger.warn({ type: part.type }, 'Skipping image part without url or base64_data');
     return null;
   }
-  // audio/video/file：MiMo Chat 模型不支持（TTS 模型另议）
-  if (part.type === 'audio' || part.type === 'video' || part.type === 'file') {
-    logger.warn({ type: part.type }, 'MiMo chat models do not support this media type; skipping');
-    return null;
-  }
+  // 所有其余类型（audio/video/file）MiMo Chat 模型均不支持
+  logger.warn({ type: part.type }, 'MiMo chat models do not support this media type; skipping');
   return null;
 }
 

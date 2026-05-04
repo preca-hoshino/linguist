@@ -1,7 +1,7 @@
 // src/utils/tool-id.ts — 工具调用 ID 规范化
 
 import type { InternalChatResponse, InternalChatStreamChunk, InternalMessage } from '@/types';
-import { DNS_NAMESPACE, v5 as uuidv5 } from '@/utils/uuid';
+import { DNS_NAMESPACE, v5 as uuidv5 } from '@/utils/crypto';
 
 /**
  * 用于将工具 ID 确定性映射为 UUID 的固定命名空间（RFC4122 DNS 命名空间）。

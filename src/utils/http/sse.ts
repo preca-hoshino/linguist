@@ -1,4 +1,4 @@
-// src/utils/sse.ts — SSE (Server-Sent Events) 流式解析器
+// src/utils/http/sse.ts — SSE (Server-Sent Events) 流式解析器
 
 /**
  * 解析 SSE 流，逐行 yield `data:` 行的内容（不含前缀）

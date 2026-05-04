@@ -2,7 +2,7 @@
 import { AnthropicChatStreamResponseAdapter } from '../stream';
 import type { InternalChatStreamChunk, ModelHttpContext } from '@/types';
 
-jest.mock('@/utils/uuid', () => ({
+jest.mock('@/utils/crypto', () => ({
   v4: (): string => 'mock-uuid',
 }));
 

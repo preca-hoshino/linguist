@@ -1,4 +1,4 @@
-import { safeParseJson } from '../json';
+import { safeParseJson } from '../transform';
 
 describe('safeParseJson', () => {
   it('should parse valid JSON object', () => {

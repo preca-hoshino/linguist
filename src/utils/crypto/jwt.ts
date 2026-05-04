@@ -1,4 +1,4 @@
-// src/utils/jwt.ts — HS256 JWT 签发与验证（零依赖，仅用 Node crypto）
+// src/utils/crypto/jwt.ts — HS256 JWT 签发与验证（零依赖，仅用 Node crypto）
 
 import crypto from 'node:crypto';
 

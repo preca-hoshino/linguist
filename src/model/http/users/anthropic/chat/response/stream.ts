@@ -2,7 +2,7 @@
 
 import type { UserChatStreamResponseAdapter } from '@/model/http/users/types';
 import type { ChatUsage, InternalChatStreamChunk, ModelHttpContext } from '@/types';
-import { v4 as uuidv4 } from '@/utils/uuid';
+import { v4 as uuidv4 } from '@/utils/crypto';
 import { convertUsage } from './usage-converter';
 
 /** 生成虚假签名 */

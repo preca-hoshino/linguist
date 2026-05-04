@@ -89,7 +89,7 @@ export class MiMoChatStreamResponseAdapter implements ProviderChatStreamResponse
   }
 
   private mapFinishReason(reason: string | null): FinishReason | null {
-    if (reason === null || reason === '' || reason === undefined) {
+    if (reason === null || reason === '') {
       return null;
     }
     if (MiMoChatStreamResponseAdapter.KNOWN_REASONS.has(reason)) {

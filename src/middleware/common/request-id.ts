@@ -1,7 +1,7 @@
 // src/middleware/common/request-id.ts — 请求唯一 ID 生成中间件（占位）
 
 import type { ModelHttpContext } from '@/types';
-import { v4 as uuidv4 } from '@/utils/uuid';
+import { v4 as uuidv4 } from '@/utils/crypto';
 
 // TODO: Phase 3 实现
 // - 从请求头 X-Request-ID 提取（若客户端提供），否则生成 UUID v4
