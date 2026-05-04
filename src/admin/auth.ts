@@ -1,7 +1,7 @@
 // src/admin/auth.ts — 管理 API JWT 认证中间件
 
 import type { NextFunction, Request, Response } from 'express';
-import type { ApiErrorResponse } from '@/types/api';
+import type { ApiErrorResponse } from '@/types';
 import { createLogger, logColors, verifyToken } from '@/utils';
 
 const logger = createLogger('Admin:Auth', logColors.bold + logColors.red);
