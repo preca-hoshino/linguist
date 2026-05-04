@@ -1,4 +1,4 @@
-// src/providers/engine.ts — 提供商调用核心引擎与 HTTP 解析
+// src/model/http/providers/engine/core.ts — 提供商调用核心引擎
 
 import { configManager } from '@/config';
 import type {
@@ -12,36 +12,15 @@ import type {
   ResolvedRoute,
   RoutedModelHttpContext,
 } from '@/types';
-import { createCachedLoggerFactory, createLogger, GatewayError, logColors, parseSSEStream } from '@/utils';
-import { fetchHeadersToRecord } from './http-utils';
-import { getProviderChatAdapterSet, getProviderEmbeddingAdapterSet } from './index';
-import type { ProviderChatStreamResponseAdapter } from './types';
-import { cacheReasoningContent } from './deepseek/reasoning-cache';
-
-// ========== 动态 Provider Logger ==========
-
-/** 模块级剥离日志器 */
-const stripLogger = createLogger('Provider:Strip', logColors.bold + logColors.gray);
-
-/** 根据 providerKind 获取（或创建）对应的 Logger */
-const getProviderLogger = createCachedLoggerFactory(
-  {
-    deepseek: { label: 'Provider:DeepSeek', color: logColors.bold + logColors.green },
-    gemini: { label: 'Provider:Gemini', color: logColors.bold + logColors.yellow },
-    volcengine: { label: 'Provider:VolcEngine', color: logColors.bold + logColors.magenta },
-    copilot: { label: 'Provider:Copilot', color: logColors.bold + logColors.cyan },
-    mimo: { label: 'Provider:MiMo', color: logColors.bold + logColors.blue },
-  },
-  'Provider',
-  logColors.bold + logColors.white,
-);
-
-// ========== 错误消息脱敏 ==========
-
-function sanitizeProviderError(detail: string): string {
-  const stripped = detail.replace(/^\w[\w\s]* API returned \d+:\s*/i, '');
-  return stripped.length > 0 ? stripped : 'Provider request failed';
-}
+import { GatewayError } from '@/utils';
+import { fetchHeadersToRecord } from '../http-utils';
+import { getProviderChatAdapterSet, getProviderEmbeddingAdapterSet } from '../index';
+import type { ProviderCallOptions } from '../types';
+import { cacheReasoningContent } from '../deepseek/reasoning-cache';
+import { applyBodyOverrides, stripUnsupportedChatParams, stripUnsupportedEmbeddingParams } from './strip';
+import { handleProviderError } from './errors';
+import { getProviderLogger } from './logger';
+import { createChunkGenerator } from './stream';
 
 // ========== 推理内容缓存 ==========
 
@@ -69,121 +48,6 @@ export function cacheReasoningFromResponse(ctx: RoutedModelHttpContext): void {
   }
 }
 
-// ========== 参数剥离 ==========
-
-/**
- * Chat 请求中可按 supported_parameters 声明剥离的调优参数列表
- *
- * ⚠️ 必须与 admin/model/provider-models.ts 中的 CHAT_PARAMETERS 白名单保持同步。
- * 新增参数需同时满足：
- *   1. 存在于 InternalChatRequest 类型定义中
- *   2. 加入此常量
- *   3. 加入 admin 白名单 CHAT_PARAMETERS
- */
-const FILTERABLE_CHAT_PARAMS: ReadonlyArray<keyof InternalChatRequest> = [
-  'temperature',
-  'top_p',
-  'top_k',
-  'max_tokens',
-  'frequency_penalty',
-  'presence_penalty',
-  'stop',
-] as const;
-
-/**
- * Embedding 请求中可按 supported_parameters 声明剥离的调优参数列表
- *
- * ⚠️ 必须与 admin/model/provider-models.ts 中的 EMBEDDING_PARAMETERS 白名单保持同步。
- */
-const FILTERABLE_EMBEDDING_PARAMS: ReadonlyArray<keyof InternalEmbeddingRequest> = [
-  'dimensions',
-  'encoding_format',
-] as const;
-
-/**
- * 按后端声明的 supported_parameters 静默剥离 InternalChatRequest 中不支持的调优参数
- * 用于在适配器序列化前清理请求，避免不支持的参数被透传到提供商 API
- */
-function stripUnsupportedChatParams(
-  req: InternalChatRequest,
-  supportedParameters: string[] = [],
-  requestId?: string,
-): InternalChatRequest {
-  // 若后端未声明任何 supported_parameters，不做过滤（向后兼容）
-  if (supportedParameters.length === 0) {
-    return req;
-  }
-
-  const filtered: InternalChatRequest = { ...req };
-  const stripped: string[] = [];
-  for (const field of FILTERABLE_CHAT_PARAMS) {
-    if (!supportedParameters.includes(field as string) && field in filtered) {
-      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-      delete (filtered as unknown as Record<string, unknown>)[field];
-      stripped.push(field as string);
-    }
-  }
-  if (stripped.length > 0) {
-    stripLogger.debug(
-      { requestId, strippedParams: stripped, supportedParameters },
-      '[strip] removed unsupported chat params from request',
-    );
-  }
-  return filtered;
-}
-
-/**
- * 按后端声明的 supported_parameters 静默剥离 InternalEmbeddingRequest 中不支持的调优参数
- */
-function stripUnsupportedEmbeddingParams(
-  req: InternalEmbeddingRequest,
-  supportedParameters: string[] = [],
-  requestId?: string,
-): InternalEmbeddingRequest {
-  if (supportedParameters.length === 0) {
-    return req;
-  }
-
-  const filtered: InternalEmbeddingRequest = { ...req };
-  const stripped: string[] = [];
-  for (const field of FILTERABLE_EMBEDDING_PARAMS) {
-    if (!supportedParameters.includes(field as string) && field in filtered) {
-      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-      delete (filtered as unknown as Record<string, unknown>)[field];
-      stripped.push(field as string);
-    }
-  }
-  if (stripped.length > 0) {
-    stripLogger.debug(
-      { requestId, strippedParams: stripped, supportedParameters },
-      '[strip] removed unsupported embedding params from request',
-    );
-  }
-  return filtered;
-}
-
-/**
- * 应用 Body 重写规则（null = 删除字段，字符串 = 覆盖/追加）
- */
-function applyBodyOverrides(
-  body: Record<string, unknown>,
-  overrides?: Record<string, string | null>,
-): Record<string, unknown> {
-  if (!overrides || Object.keys(overrides).length === 0) {
-    return body;
-  }
-  const result = { ...body };
-  for (const [key, value] of Object.entries(overrides)) {
-    if (value === null) {
-      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
-      delete result[key];
-    } else {
-      result[key] = value;
-    }
-  }
-  return result;
-}
-
 // ========== 框架引擎: 泛型内部实现 ==========
 
 interface AdapterSet<TReq, TRes> {
@@ -195,7 +59,7 @@ interface AdapterSet<TReq, TRes> {
     call: (
       req: Record<string, unknown>,
       model: string,
-      options?: import('./types').ProviderCallOptions,
+      options?: ProviderCallOptions,
     ) => Promise<ProviderCallResult>;
   };
 }
@@ -264,26 +128,7 @@ async function dispatchProvider<TReq, TRes extends InternalResponse>(
   try {
     await executor(ctx, request, getAdapterSet, label);
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    providerLogger.warn(
-      { requestId: ctx.id, model: ctx.route.model, strategy: ctx.route.strategy, error: detail },
-      `${ctx.route.strategy}: ${label.toLowerCase()} provider call failed`,
-    );
-
-    if (error instanceof GatewayError && error.providerDetail !== undefined) {
-      ctx.providerError = error.providerDetail;
-    }
-
-    const sanitizedMessage = sanitizeProviderError(detail);
-
-    if (error instanceof Error && error.name === 'TimeoutError') {
-      throw new GatewayError(504, 'provider_timeout', 'Provider request timed out');
-    }
-
-    if (error instanceof GatewayError) {
-      throw new GatewayError(error.statusCode, error.errorCode, sanitizedMessage);
-    }
-    throw new GatewayError(502, 'provider_error', sanitizedMessage);
+    handleProviderError(error, ctx, label, providerLogger);
   }
 }
 
@@ -396,63 +241,6 @@ export async function dispatchChatProviderStream(
   try {
     return await tryStreamConnect(ctx, chatRequest, candidate);
   } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    getProviderLogger(candidate.providerKind).warn(
-      { requestId: ctx.id, model: candidate.actualModel, strategy: ctx.route.strategy, error: detail },
-      `${ctx.route.strategy}: chat stream provider call failed`,
-    );
-
-    if (error instanceof GatewayError && error.providerDetail !== undefined) {
-      ctx.providerError = error.providerDetail;
-    }
-
-    const sanitizedMessage = sanitizeProviderError(detail);
-
-    if (error instanceof Error && error.name === 'TimeoutError') {
-      throw new GatewayError(504, 'provider_timeout', 'Provider request timed out');
-    }
-
-    if (error instanceof GatewayError) {
-      throw new GatewayError(error.statusCode, error.errorCode, sanitizedMessage);
-    }
-    throw new GatewayError(502, 'provider_error', sanitizedMessage);
+    handleProviderError(error, ctx, 'Chat Stream', getProviderLogger(candidate.providerKind));
   }
-}
-
-async function* createChunkGenerator(
-  ctx: RoutedModelHttpContext,
-  response: globalThis.Response,
-  streamResponseAdapter: ProviderChatStreamResponseAdapter,
-): AsyncGenerator<InternalChatStreamChunk> {
-  const providerLogger = getProviderLogger(ctx.route.providerKind);
-  if (!response.body) {
-    providerLogger.warn({ requestId: ctx.id }, 'Stream response has no body');
-    return;
-  }
-
-  for await (const dataLine of parseSSEStream(response.body)) {
-    try {
-      const providerChunk = JSON.parse(dataLine) as unknown;
-      yield streamResponseAdapter.fromProviderStreamChunk(providerChunk);
-    } catch (error) {
-      providerLogger.warn(
-        { requestId: ctx.id, error: error instanceof Error ? error.message : String(error) },
-        'Failed to parse stream chunk, skipping',
-      );
-    }
-  }
-
-  ctx.timing.providerEnd = Date.now();
-  /* istanbul ignore next -- fallback safety */
-  const providerDuration =
-    ctx.timing.providerStart === undefined ? undefined : ctx.timing.providerEnd - ctx.timing.providerStart;
-  providerLogger.debug(
-    {
-      requestId: ctx.id,
-      model: ctx.route.model,
-      duration:
-        /* istanbul ignore next -- fallback safety */ providerDuration === undefined ? 'N/A' : `${providerDuration}ms`,
-    },
-    '[dispatch] upstream stream completed',
-  );
 }
