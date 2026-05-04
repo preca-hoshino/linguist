@@ -86,10 +86,9 @@ export async function queryRequestLogs(query: RequestLogQuery = {}): Promise<{
   const offset = Math.max(query.offset ?? 0, 0);
 
   // 精确 COUNT：reltuples 估算在大量写入/删除后严重失真，导致前端页数虚高
-  const countResult = await db.query<{ total: string }>(
-    `SELECT COUNT(*) AS total FROM request_logs r ${whereClause}`,
-    [...values],
-  );
+  const countResult = await db.query<{ total: string }>(`SELECT COUNT(*) AS total FROM request_logs r ${whereClause}`, [
+    ...values,
+  ]);
   const total = Number.parseInt(countResult.rows[0]?.total ?? '0', 10);
 
   // 分页查询（仅窄表，严禁 JOIN request_log_details）
