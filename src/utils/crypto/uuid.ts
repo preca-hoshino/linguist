@@ -1,3 +1,5 @@
+// src/utils/crypto/uuid.ts — UUID v4 / v5 生成器（零依赖，仅用 Node crypto）
+
 import crypto from 'node:crypto';
 
 /** v4 — random UUID */
