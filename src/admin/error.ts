@@ -4,7 +4,7 @@
 // 所有管理 API 路由统一使用本模块的 handleAdminError。
 
 import type { Response } from 'express';
-import type { ApiErrorResponse, ApiErrorType } from '@/types/api';
+import type { ApiErrorResponse, ApiErrorType } from '@/types';
 import { createLogger, GatewayError, logColors } from '@/utils';
 
 const logger = createLogger('Admin:Error', logColors.bold + logColors.red);
