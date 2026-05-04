@@ -1,7 +1,7 @@
 // src/db/users/repository.ts — 用户数据访问层
 
 import { db, generateShortId } from '@/db';
-import { hashPassword } from '@/utils/hash';
+import { hashPassword } from '@/utils/crypto';
 
 /** 数据库行类型（不含 password_hash） */
 interface UserRow {

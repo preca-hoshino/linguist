@@ -1,6 +1,6 @@
 // tests/integration/chat-flow.test.ts — 基于 Mock 的集成聊天链路测试
 
-import { v4 as uuidv4 } from '@/utils/uuid';
+import { v4 as uuidv4 } from '@/utils/crypto';
 import { OpenAICompatChatRequestAdapter } from '../../src/model/http/users/openaicompat/chat/request';
 import { OpenAICompatChatResponseAdapter } from '../../src/model/http/users/openaicompat/chat/response';
 import { dispatchChatProvider } from '../../src/model/http/providers/engine';

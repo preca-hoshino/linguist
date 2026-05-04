@@ -1,5 +1,5 @@
 import { db, generateShortId } from '@/db';
-import { hashPassword } from '@/utils/hash';
+import { hashPassword } from '@/utils/crypto';
 import {
   countUsers,
   createUser,
@@ -16,7 +16,7 @@ jest.mock('@/db', () => ({
   generateShortId: jest.fn(),
 }));
 
-jest.mock('@/utils/hash', () => ({
+jest.mock('@/utils/crypto', () => ({
   hashPassword: jest.fn(),
 }));
 
