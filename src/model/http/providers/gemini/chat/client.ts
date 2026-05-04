@@ -111,7 +111,6 @@ export class GeminiChatClient implements ProviderChatClient {
       method: 'POST',
       headers: requestHeaders,
       body: JSON.stringify(providerReq),
-      signal: AbortSignal.timeout(options?.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT),
     });
 
     if (!response.ok) {
