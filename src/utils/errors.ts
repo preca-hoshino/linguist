@@ -1,4 +1,4 @@
-import type { ProviderErrorDetail } from '@/types/provider';
+import type { ProviderErrorDetail } from '@/types';
 
 /**
  * 网关统一错误类
