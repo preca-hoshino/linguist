@@ -12,18 +12,39 @@
 
 ```
 types/
-├── api.ts          # ApiErrorType、ApiErrorBody、ApiErrorResponse（管理 API 公共类型系统）
-├── billing.ts      # PricingTier、CostBreakdown、BillingResult（阶梯计费类型）
-├── chat.ts         # InternalMessage、InternalChatRequest、InternalChatResponse、ThinkingConfig、ChatUsage 等
-├── config.ts       # ProviderConfig、VirtualModelBackend、VirtualModelConfig、ResolvedRoute
-├── context.ts      # ModelHttpContext、RoutedModelHttpContext（模型请求全生命周期上下文）
-├── embedding.ts    # InternalEmbeddingRequest、InternalEmbeddingResponse
-├── mcp.ts          # McpToolDefinition、McpCallRequest、McpCallResponse、McpContent（MCP 协议映射类型）
-├── mcp-context.ts  # McpGatewayContext（MCP 请求全生命周期上下文，对标 ModelHttpContext）
-├── provider.ts     # HttpHeaders、ProviderCallResult、ProviderStreamResult、ProviderErrorDetail
-├── realtime.ts     # 实时模式相关类型
-├── session.ts      # 会话相关类型
-└── index.ts        # 统一 export type * 再导出
+├── index.ts            # 顶层聚合 barrel（对外唯一入口，按层 re-export）
+│
+├── common/             # 跨协议通用类型（≥2 层共享，或无协议归属）
+│   ├── api.ts          #   ApiErrorType、ApiErrorBody、ApiErrorResponse
+│   ├── billing.ts      #   PricingTier、CostBreakdown、BillingResult
+│   ├── config.ts       #   ModelType、ProviderCredential、ProviderConfig、VirtualModelConfig、ResolvedRoute
+│   └── provider.ts     #   HttpHeaders、ProviderErrorDetail、ProviderCallResult、ProviderStreamResult
+│
+├── http/               # HTTP V1 协议层（无状态请求/响应）
+│   ├── context.ts      #   ModelHttpContext、RoutedModelHttpContext
+│   ├── chat/           #   聊天域（barrel 模式）
+│   │   ├── shared.ts   #     ContentPart、InternalMessage、ToolCall、ToolDefinition、ThinkingConfig、ChatUsage
+│   │   ├── request.ts  #     InternalChatRequest
+│   │   ├── response.ts #     ChatChoice、InternalChatResponse
+│   │   └── streaming.ts#     ToolCallDelta、ChatStreamDelta、InternalChatStreamChunk
+│   └── embedding/      #   嵌入域（barrel 模式）
+│       ├── input.ts    #     EmbeddingInput（判别联合）
+│       ├── task-type.ts#     EmbeddingTaskType
+│       ├── request.ts  #     InternalEmbeddingRequest
+│       └── response.ts #     SparseEmbeddingElement、EmbeddingUsage、InternalEmbeddingResponse
+│
+├── ws/                 # WebSocket V2 协议层（有状态长连接）
+│   ├── context.ts      #   ModelWsContext、WsSessionState、WsSessionEvent
+│   └── realtime/       #   实时事件域（barrel 模式）
+│       ├── client-events.ts  # WsSessionUpdate ~ WsResponseCancel（9 个客户端事件）
+│       ├── server-events.ts  # WsSessionCreated ~ WsError（10 个服务端事件）
+│       ├── conversation.ts   # WsContentPart、WsConversationItem
+│       ├── unions.ts         # WsClientEvent、WsServerEvent（联合类型）
+│       └── frame.ts          # InternalWSFrame
+│
+└── mcp/                # MCP 协议层（协议代理）
+    ├── context.ts      #   McpGatewayContext、McpLogCreateInput
+    └── protocol.ts     #   McpToolDefinition、McpCallRequest、McpContent、McpCallResponse
 ```
 
 ## 核心设计约定
@@ -80,17 +101,18 @@ ThinkingConfig { type: 'enabled' | 'disabled' | 'auto'; budget_tokens?: number }
 
 ### 新增字段或类型
 
-1. 将新字段添加到对应的 `.ts` 文件（`api.ts`、`billing.ts`、`context.ts`、`config.ts`、`provider.ts`、`chat.ts` 或 `embedding.ts`）
-2. 如是新文件，在 `index.ts` 中添加 `export type *` 语句
-3. TypeScript 编译器会高亮所有需要更新的调用位置，按错误人工更新
+1. 确定新类型归属的协议层（`common/` / `http/` / `ws/` / `mcp/`）和域（`chat/` / `embedding/` / `realtime/` 等）
+2. 将新字段添加到对应的 `.ts` 文件；如需新文件，在所在目录的 `index.ts` barrel 中添加 `export type *` 语句
+3. 如是跨层通用类型，放入 `common/` 并确保在各层 barrel 均可达
+4. TypeScript 编译器会高亮所有需要更新的调用位置，按错误人工更新
 
 ### 重构
 
-- **更改 `GatewayContext` 字段**：影响范围较大，需更新 `src/app/`、`src/router/`、所有中间件、用户响应适配器、`src/db/request-logs.ts`
-- **更改 `route` 子对象**：需同步更新 `src/router/index.ts`（赋值）、`src/providers/engine.ts`（读取 + failover 重写）、`src/db/request-logs.ts`（快照）
-- **更改内部请求/响应类型**：需更新所有用户适配器（`src/users/`）和提供商适配器（`src/providers/`）中的对应转换逻辑
+- **更改 `ModelHttpContext` 字段**：影响 `http/context.ts`、`src/model/http/app/`、`src/model/http/router/`、所有中间件、用户响应适配器、`src/db/request-logs.ts`
+- **更改 `route` 子对象**：需同步更新 `src/model/http/router/index.ts`（赋值）、`src/model/http/providers/engine.ts`（读取 + failover 重写）、`src/db/request-logs.ts`（快照）
+- **更改内部请求/响应类型**：需更新所有用户适配器（`src/model/http/users/`）和提供商适配器（`src/model/http/providers/`）中的对应转换逻辑
 
 ### 删除字段
 
 1. 从对应 `.ts` 文件中删除字段
-2. 运行 `npm run type-check` 找出所有使用该字段的位置并一并清理
+2. 运行 `npm run check:types` 找出所有使用该字段的位置并一并清理
