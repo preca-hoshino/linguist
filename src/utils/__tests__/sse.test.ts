@@ -1,4 +1,4 @@
-import { parseSSEStream } from '../sse';
+import { parseSSEStream } from '../http/sse';
 
 /**
  * 构造一个模拟的 ReadableStream，将给定的 chunks 按序推送。

@@ -1,4 +1,4 @@
-import { mimeToMediaType } from '../media';
+import { mimeToMediaType } from '../transform';
 
 describe('mimeToMediaType', () => {
   it('should return image for image MIME types', () => {
