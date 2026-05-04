@@ -10,15 +10,32 @@
  * - Gemini 流没有 [DONE] 标记，连接关闭时自然结束
  *
  * @param body fetch Response 的 ReadableStream
+ * @param signal 可选 AbortSignal — 触发后取消 reader 并终止迭代
  */
-export async function* parseSSEStream(body: ReadableStream<Uint8Array>): AsyncGenerator<string> {
+export async function* parseSSEStream(body: ReadableStream<Uint8Array>, signal?: AbortSignal): AsyncGenerator<string> {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
 
+  // 监听 abort 信号：取消 reader 使在途 read() 抛出，循环自然终止
+  const onAbort = (): void => {
+    void reader.cancel();
+  };
+  signal?.addEventListener('abort', onAbort, { once: true });
+
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      let done: boolean;
+      let value: Uint8Array | undefined;
+      try {
+        ({ done, value } = await reader.read());
+      } catch (_err) {
+        // reader.cancel() 导致 read() 抛出：若由 abort 触发则静默退出
+        if (signal?.aborted) {
+          break;
+        }
+        throw _err;
+      }
       if (done) {
         break;
       }
@@ -58,6 +75,7 @@ export async function* parseSSEStream(body: ReadableStream<Uint8Array>): AsyncGe
       }
     }
   } finally {
+    signal?.removeEventListener('abort', onAbort);
     reader.releaseLock();
   }
 }
