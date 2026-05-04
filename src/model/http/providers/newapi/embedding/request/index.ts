@@ -1,0 +1,48 @@
+// src/model/http/providers/newapi/embedding/request/index.ts — New API 嵌入请求适配器
+//
+// 转换为兼容 OpenAI /v1/embeddings 格式的请求
+
+import type { ProviderEmbeddingRequestAdapter } from '@/model/http/providers/types';
+import type { InternalEmbeddingRequest } from '@/types';
+import { createLogger, logColors } from '@/utils';
+
+const logger = createLogger('Provider:NewApi:Embedding', logColors.bold + logColors.magenta);
+
+/**
+ * New API 嵌入请求适配器
+ * 转换为兼容 OpenAI /v1/embeddings 格式的请求
+ */
+export class NewApiEmbeddingRequestAdapter implements ProviderEmbeddingRequestAdapter {
+  public toProviderRequest(
+    internalReq: InternalEmbeddingRequest,
+    routedModel: string,
+    _modelConfig?: Record<string, unknown>,
+  ): Record<string, unknown> {
+    logger.debug(
+      { routedModel, inputsCount: internalReq.input.length },
+      'Adapting internal embedding request to New API format',
+    );
+
+    const inputTexts: string[] = [];
+    for (const item of internalReq.input) {
+      if (item.type === 'text') {
+        inputTexts.push(item.text);
+      }
+    }
+
+    const req: Record<string, unknown> = {
+      model: routedModel,
+      input: inputTexts,
+    };
+
+    if (internalReq.encoding_format !== undefined) {
+      req.encoding_format = internalReq.encoding_format;
+    }
+
+    if (internalReq.dimensions !== undefined) {
+      req.dimensions = internalReq.dimensions;
+    }
+
+    return req;
+  }
+}
