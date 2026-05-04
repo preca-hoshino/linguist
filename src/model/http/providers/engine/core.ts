@@ -16,7 +16,8 @@ import { GatewayError } from '@/utils';
 import { fetchHeadersToRecord } from '../http-utils';
 import { getProviderChatAdapterSet, getProviderEmbeddingAdapterSet } from '../index';
 import type { ProviderCallOptions } from '../types';
-import { cacheReasoningContent } from '../deepseek/reasoning-cache';
+import { cacheReasoningContent as cacheDeepSeekReasoning } from '../deepseek/reasoning-cache';
+import { cacheReasoningContent as cacheNewApiReasoning } from '../newapi/reasoning-cache';
 import { applyBodyOverrides, stripUnsupportedChatParams, stripUnsupportedEmbeddingParams } from './strip';
 import { handleProviderError } from './errors';
 import { getProviderLogger } from './logger';
@@ -25,11 +26,12 @@ import { createChunkGenerator } from './stream';
 // ========== 推理内容缓存 ==========
 
 /**
- * 若当前请求属于 DeepSeek 推理模型且开启了 reasoning_content_backfill，
+ * 若当前请求属于支持推理缓存的提供商（DeepSeek / New API）且开启了 reasoning_content_backfill，
  * 从响应中提取 reasoning_content 按 assistant content 缓存供后续多轮对话自动回填。
  */
 export function cacheReasoningFromResponse(ctx: RoutedModelHttpContext): void {
-  if (ctx.route.providerKind !== 'deepseek') {
+  const { providerKind } = ctx.route;
+  if (providerKind !== 'deepseek' && providerKind !== 'newapi') {
     return;
   }
   if (ctx.route.modelConfig?.reasoning_content_backfill !== true) {
@@ -39,11 +41,12 @@ export function cacheReasoningFromResponse(ctx: RoutedModelHttpContext): void {
   if (!response?.choices) {
     return;
   }
+  const cacheFn = providerKind === 'deepseek' ? cacheDeepSeekReasoning : cacheNewApiReasoning;
   for (const choice of response.choices) {
     const content = choice.message.content;
     const reasoning = choice.message.reasoning_content;
     if (typeof content === 'string' && typeof reasoning === 'string') {
-      cacheReasoningContent(content, reasoning);
+      cacheFn(content, reasoning);
     }
   }
 }

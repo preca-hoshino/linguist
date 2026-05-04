@@ -6,6 +6,7 @@ import { createLogger, GatewayError, logColors } from '@/utils';
 import { copilotPlugin } from './copilot';
 import { deepseekPlugin } from './deepseek';
 import { geminiPlugin } from './gemini';
+import { newapiPlugin } from './newapi';
 import type { ProviderChatAdapterSet, ProviderEmbeddingAdapterSet, ProviderPlugin } from './types';
 import { volcenginePlugin } from './volcengine';
 import { mimoPlugin } from './mimo';
@@ -32,6 +33,7 @@ registerPlugin(geminiPlugin);
 registerPlugin(volcenginePlugin);
 registerPlugin(copilotPlugin);
 registerPlugin(mimoPlugin);
+registerPlugin(newapiPlugin);
 
 /**
  * 获取注册的插件对象

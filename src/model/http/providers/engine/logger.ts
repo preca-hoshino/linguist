@@ -11,6 +11,7 @@ export const getProviderLogger: (key: string) => Logger = createCachedLoggerFact
     volcengine: { label: 'Provider:VolcEngine', color: logColors.bold + logColors.magenta },
     copilot: { label: 'Provider:Copilot', color: logColors.bold + logColors.cyan },
     mimo: { label: 'Provider:MiMo', color: logColors.bold + logColors.blue },
+    newapi: { label: 'Provider:NewApi', color: logColors.bold + logColors.magenta },
   },
   'Provider',
   logColors.bold + logColors.white,
