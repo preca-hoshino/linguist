@@ -1,4 +1,4 @@
-// src/types/session.ts — WebSocket 会话上下文类型
+// src/types/ws/context.ts — WebSocket 会话上下文类型
 
 import type { InternalWSFrame } from './realtime';
 

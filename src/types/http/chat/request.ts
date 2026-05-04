@@ -1,12 +1,6 @@
-// src/types/chat-request.ts — 聊天请求类型
+// src/types/http/chat/request.ts — 聊天请求类型
 
-import type {
-  InternalMessage,
-  ResponseFormat,
-  ThinkingConfig,
-  ToolChoice,
-  ToolDefinition,
-} from './chat-shared';
+import type { InternalMessage, ResponseFormat, ThinkingConfig, ToolChoice, ToolDefinition } from './shared';
 
 /**
  * 核心请求实体 (Chat Request)

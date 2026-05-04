@@ -1,4 +1,4 @@
-// src/types/mcp-context.ts — MCP 网关上下文类型定义
+// src/types/mcp/context.ts — MCP 网关上下文类型定义
 // 类比 ModelHttpContext，作为 MCP 请求全生命周期的统一上下文载体
 
 /**
@@ -99,3 +99,19 @@ export interface McpGatewayContext {
     end?: number | undefined;
   };
 }
+
+/** MCP 日志写入输入（从 McpGatewayContext 提取的窄表字段） */
+export type McpLogCreateInput = Pick<
+  McpGatewayContext,
+  | 'id'
+  | 'virtualMcpId'
+  | 'virtualMcpName'
+  | 'mcpProviderId'
+  | 'appId'
+  | 'sessionId'
+  | 'method'
+  | 'toolName'
+  | 'status'
+  | 'errorMessage'
+  | 'timing'
+>;

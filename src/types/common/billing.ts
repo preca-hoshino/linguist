@@ -1,4 +1,4 @@
-// src/types/billing.ts — 阶梯计费类型定义
+// src/types/common/billing.ts — 阶梯计费类型定义
 //
 // 企业级网关后置计费核心类型：
 // - PricingTier：单条阶梯价格配置（存储在 provider_models.pricing_tiers JSONB）

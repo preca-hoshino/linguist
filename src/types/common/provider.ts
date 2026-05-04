@@ -1,4 +1,4 @@
-// src/types/provider.ts — 提供商调用相关类型
+// src/types/common/provider.ts — 提供商调用相关类型
 
 /** HTTP 头部快照（兼容 Express IncomingHttpHeaders / OutgoingHttpHeaders） */
 export type HttpHeaders = Record<string, string | string[] | undefined>;

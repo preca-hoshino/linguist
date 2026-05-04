@@ -56,11 +56,7 @@ interface AdapterSet<TReq, TRes> {
   };
   responseAdapter: { fromProviderResponse: (res: unknown) => TRes };
   client: {
-    call: (
-      req: Record<string, unknown>,
-      model: string,
-      options?: ProviderCallOptions,
-    ) => Promise<ProviderCallResult>;
+    call: (req: Record<string, unknown>, model: string, options?: ProviderCallOptions) => Promise<ProviderCallResult>;
   };
 }
 

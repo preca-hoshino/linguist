@@ -1,6 +1,4 @@
-// src/types/mcp.ts — MCP 协议映射类型（占位）
-
-// TODO: Phase 4 按 MCP 协议规范完善
+// src/types/mcp/protocol.ts — MCP 协议映射类型
 
 /** MCP 工具定义（对应 MCP ToolDefinition） */
 export interface McpToolDefinition {
@@ -35,5 +33,5 @@ export interface McpCallResponse {
   content: McpContent[];
 
   /** 是否为错误响应 */
-  isError?: boolean | undefined;
+  isError: boolean;
 }

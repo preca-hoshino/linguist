@@ -1,4 +1,4 @@
-// src/types/api.ts — 管理 API 公共类型系统
+// src/types/common/api.ts — 管理 API 公共类型系统
 //
 // 定义统一的响应结构和错误格式，供 src/admin/ 路由和前端共用。
 // 遵循 Stripe API 风格的 object 字段约定。

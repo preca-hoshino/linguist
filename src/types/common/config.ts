@@ -1,4 +1,4 @@
-// src/types/config.ts — 配置与路由相关类型定义
+// src/types/common/config.ts — 配置与路由相关类型定义
 
 export type ModelType = 'chat' | 'embedding' | 'rerank' | 'image' | 'audio';
 

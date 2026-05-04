@@ -1,6 +1,6 @@
-// src/types/chat-streaming.ts — 流式响应类型
+// src/types/http/chat/streaming.ts — 流式响应类型
 
-import type { ChatUsage, FinishReason } from './chat-shared';
+import type { ChatUsage, FinishReason } from './shared';
 
 /**
  * 工具调用增量（流式）

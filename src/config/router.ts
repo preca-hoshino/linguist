@@ -1,10 +1,6 @@
 // src/config/router.ts — 路由解析、能力过滤、流控感知
 
-import type {
-  ResolvedRoute,
-  VirtualModelBackend,
-  VirtualModelConfig,
-} from '@/types';
+import type { ResolvedRoute, VirtualModelBackend, VirtualModelConfig } from '@/types';
 import { createLogger, logColors, rateLimiter } from '@/utils';
 
 const logger = createLogger('Config:Router', logColors.bold + logColors.yellow);
@@ -126,10 +122,7 @@ export function resolveAllBackends(
   const available = filterByRateLimit(scored);
 
   if (available.length === 0 && eligible.length > 0) {
-    logger.warn(
-      { eligibleCount: eligible.length },
-      'All backends rate-limited for virtual model',
-    );
+    logger.warn({ eligibleCount: eligible.length }, 'All backends rate-limited for virtual model');
   }
 
   if (config.routingStrategy === 'load_balance') {

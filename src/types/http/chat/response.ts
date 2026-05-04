@@ -1,6 +1,6 @@
-// src/types/chat-response.ts — 非流式响应类型
+// src/types/http/chat/response.ts — 非流式响应类型
 
-import type { ChatUsage, FinishReason, ToolCall } from './chat-shared';
+import type { ChatUsage, FinishReason, ToolCall } from './shared';
 
 /**
  * 非流式候选项（对应 InternalChatResponse.choices[] 的单项）

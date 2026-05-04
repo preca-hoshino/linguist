@@ -1,4 +1,4 @@
-// src/types/chat-shared.ts — 聊天共享基础类型（消息、工具、内容块）
+// src/types/http/chat/shared.ts — 聊天共享基础类型（消息、工具、内容块）
 
 /**
  * 内部消息内容块 — 文本

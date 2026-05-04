@@ -1,10 +1,10 @@
-// src/types/context.ts — 网关上下文类型定义
+// src/types/http/context.ts — 网关上下文类型定义
 
-import type { CostBreakdown } from './billing';
+import type { CostBreakdown } from '../common/billing';
 import type { InternalChatRequest, InternalChatResponse } from './chat';
-import type { ModelType, ProviderConfig } from './config';
+import type { ModelType, ProviderConfig } from '../common/config';
 import type { InternalEmbeddingRequest, InternalEmbeddingResponse } from './embedding';
-import type { HttpHeaders, ProviderErrorDetail } from './provider';
+import type { HttpHeaders, ProviderErrorDetail } from '../common/provider';
 
 /**
  * 全局上下文对象 (Gateway Context)
