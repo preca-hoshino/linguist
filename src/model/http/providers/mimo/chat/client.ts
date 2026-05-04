@@ -77,12 +77,10 @@ export class MiMoChatClient implements ProviderChatClient {
 
     const requestHeaders = this.buildHeaders(options);
 
-    const timeout = options?.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT;
     const response = await fetch(url, {
       method: 'POST',
       headers: requestHeaders,
       body: JSON.stringify(providerReq),
-      signal: AbortSignal.timeout(timeout),
     });
 
     if (!response.ok) {

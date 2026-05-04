@@ -220,7 +220,7 @@ async function tryStreamConnect(
 
   providerLogger.debug({ requestId: ctx.id, model: ctx.route.model }, '[dispatch] upstream stream connected');
 
-  return { stream: createChunkGenerator(ctx, response, streamResponseAdapter) };
+  return { stream: createChunkGenerator(ctx, response, streamResponseAdapter, candidate.timeoutMs) };
 }
 
 export async function dispatchChatProviderStream(

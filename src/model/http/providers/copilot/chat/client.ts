@@ -106,7 +106,7 @@ export class CopilotChatClient implements ProviderChatClient {
       method: 'POST',
       headers: requestHeaders,
       body: JSON.stringify(finalBody),
-      signal: AbortSignal.timeout(DEFAULT_PROVIDER_TIMEOUT),
+      signal: AbortSignal.timeout(options?.timeoutMs ?? DEFAULT_PROVIDER_TIMEOUT),
     });
 
     const duration = Date.now() - start;
@@ -162,7 +162,6 @@ export class CopilotChatClient implements ProviderChatClient {
       method: 'POST',
       headers: requestHeaders,
       body: JSON.stringify(finalBody),
-      signal: AbortSignal.timeout(DEFAULT_PROVIDER_TIMEOUT),
     });
 
     if (!response.ok) {
