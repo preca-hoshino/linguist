@@ -12,19 +12,27 @@
 
 ```
 utils/
+├── crypto/             # 加密工具子模块
+│   ├── index.ts        #   barrel 再导出
+│   ├── hash.ts         #   密码哈希工具（scrypt）
+│   ├── jwt.ts          #   JWT HS256 签发与验证
+│   └── uuid.ts         #   UUID v4/v5 生成器
+├── http/               # HTTP 协议工具子模块
+│   ├── index.ts        #   barrel 再导出
+│   ├── sse.ts          #   SSE 流式解析器
+│   └── response-headers.ts  # 响应头注入（X-Request-Id 等）
+├── sql/                # SQL 构建工具子模块
+│   ├── index.ts        #   barrel 再导出
+│   └── query-builder.ts    # buildUpdateSet / buildBatchInsert / buildInClause
 ├── errors.ts           # GatewayError 类
-├── logger.ts           # createLogger(module) — winston 日志工厂（无默认实例导出，各模块自行创建）
-├── query-builder.ts    # buildUpdateSet + buildBatchInsert — 动态 SQL 构建
-├── json.ts             # JSON 解析工具
-├── media.ts            # 媒体类型处理
-├── sse.ts              # SSE 流式传输工具
-├── constants.ts        # 常量定义
-├── hash.ts             # 密码哈希工具（scrypt）
-├── jwt.ts              # JWT 工具
-├── uuid.ts             # UUID v4/v5 生成器
+├── logger.ts           # createLogger(module) — winston 日志工厂
+├── rate-limiter.ts     # 内存限流器（滑动窗口）
+├── transform.ts        # 数据转换工具（安全 JSON 解析 + MIME 类型推断，合并自原 json.ts + media.ts）
+├── math.ts             # 数值计算工具（roundRate / safeRate / roundOrNull，从 db/stats/helpers 提取）
+├── headers.ts          # 请求头脱敏与格式转换（sanitizeHeaders / expressHeadersToRecord，从 app/helpers 提取）
 ├── tool-id.ts          # 工具调用 ID → UUID v5 规范化
-├── rate-limiter.ts     # 内存限流器
-└── index.ts            # 统一再导出
+├── constants.ts        # 常量定义（DEFAULT_PROVIDER_TIMEOUT）
+└── index.ts            # 统一再导出（向后兼容）
 ```
 
 > **注意**：提供商错误映射（`mapProviderError`）和提供商响应解析（`parseProviderResponse`）已迁移至 `src/providers/` 模块，参见 [`src/providers/README.md`](../providers/README.md)。
@@ -139,21 +147,67 @@ const { placeholders, values } = buildBatchInsert(
 // placeholders: "($1, $2), ($3, $4)"
 ```
 
+## transform — 安全 JSON 解析 + MIME 类型推断
+
+```typescript
+import { safeParseJson, mimeToMediaType } from '@/utils';
+
+// 安全解析 JSON：失败不抛异常，包装为 { result: value }
+const parsed = safeParseJson('{"key": "val"}');  // { key: 'val' }
+const fallback = safeParseJson('not-json');       // { result: 'not-json' }
+
+// MIME 类型 → 内部媒体类型
+mimeToMediaType('image/png');   // 'image'
+mimeToMediaType('audio/mp3');   // 'audio'
+mimeToMediaType('video/mp4');   // 'video'
+mimeToMediaType('application/pdf'); // 'file'
+```
+
+## math — 通用数值计算
+
+```typescript
+import { roundRate, safeRate, roundOrNull } from '@/utils';
+
+roundRate(3.14159);               // 3.14（四舍五入到 2 位小数）
+safeRate(5, 10);                  // 0.5（避免除零，保留 4 位小数）
+roundOrNull(null);                // null
+roundOrNull(3.7);                 // 4
+```
+
+> 来源：从 `src/db/stats/helpers.ts` 提取，消除跨领域重复定义。
+
+## headers — 请求头脱敏与格式转换
+
+```typescript
+import { sanitizeHeaders, expressHeadersToRecord } from '@/utils';
+
+// 脱敏敏感头（Authorization, x-api-key, cookie, x-goog-api-key）
+const clean = sanitizeHeaders(req.headers);
+// { authorization: 'sk-abc12345...', 'content-type': 'application/json', ... }
+
+// Express OutgoingHttpHeaders → 纯 Record
+const record = expressHeadersToRecord(res.getHeaders());
+// { 'content-type': 'application/json', 'content-length': '1234', ... }
+```
+
+> 来源：从 `src/model/http/app/helpers.ts` 提取。
+
 ## 新增 / 重构 / 删除向导
 
 ### 新增工具函数
 
-1. 将新函数添加到现有对应文件（按职能归类），或新建`.ts`文件
-2. 如新建文件，在 `index.ts` 中添加再导出语句
+1. 按职能归入对应子目录：加密 → `crypto/`、HTTP → `http/`、SQL → `sql/`；通用纯函数可放根目录
+2. 在对应子目录的 `index.ts`（或根 `index.ts`）中添加再导出语句
 3. 新工具不应依赖项目内部模块（`types/`、`config/` 等），保持工具层的单向依赖
 
 ### 重构
 
 - **换日志库**：只需修改 `logger.ts`，其他模块的调用方式不变
 - **扩展错误格式**：在 `errors.ts` 的 `handleError` 中添加新的 `format` 分支，并同步更新对应的用户适配器
+- **新增加密工具**：放入 `crypto/` 子目录，在 `crypto/index.ts` + 根 `index.ts` 中导出
 
 ### 删除工具函数
 
 1. 从对应文件中删除函数
-2. 在 `index.ts` 中移除再导出
-3. 运行 `npm run type-check` 找出所有引用并一并删除
+2. 在对应的 `index.ts`（子目录 barrel + 根 barrel）中移除再导出
+3. 运行 `npm run check:types` 找出所有引用并一并删除
