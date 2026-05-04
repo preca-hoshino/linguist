@@ -76,9 +76,7 @@ export async function loadAllFromDb(): Promise<LoadedConfig> {
     config: Record<string, unknown>;
     rpm_limit: number | null;
     tpm_limit: number | null;
-  }>(
-    'SELECT id, kind, name, credential_type, credential, base_url, config, rpm_limit, tpm_limit FROM model_providers',
-  );
+  }>('SELECT id, kind, name, credential_type, credential, base_url, config, rpm_limit, tpm_limit FROM model_providers');
 
   for (const row of providersRes.rows) {
     const cred = parseCredential(row.credential_type, row.credential);
