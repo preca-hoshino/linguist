@@ -82,9 +82,7 @@ export function normalizeToolCallIds(messages: InternalMessage[]): InternalMessa
  * 确保响应侧 ID 与请求侧历史消息的规范化策略一致。
  */
 export function normalizeResponseToolCallIds(response: InternalChatResponse): InternalChatResponse {
-  const hasToolCalls = response.choices.some(
-    (c) => c.message.tool_calls !== undefined && c.message.tool_calls.length > 0,
-  );
+  const hasToolCalls = response.choices.some((c) => c.message.tool_calls != null && c.message.tool_calls.length > 0);
   if (!hasToolCalls) {
     return response;
   }
@@ -116,7 +114,7 @@ export function normalizeResponseToolCallIds(response: InternalChatResponse): In
  * 仅对非 undefined 的 id 进行转换。
  */
 export function normalizeStreamChunkToolCallIds(chunk: InternalChatStreamChunk): InternalChatStreamChunk {
-  const hasToolCalls = chunk.choices.some((c) => c.delta.tool_calls !== undefined && c.delta.tool_calls.length > 0);
+  const hasToolCalls = chunk.choices.some((c) => c.delta.tool_calls != null && c.delta.tool_calls.length > 0);
   if (!hasToolCalls) {
     return chunk;
   }
