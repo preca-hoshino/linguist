@@ -23,10 +23,10 @@ function convertContentPart(part: ContentPart): Record<string, unknown> | null {
     return { type: 'text', text: part.text };
   }
   if (part.type === 'image') {
-    if (part.url !== undefined && part.url.length > 0) {
+    if (part.url != null && part.url.length > 0) {
       return { type: 'image_url', image_url: { url: part.url } };
     }
-    if (part.base64_data !== undefined && part.base64_data.length > 0) {
+    if (part.base64_data != null && part.base64_data.length > 0) {
       const mimeType = part.mime_type ?? 'image/jpeg';
       return { type: 'image_url', image_url: { url: `data:${mimeType};base64,${part.base64_data}` } };
     }

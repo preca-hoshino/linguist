@@ -34,7 +34,7 @@ function convertMediaPart(part: MediaContentPart): VolcEngineContentPart | null 
   }
 
   // 优先使用 URL（远程引用更高效）
-  if (part.url !== undefined && part.url.length > 0) {
+  if (part.url != null && part.url.length > 0) {
     return {
       type: 'image_url',
       image_url: { url: part.url },
@@ -42,7 +42,7 @@ function convertMediaPart(part: MediaContentPart): VolcEngineContentPart | null 
   }
 
   // 回退到 base64 inline data
-  if (part.base64_data !== undefined && part.base64_data.length > 0) {
+  if (part.base64_data != null && part.base64_data.length > 0) {
     // 优先使用 mime_type，回退到根据类型推断
     const mimeType = part.mime_type ?? `image/${MEDIA_DEFAULT_SUBTYPE[part.type] ?? 'jpeg'}`;
     const dataUrl = `data:${mimeType};base64,${part.base64_data}`;

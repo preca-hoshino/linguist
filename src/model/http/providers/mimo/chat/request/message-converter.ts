@@ -20,10 +20,10 @@ function convertContentPart(part: ContentPart): Record<string, unknown> | null {
     return { type: 'text', text: part.text };
   }
   if (part.type === 'image') {
-    if (part.url !== undefined && part.url.length > 0) {
+    if (part.url != null && part.url.length > 0) {
       return { type: 'image_url', image_url: { url: part.url } };
     }
-    if (part.base64_data !== undefined && part.base64_data.length > 0) {
+    if (part.base64_data != null && part.base64_data.length > 0) {
       const mimeType = part.mime_type ?? 'image/jpeg';
       return { type: 'image_url', image_url: { url: `data:${mimeType};base64,${part.base64_data}` } };
     }
@@ -66,7 +66,7 @@ export function normalizeMessages(messages: InternalMessage[]): Record<string, u
     };
 
     // 发送者名称
-    if (msg.name !== undefined && msg.name.length > 0) {
+    if (msg.name != null && msg.name.length > 0) {
       normalized.name = msg.name;
     }
 
@@ -76,7 +76,7 @@ export function normalizeMessages(messages: InternalMessage[]): Record<string, u
         normalized.reasoning_content = msg.reasoning_content;
       }
       // 工具调用
-      if (msg.tool_calls !== undefined && msg.tool_calls.length > 0) {
+      if (msg.tool_calls != null && msg.tool_calls.length > 0) {
         normalized.tool_calls = msg.tool_calls;
       }
     }

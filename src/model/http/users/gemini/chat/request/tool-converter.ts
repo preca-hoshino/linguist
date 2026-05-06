@@ -167,9 +167,9 @@ export function convertToolConfig(toolConfig?: GeminiToolConfig): ToolChoice | u
   }
 
   // ANY
-  if (fcc.allowedFunctionNames !== undefined && fcc.allowedFunctionNames.length > 0) {
+  if (fcc.allowedFunctionNames != null && fcc.allowedFunctionNames.length > 0) {
     const fnName = fcc.allowedFunctionNames[0];
-    if (fnName !== undefined && fnName.length > 0) {
+    if (fnName != null && fnName.length > 0) {
       return {
         type: 'function',
         function: { name: fnName },

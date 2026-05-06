@@ -70,7 +70,7 @@ export class VolcEngineEmbeddingResponseAdapter implements ProviderEmbeddingResp
     };
 
     // 映射稀疏向量（可选）
-    if (firstItem.sparse_embedding !== undefined && firstItem.sparse_embedding.length > 0) {
+    if (firstItem.sparse_embedding != null && firstItem.sparse_embedding.length > 0) {
       result.sparse_embedding = firstItem.sparse_embedding.map(
         (se): SparseEmbeddingElement => ({
           index: se.index,

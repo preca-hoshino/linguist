@@ -30,6 +30,7 @@ interface BackendRow {
   provider_model_name?: string | undefined;
   provider_name?: string | undefined;
   provider_id?: string | undefined;
+  provider_kind?: string | undefined;
 }
 
 /** 虚拟模型的数据库行 */
@@ -88,7 +89,8 @@ async function loadVirtualModelWithBackends(
 
   const backendsResult = await db.query<BackendRow>(
     `SELECT vmb.provider_model_id, vmb.weight, vmb.priority,
-            pm.name AS provider_model_name, p.name AS provider_name, pm.provider_id
+            pm.name AS provider_model_name, p.name AS provider_name, pm.provider_id,
+            p.kind AS provider_kind
      FROM virtual_model_backends vmb
      JOIN model_provider_models pm ON vmb.provider_model_id = pm.id
      JOIN model_providers p ON pm.provider_id = p.id
@@ -213,7 +215,8 @@ router.get('/', async (req: Request, res: Response) => {
     if (expandBackends) {
       backendResult = await db.query<BackendRow & { virtual_model_id: string }>(
         `SELECT vmb.virtual_model_id, vmb.provider_model_id, vmb.weight, vmb.priority,
-                pm.name AS provider_model_name, p.name AS provider_name, pm.provider_id
+                pm.name AS provider_model_name, p.name AS provider_name, pm.provider_id,
+                p.kind AS provider_kind
          FROM virtual_model_backends vmb
          JOIN model_provider_models pm ON vmb.provider_model_id = pm.id
          JOIN model_providers p ON pm.provider_id = p.id
@@ -243,6 +246,7 @@ router.get('/', async (req: Request, res: Response) => {
         provider_model_name: row.provider_model_name,
         provider_name: row.provider_name,
         provider_id: row.provider_id,
+        provider_kind: row.provider_kind,
       });
       backendsByVm.set(row.virtual_model_id, list);
     }

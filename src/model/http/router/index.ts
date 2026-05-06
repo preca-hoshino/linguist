@@ -37,7 +37,7 @@ function inferChatCapabilities(req: InternalChatRequest): string[] {
   }
 
   // 检查是否使用工具
-  if (req.tools !== undefined && req.tools.length > 0) {
+  if (req.tools != null && req.tools.length > 0) {
     caps.push('tools');
   }
 

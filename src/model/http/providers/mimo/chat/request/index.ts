@@ -113,7 +113,7 @@ export class MiMoChatRequestAdapter implements ProviderChatRequestAdapter {
 
     // ── 工具调用 ──────────────────────────────────────────────────────
 
-    if (internalReq.tools !== undefined && internalReq.tools.length > 0) {
+    if (internalReq.tools != null && internalReq.tools.length > 0) {
       req.tools = normalizeTools(internalReq.tools);
     }
 

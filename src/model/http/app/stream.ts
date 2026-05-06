@@ -64,7 +64,7 @@ export async function processStreamSend(
         (c) =>
           (c.delta.content !== undefined && c.delta.content !== '') ||
           (c.delta.reasoning_content !== undefined && c.delta.reasoning_content !== '') ||
-          (c.delta.tool_calls !== undefined && c.delta.tool_calls.length > 0),
+          (c.delta.tool_calls != null && c.delta.tool_calls.length > 0),
       );
       if (hasContent) {
         ctx.timing.ttft = Date.now();
@@ -152,7 +152,7 @@ export function mergeStreamChunks(chunks: InternalChatStreamChunk[]): InternalCh
       if (choice.finish_reason !== null) {
         acc.finish_reason = choice.finish_reason;
       }
-      if (choice.delta.tool_calls !== undefined) {
+      if (choice.delta.tool_calls != null) {
         for (const tc of choice.delta.tool_calls) {
           let toolAcc = acc.toolCalls.get(tc.index);
           if (toolAcc === undefined) {
