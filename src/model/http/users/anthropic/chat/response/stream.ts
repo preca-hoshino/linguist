@@ -118,7 +118,7 @@ export class AnthropicChatStreamResponseAdapter implements UserChatStreamRespons
     }
 
     // 4. 处理 tool_calls（工具调用增量）
-    if (delta.tool_calls !== undefined && delta.tool_calls.length > 0) {
+    if (delta.tool_calls != null && delta.tool_calls.length > 0) {
       for (const tc of delta.tool_calls) {
         if (tc.id !== undefined) {
           if (state.blockState !== 'idle') {
