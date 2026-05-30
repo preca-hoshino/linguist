@@ -54,7 +54,7 @@ const CHAT_PARAMETERS = [
  * 必须与 engine.ts 中 FILTERABLE_EMBEDDING_PARAMS 保持同步。
  * 新增参数需同时加入 InternalEmbeddingRequest 类型定义和所有提供商适配器。
  */
-const EMBEDDING_PARAMETERS = ['dimensions', 'encoding_format'] as const;
+const EMBEDDING_PARAMETERS = ['dimensions', 'encoding_format', 'sparse_embedding', 'task'] as const;
 const RERANK_PARAMETERS = ['top_n', 'return_documents'] as const;
 const IMAGE_PARAMETERS = ['steps', 'guidance_scale', 'width', 'height', 'seed'] as const;
 const AUDIO_PARAMETERS = ['speed', 'pitch', 'sample_rate'] as const;

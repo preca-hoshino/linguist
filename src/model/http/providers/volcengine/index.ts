@@ -23,7 +23,7 @@ export const volcenginePlugin: ProviderPlugin = {
     'presence_penalty',
     'stop',
   ] as const,
-  supportedEmbeddingParameters: ['dimensions', 'encoding_format'] as const,
+  supportedEmbeddingParameters: ['dimensions', 'encoding_format', 'sparse_embedding', 'task'] as const,
 
   getChatAdapterSet: (config) => ({
     requestAdapter: new VolcEngineChatRequestAdapter(),

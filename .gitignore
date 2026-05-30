@@ -30,3 +30,5 @@ frontend/
 
 # Caches
 .eslintcache
+# Local utility scripts with credentials
+scripts/register-newapi-models.ps1
