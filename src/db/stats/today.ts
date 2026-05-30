@@ -22,6 +22,7 @@ export async function getStatsToday(dimension: StatsDimension, id?: string): Pro
         COALESCE(SUM(r.total_tokens), 0)::bigint AS total_tokens,
         COALESCE(SUM(r.prompt_tokens), 0)::bigint AS prompt_tokens,
         COALESCE(SUM(r.completion_tokens), 0)::bigint AS completion_tokens,
+        COALESCE(SUM(r.cached_tokens), 0)::bigint AS cached_tokens,
         COUNT(*) FILTER (WHERE r.status = 'error')::int AS total_errors,
         COALESCE(SUM(r.calculated_cost), 0.0)::float AS today_cost
       FROM request_logs r
@@ -69,7 +70,7 @@ export async function getStatsToday(dimension: StatsDimension, id?: string): Pro
       ${dimFilter.clause}
     )
     SELECT
-      t.total_reqs, t.total_tokens, t.prompt_tokens, t.completion_tokens, t.total_errors,
+      t.total_reqs, t.total_tokens, t.prompt_tokens, t.completion_tokens, t.cached_tokens, t.total_errors,
       tl.today_avg_latency, tl.today_avg_ttft, tl.today_avg_itl, t.today_cost,
       r1.reqs AS rpm_reqs, r1.tokens AS rpm_tokens,
       r5.recent_avg_latency, r5.errors AS r5_errors, r5.total AS r5_total,
@@ -82,6 +83,7 @@ export async function getStatsToday(dimension: StatsDimension, id?: string): Pro
     total_tokens: string;
     prompt_tokens: string;
     completion_tokens: string;
+    cached_tokens: string;
     total_errors: number;
     rpm_reqs: number;
     rpm_tokens: string;
@@ -104,6 +106,7 @@ export async function getStatsToday(dimension: StatsDimension, id?: string): Pro
       today_tokens: 0,
       today_prompt_tokens: 0,
       today_completion_tokens: 0,
+      today_cached_tokens: 0,
       today_errors: 0,
       current_rpm: 0,
       current_tpm: 0,
@@ -122,6 +125,7 @@ export async function getStatsToday(dimension: StatsDimension, id?: string): Pro
     today_tokens: Number(row.total_tokens),
     today_prompt_tokens: Number(row.prompt_tokens),
     today_completion_tokens: Number(row.completion_tokens),
+    today_cached_tokens: Number(row.cached_tokens),
     today_errors: row.total_errors,
     // RPM/TPM 使用近 5 分钟窗口除以 5 ，比 1 分钟窗口更平滑、更少出现 0
     current_rpm: Math.round(row.r5_total / 5),
