@@ -123,6 +123,7 @@ export interface StatsToday {
   today_tokens: number;
   today_prompt_tokens: number;
   today_completion_tokens: number;
+  today_cached_tokens: number;
   today_errors: number;
   current_rpm: number;
   current_tpm: number;
