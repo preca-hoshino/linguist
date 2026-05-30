@@ -92,7 +92,7 @@ describe('Provider Models API Integration', () => {
           name: 'Embed Model',
           model_type: 'embedding',
           capabilities: ['multimodal', 'dynamic_dim'],
-          supported_parameters: ['dimensions', 'encoding_format'],
+          supported_parameters: ['dimensions', 'task'],
           model_config: '{}',
           pricing_tiers: '[]',
           max_tokens: 1024,
@@ -110,13 +110,13 @@ describe('Provider Models API Integration', () => {
         name: 'Embed Model',
         model_type: 'embedding',
         capabilities: ['multimodal', 'dynamic_dim'],
-        supported_parameters: ['dimensions', 'encoding_format'],
+        supported_parameters: ['dimensions', 'task'],
         max_tokens: 1024,
       });
 
     expect(res.status).toBe(201);
     expect(res.body.capabilities).toEqual(['multimodal', 'dynamic_dim']);
-    expect(res.body.supported_parameters).toEqual(['dimensions', 'encoding_format']);
+    expect(res.body.supported_parameters).toEqual(['dimensions', 'task']);
   });
 
   it('should fail with 400 when an invalid supported_parameter is provided', async () => {
