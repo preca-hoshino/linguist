@@ -41,6 +41,10 @@ export class CopilotEmbeddingRequestAdapter implements ProviderEmbeddingRequestA
       req.dimensions = internalReq.dimensions;
     }
 
+    if (internalReq.user !== undefined) {
+      req.user = internalReq.user;
+    }
+
     return req;
   }
 }
