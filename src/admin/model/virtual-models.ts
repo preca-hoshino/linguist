@@ -14,6 +14,7 @@ import {
 } from '@/utils';
 import { handleAdminError } from '../error';
 import { validateMetadata } from '../metadata-validator';
+import { requirePermission } from '../permission';
 
 const logger = createLogger('Admin:VirtualModels', logColors.bold + logColors.blue);
 
@@ -119,7 +120,7 @@ function withThroughput<T extends { id: string }>(vm: T): T & { throughput: { rp
 }
 
 // ==================== 列出所有虚拟模型 ====================
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', requirePermission('models', 'view'), async (req: Request, res: Response) => {
   try {
     const { search, limit, offset, expand, model_type, routing_strategy, is_active } = req.query;
     const limitNum =
@@ -268,7 +269,7 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // ==================== 获取单个虚拟模型 ====================
-router.get('/:id', async (req: Request, res: Response) => {
+router.get('/:id', requirePermission('models', 'view'), async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const { expand } = req.query;
@@ -307,7 +308,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 // ==================== 创建虚拟模型 ====================
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', requirePermission('models', 'edit'), async (req: Request, res: Response) => {
   try {
     const body = req.body as VirtualModelBody;
     const { name, description, model_type, routing_strategy, backends, rpm_limit, tpm_limit, metadata } = body;
@@ -391,7 +392,7 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // ==================== 更新虚拟模型 ====================
-router.patch('/:id', async (req: Request, res: Response) => {
+router.patch('/:id', requirePermission('models', 'edit'), async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const body = req.body as VirtualModelBody;
@@ -505,7 +506,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
 });
 
 // ==================== 删除虚拟模型 ====================
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', requirePermission('models', 'edit'), async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     logger.debug({ id }, 'Deleting virtual model');

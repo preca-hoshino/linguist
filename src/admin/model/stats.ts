@@ -3,6 +3,7 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import type { StatsBreakdownGroupBy, StatsDimension, StatsInterval, StatsRange } from '@/db';
+import { requirePermission } from '../permission';
 import {
   db,
   getStatsBreakdown,
@@ -18,6 +19,7 @@ import { handleAdminError } from '../error';
 const logger = createLogger('Admin:Stats', logColors.bold + logColors.blue);
 
 const router: Router = Router();
+router.use(requirePermission('models', 'view'));
 
 const VALID_RANGES: StatsRange[] = ['15m', '1h', '6h', '24h', '7d', '14d', '30d'];
 const VALID_DIMENSIONS: StatsDimension[] = ['global', 'provider', 'provider_model', 'virtual_model', 'app'];
