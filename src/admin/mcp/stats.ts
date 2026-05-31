@@ -13,8 +13,10 @@ import {
 } from '@/db/mcp-logs';
 import { GatewayError } from '@/utils';
 import { handleAdminError } from '../error';
+import { requirePermission } from '../permission';
 
 const router: Router = Router();
+router.use(requirePermission('mcp', 'view'));
 
 const VALID_RANGES: McpStatsRange[] = ['15m', '1h', '6h', '24h', '7d', '14d', '30d'];
 const VALID_DIMENSIONS: McpStatsDimension[] = ['global', 'mcp_provider', 'virtual_mcp'];

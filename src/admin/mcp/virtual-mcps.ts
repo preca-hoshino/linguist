@@ -9,6 +9,7 @@ import {
   listVirtualMcps,
   updateVirtualMcp,
 } from '@/db/mcp-virtual-servers/queries';
+import { requirePermission } from '../permission';
 import type { VirtualMcpCreateInput, VirtualMcpUpdateInput } from '@/db/mcp-virtual-servers/types';
 import { GatewayError } from '@/utils';
 import { handleAdminError } from '../error';
@@ -17,12 +18,13 @@ import { validateMetadata } from '../metadata-validator';
 const router: Router = Router();
 
 /** 虚拟 MCP 名字只允许字母、数字、连字符、下划线、点，不允许空格 */
+
 const MCP_NAME_REGEX = /^[a-zA-Z0-9._-]+$/;
 const MCP_NAME_FORMAT_ERROR =
   'Name must not contain spaces. Only letters, numbers, hyphens (-), underscores (_), and dots (.) are allowed.';
 
 // ==================== 列出所有虚拟 MCP ====================
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', requirePermission('mcp', 'view'), async (req: Request, res: Response) => {
   try {
     const { search, limit, offset, is_active, mcp_provider_id } = req.query;
 
@@ -51,7 +53,7 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // ==================== 查询单个虚拟 MCP ====================
-router.get('/:id', async (req: Request, res: Response) => {
+router.get('/:id', requirePermission('mcp', 'view'), async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const virtualMcp = await getVirtualMcpById(id);
@@ -67,7 +69,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 // ==================== 创建虚拟 MCP ====================
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', requirePermission('mcp', 'edit'), async (req: Request, res: Response) => {
   try {
     const body = req.body as VirtualMcpCreateInput;
     if (
@@ -93,7 +95,7 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // ==================== 更新虚拟 MCP ====================
-router.patch('/:id', async (req: Request, res: Response) => {
+router.patch('/:id', requirePermission('mcp', 'edit'), async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const body = req.body as VirtualMcpUpdateInput;
@@ -117,7 +119,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
 });
 
 // ==================== 删除虚拟 MCP ====================
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', requirePermission('mcp', 'edit'), async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const success = await deleteVirtualMcp(id);

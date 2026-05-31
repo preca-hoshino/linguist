@@ -6,8 +6,10 @@ import { deleteMcpLogById, getMcpLogById, listMcpLogs } from '@/db/mcp-logs/quer
 import type { McpLogQuery } from '@/db/mcp-logs/types';
 import { GatewayError } from '@/utils';
 import { handleAdminError } from '../error';
+import { requirePermission } from '../permission';
 
 const router: Router = Router();
+router.use(requirePermission('mcp', 'view'));
 
 // ==================== 列出所有 MCP 日志 ====================
 router.get('/', async (req: Request, res: Response) => {
@@ -62,7 +64,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 // ==================== 删除单条 MCP 日志 ====================
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', requirePermission('mcp', 'edit'), async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const deleted = await deleteMcpLogById(id);
