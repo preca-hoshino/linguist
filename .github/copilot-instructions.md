@@ -44,4 +44,5 @@ npm run db           # 运行数据库迁移
 | API 设计        | `.github/instructions/api-design.instructions.md`        |
 | 管理 API (REST) | `.github/instructions/admin-api-rest.instructions.md`    |
 | 管理 API (参数) | `.github/instructions/admin-api-params.instructions.md`  |
+| 权限模型        | `.github/instructions/permission-model.instructions.md`  |
 | 测试            | `.github/instructions/testing.instructions.md`           |
