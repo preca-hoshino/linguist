@@ -89,11 +89,11 @@ describe('adminAuth middleware', () => {
     expect(mockNext).not.toHaveBeenCalled();
   });
 
-  it('should call next and set res.locals.userId if valid', () => {
+  it('should call next and set res.locals.userId if valid', async () => {
     mockRequest.headers = { authorization: 'Bearer valid-token' };
     (verifyToken as jest.Mock).mockReturnValue({ sub: 'user-id-123' });
 
-    adminAuth(mockRequest as Request, mockResponse as Response, mockNext);
+    await adminAuth(mockRequest as Request, mockResponse as Response, mockNext);
 
     expect(verifyToken).toHaveBeenCalledWith('valid-token', 'test-secret');
     expect(mockResponse.locals?.userId).toBe('user-id-123');

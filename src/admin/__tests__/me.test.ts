@@ -40,6 +40,7 @@ describe('GET /api/me', () => {
       email: 'test@example.com',
       avatar_data: '',
       is_active: true,
+      permissions: { models: 'edit', mcp: 'edit', apps: 'edit', users: 'edit', settings: 'edit' },
       created_at: '2026-01-01T00:00:00.000Z',
       updated_at: '2026-01-02T00:00:00.000Z',
     });
@@ -54,6 +55,7 @@ describe('GET /api/me', () => {
       email: 'test@example.com',
       avatar_url: '',
       is_active: true,
+      permissions: { models: 'edit', mcp: 'edit', apps: 'edit', users: 'edit', settings: 'edit' },
       created_at: '2026-01-01T00:00:00.000Z',
       updated_at: '2026-01-02T00:00:00.000Z',
     });
@@ -66,6 +68,7 @@ describe('GET /api/me', () => {
       email: 'avatar@example.com',
       avatar_data: 'base64-avatar-data',
       is_active: true,
+      permissions: { models: 'edit', mcp: 'edit', apps: 'edit', users: 'edit', settings: 'edit' },
       created_at: '2026-01-01T00:00:00.000Z',
       updated_at: '2026-01-01T00:00:00.000Z',
     });
