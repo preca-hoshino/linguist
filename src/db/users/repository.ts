@@ -1,6 +1,8 @@
 // src/db/users/repository.ts — 用户数据访问层
 
 import { db, generateShortId } from '@/db';
+import type { UserPermissions } from '@/types';
+import { DEFAULT_PERMISSIONS } from '@/types';
 import { hashPassword } from '@/utils/crypto';
 
 /** 数据库行类型（不含 password_hash） */
@@ -10,6 +12,7 @@ interface UserRow {
   email: string;
   avatar_data: string;
   is_active: boolean;
+  permissions: UserPermissions;
   created_at: string;
   updated_at: string;
   [key: string]: unknown;
@@ -21,16 +24,24 @@ interface UserRowFull extends UserRow {
 }
 
 /** 安全字段列表（排除 password_hash） */
-const SAFE_COLUMNS = 'id, username, email, avatar_data, is_active, created_at, updated_at';
+const SAFE_COLUMNS = 'id, username, email, avatar_data, is_active, permissions, created_at, updated_at';
 
 /**
  * 按邮箱查找用户（登录用，返回含 password_hash）
  */
 export async function findByEmail(email: string): Promise<UserRowFull | null> {
   const result = await db.query<UserRowFull>(
-    'SELECT id, username, email, password_hash, avatar_data, is_active, created_at, updated_at FROM users WHERE email = $1 LIMIT 1',
+    'SELECT id, username, email, password_hash, avatar_data, is_active, permissions, created_at, updated_at FROM users WHERE email = $1 LIMIT 1',
     [email],
   );
+  return result.rows[0] ?? null;
+}
+
+/**
+ * 按 OIDC sub 查找用户（预留）
+ */
+export async function findByOidcSub(oidcSub: string): Promise<UserRow | null> {
+  const result = await db.query<UserRow>(`SELECT ${SAFE_COLUMNS} FROM users WHERE oidc_sub = $1 LIMIT 1`, [oidcSub]);
   return result.rows[0] ?? null;
 }
 
@@ -99,12 +110,14 @@ export async function createUser(data: {
   email: string;
   password: string;
   avatar_data?: string;
+  permissions?: UserPermissions;
 }): Promise<UserRow> {
   const id = await generateShortId('users');
   const passwordHash = hashPassword(data.password);
+  const perms = data.permissions ?? DEFAULT_PERMISSIONS;
   const result = await db.query<UserRow>(
-    `INSERT INTO users (id, username, email, password_hash, avatar_data) VALUES ($1, $2, $3, $4, $5) RETURNING ${SAFE_COLUMNS}`,
-    [id, data.username, data.email, passwordHash, data.avatar_data ?? ''],
+    `INSERT INTO users (id, username, email, password_hash, avatar_data, permissions) VALUES ($1, $2, $3, $4, $5, $6) RETURNING ${SAFE_COLUMNS}`,
+    [id, data.username, data.email, passwordHash, data.avatar_data ?? '', JSON.stringify(perms)],
   );
   const row = result.rows[0];
   if (!row) {
@@ -120,6 +133,7 @@ export interface UserUpdateData {
   password?: string;
   avatar_data?: string;
   is_active?: boolean;
+  permissions?: UserPermissions;
 }
 
 /**
@@ -149,6 +163,10 @@ export async function updateUser(id: string, data: UserUpdateData): Promise<User
   if (data.is_active !== undefined) {
     setClauses.push(`is_active = $${paramIndex++}`);
     values.push(data.is_active);
+  }
+  if (data.permissions !== undefined) {
+    setClauses.push(`permissions = $${paramIndex++}`);
+    values.push(JSON.stringify(data.permissions));
   }
 
   if (setClauses.length === 0) {

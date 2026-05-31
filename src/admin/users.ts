@@ -3,15 +3,21 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import type { UserUpdateData } from '@/db';
-import { createUser, deleteUser, getUserAvatarData, listUsers, updateUser } from '@/db';
+import { createUser, deleteUser, findUserById, getUserAvatarData, listUsers, updateUser } from '@/db';
+import type { UserPermissions } from '@/types';
+import { canManageUser, hasPermission, PERMISSION_MODULES, validatePermissions } from '@/types';
 import { createLogger, GatewayError, logColors } from '@/utils';
 import { handleAdminError } from './error';
 import { validateMetadata } from './metadata-validator';
+import { requirePermission } from './permission';
 
 const logger = createLogger('Admin:Users', logColors.bold + logColors.magenta);
 
 const usersRouter: Router = Router();
 export const publicUsersRouter: Router = Router();
+
+// 用户管理全部需要 users:view 权限
+usersRouter.use(requirePermission('users', 'view'));
 
 /** GET /api/users — 列出所有用户 */
 usersRouter.get('/', async (req: Request, res: Response) => {
@@ -43,6 +49,7 @@ usersRouter.get('/', async (req: Request, res: Response) => {
       email: u.email,
       avatar_url: u.avatar_data ? `/api/users/${u.id}/avatar` : '',
       is_active: u.is_active,
+      permissions: u.permissions,
       created_at: u.created_at,
       updated_at: u.updated_at,
     }));
@@ -54,14 +61,15 @@ usersRouter.get('/', async (req: Request, res: Response) => {
 });
 
 /** POST /api/users — 创建用户 */
-usersRouter.post('/', async (req: Request, res: Response) => {
+usersRouter.post('/', requirePermission('users', 'edit'), async (req: Request, res: Response) => {
   try {
-    const { username, email, password, avatar_data, metadata } = req.body as {
+    const { username, email, password, avatar_data, metadata, permissions } = req.body as {
       username?: string;
       email?: string;
       password?: string;
       avatar_data?: string;
       metadata?: Record<string, string>;
+      permissions?: UserPermissions;
     };
 
     if (
@@ -77,7 +85,28 @@ usersRouter.post('/', async (req: Request, res: Response) => {
 
     validateMetadata(metadata);
 
-    const user = await createUser({ username, email, password, avatar_data: avatar_data ?? '' });
+    // 验证权限结构（如传入）
+    if (permissions !== undefined && !validatePermissions(permissions)) {
+      throw new GatewayError(400, 'invalid_request', 'Invalid permissions structure');
+    }
+
+    // 权限天花板：不能授予超过自身权限的级别
+    if (permissions !== undefined) {
+      const requestUserPerms = res.locals.userPermissions as UserPermissions | undefined;
+      if (requestUserPerms) {
+        for (const mod of PERMISSION_MODULES) {
+          if (!hasPermission(requestUserPerms, mod, permissions[mod])) {
+            throw new GatewayError(
+              403,
+              'insufficient_permissions',
+              `Cannot grant ${mod}:${permissions[mod]} — your level is ${requestUserPerms[mod]}`,
+            );
+          }
+        }
+      }
+    }
+
+    const user = await createUser({ username, email, password, avatar_data: avatar_data ?? '', ...(permissions !== undefined ? { permissions } : {}) });
     logger.info({ userId: user.id, username }, 'User created');
     res.status(201).json({
       object: 'user',
@@ -86,6 +115,7 @@ usersRouter.post('/', async (req: Request, res: Response) => {
       email: user.email,
       avatar_url: user.avatar_data ? `/api/users/${user.id}/avatar` : '',
       is_active: user.is_active,
+      permissions: user.permissions,
       created_at: user.created_at,
       updated_at: user.updated_at,
     });
@@ -101,16 +131,17 @@ usersRouter.post('/', async (req: Request, res: Response) => {
 });
 
 /** PATCH /api/users/:id — 通用用户更新（支持部分字段） */
-usersRouter.patch('/:id', async (req: Request, res: Response) => {
+usersRouter.patch('/:id', requirePermission('users', 'edit'), async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
-    const { username, email, password, avatar_data, is_active, metadata } = req.body as {
+    const { username, email, password, avatar_data, is_active, metadata, permissions } = req.body as {
       username?: string;
       email?: string;
       password?: string;
       avatar_data?: string;
       is_active?: boolean;
       metadata?: Record<string, string>;
+      permissions?: UserPermissions;
     };
 
     const data: UserUpdateData = {};
@@ -130,6 +161,45 @@ usersRouter.patch('/:id', async (req: Request, res: Response) => {
       data.is_active = is_active;
     }
 
+    // 权限更新
+    if (permissions !== undefined) {
+      if (!validatePermissions(permissions)) {
+        throw new GatewayError(400, 'invalid_request', 'Invalid permissions structure');
+      }
+
+      // 自保护：禁止修改自己的权限
+      const requestUserId = res.locals.userId as string | undefined;
+      if (requestUserId === id) {
+        throw new GatewayError(400, 'invalid_request', 'Cannot modify your own permissions');
+      }
+
+      // 权限天花板：不能授予超过自身权限的级别
+      const requestUserPerms = res.locals.userPermissions as UserPermissions | undefined;
+      if (requestUserPerms) {
+        for (const mod of PERMISSION_MODULES) {
+          if (!hasPermission(requestUserPerms, mod, permissions[mod])) {
+            throw new GatewayError(
+              403,
+              'insufficient_permissions',
+              `Cannot grant ${mod}:${permissions[mod]} — your level is ${requestUserPerms[mod]}`,
+            );
+          }
+        }
+      }
+
+      data.permissions = permissions;
+    }
+
+    // 目标用户天花板：不能编辑权限高于自己的用户
+    const patchRequestUserId = res.locals.userId as string | undefined;
+    if (patchRequestUserId !== id) {
+      const patchRequestPerms = res.locals.userPermissions as UserPermissions | undefined;
+      const targetUser = await findUserById(id);
+      if (targetUser && patchRequestPerms && !canManageUser(patchRequestPerms, targetUser.permissions)) {
+        throw new GatewayError(403, 'insufficient_permissions', 'Cannot modify a user with higher permissions than your own');
+      }
+    }
+
     validateMetadata(metadata);
 
     const user = await updateUser(id, data);
@@ -145,6 +215,7 @@ usersRouter.patch('/:id', async (req: Request, res: Response) => {
       email: user.email,
       avatar_url: user.avatar_data ? `/api/users/${user.id}/avatar` : '',
       is_active: user.is_active,
+      permissions: user.permissions,
       created_at: user.created_at,
       updated_at: user.updated_at,
     });
@@ -187,9 +258,23 @@ publicUsersRouter.get('/:id/avatar', async (req: Request, res: Response) => {
 });
 
 /** DELETE /api/users/:id — 删除用户 */
-usersRouter.delete('/:id', async (req: Request, res: Response) => {
+usersRouter.delete('/:id', requirePermission('users', 'edit'), async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
+
+    // 防止自删除
+    const requestUserId = res.locals.userId as string | undefined;
+    if (requestUserId === id) {
+      throw new GatewayError(400, 'invalid_request', 'Cannot delete your own account');
+    }
+
+    // 目标用户天花板：不能删除权限高于自己的用户
+    const delRequestPerms = res.locals.userPermissions as UserPermissions | undefined;
+    const targetUser = await findUserById(id);
+    if (targetUser && delRequestPerms && !canManageUser(delRequestPerms, targetUser.permissions)) {
+      throw new GatewayError(403, 'insufficient_permissions', 'Cannot delete a user with higher permissions than your own');
+    }
+
     const deleted = await deleteUser(id);
     if (!deleted) {
       throw new GatewayError(404, 'not_found', 'User not found');

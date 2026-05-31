@@ -18,10 +18,14 @@ import {
 } from '@/model/http/providers/copilot/constants';
 import { createLogger, GatewayError, logColors } from '@/utils';
 import { handleAdminError } from '../error';
+import { requirePermission } from '../permission';
 
 const logger = createLogger('Admin:Copilot:OAuth', logColors.bold + logColors.cyan);
 
 const router: Router = Router();
+
+// Copilot OAuth 涉及凭据写入，需要 models:edit 权限
+router.use(requirePermission('models', 'edit'));
 
 /** GitHub Device Code API 响应结构 */
 interface GitHubDeviceCodeResponse {

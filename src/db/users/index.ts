@@ -6,6 +6,7 @@ export {
   createUser,
   deleteUser,
   findByEmail,
+  findByOidcSub,
   findById,
   getUserAvatarData,
   listUsers,

@@ -3,6 +3,7 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import type { RequestLogStatus } from '@/db';
+import { requirePermission } from '../permission';
 import { deleteRequestLogById, getRequestLogById, queryRequestLogs } from '@/db';
 import { createLogger, GatewayError, logColors } from '@/utils';
 import { handleAdminError } from '../error';
@@ -10,6 +11,7 @@ import { handleAdminError } from '../error';
 const logger = createLogger('Admin:RequestLogs', logColors.bold + logColors.blue);
 
 const router: Router = Router();
+router.use(requirePermission('models', 'view'));
 
 const VALID_STATUSES: RequestLogStatus[] = ['processing', 'completed', 'error'];
 
@@ -108,7 +110,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 
 // ==================== 删除单条请求日志 ====================
 // DELETE /admin/request-logs/:id
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', requirePermission('models', 'edit'), async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     logger.debug({ id }, 'Deleting request log');

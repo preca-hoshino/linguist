@@ -3,6 +3,7 @@
 import type { Request, Response } from 'express';
 import { Router } from 'express';
 import { db, generateShortId } from '@/db';
+import { requirePermission } from '../permission';
 import { getProviderSupportedModelTypes, getRegisteredProviderKinds } from '@/model/http/providers';
 import type { ProviderAdvancedConfig } from '@/types';
 import { DEFAULT_PROVIDER_CONFIG } from '@/types';
@@ -46,7 +47,7 @@ function injectSupportedModelTypes(row: Record<string, unknown>): Record<string,
 const router: Router = Router();
 
 // ==================== 列出所有提供商 ====================
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', requirePermission('models', 'view'), async (req: Request, res: Response) => {
   try {
     const { search, limit, offset, kind } = req.query;
 
@@ -106,7 +107,7 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // ==================== 查询单个提供商 ====================
-router.get('/:id', async (req: Request, res: Response) => {
+router.get('/:id', requirePermission('models', 'view'), async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     logger.debug({ id }, 'Getting provider by ID');
@@ -123,7 +124,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 // ==================== 创建提供商 ====================
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', requirePermission('models', 'edit'), async (req: Request, res: Response) => {
   try {
     const body = req.body as ProviderBody;
     const { name, kind, base_url, credential_type, credential, config, rpm_limit, tpm_limit, metadata } = body;
@@ -184,7 +185,7 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // ==================== 更新提供商 ====================
-router.patch('/:id', async (req: Request, res: Response) => {
+router.patch('/:id', requirePermission('models', 'edit'), async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const body = req.body as ProviderBody;
@@ -238,7 +239,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
 });
 
 // ==================== 删除提供商 ====================
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', requirePermission('models', 'edit'), async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     logger.debug({ id }, 'Deleting provider');

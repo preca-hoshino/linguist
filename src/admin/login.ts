@@ -2,6 +2,7 @@
 
 import type { Request, Response } from 'express';
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { findByEmail } from '@/db';
 import { createLogger, GatewayError, logColors, signToken, verifyPassword } from '@/utils';
 import { handleAdminError } from './error';
@@ -11,9 +12,25 @@ const logger = createLogger('Admin:Login', logColors.bold + logColors.cyan);
 /** 默认 token 有效期：24 小时 */
 const TOKEN_EXPIRES_IN = 86_400;
 
+/** 登录速率限制：每 IP 每分钟最多 5 次 */
+const loginRateLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: 'rate_limited',
+      message: 'Too many login attempts, please try again later',
+      type: 'rate_limit_error',
+      param: null,
+    },
+  },
+});
+
 const loginRouter: Router = Router();
 
-loginRouter.post('/login', async (req: Request, res: Response) => {
+loginRouter.post('/login', loginRateLimiter, async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body as { email?: string; password?: string };
 

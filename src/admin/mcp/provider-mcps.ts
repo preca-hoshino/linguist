@@ -9,6 +9,7 @@ import {
   listMcpProviders,
   updateMcpProvider,
 } from '@/db/mcp-providers/queries';
+import { requirePermission } from '../permission';
 import type { McpProviderCreateInput, McpProviderUpdateInput } from '@/db/mcp-providers/types';
 import type { McpToolInfo } from '@/mcp/providers/base-client';
 import { mcpConnectionManager } from '@/mcp/providers/connection-manager';
@@ -19,7 +20,7 @@ import { validateMetadata } from '../metadata-validator';
 const router: Router = Router();
 
 // ==================== 列出所有提供商 MCP ====================
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', requirePermission('mcp', 'view'), async (req: Request, res: Response) => {
   try {
     const { search, limit, offset, is_active, kind } = req.query;
 
@@ -48,7 +49,7 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // ==================== 查询单个提供商 MCP 的工具集 ====================
-router.get('/:id/tools', async (req: Request, res: Response) => {
+router.get('/:id/tools', requirePermission('mcp', 'view'), async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const provider = await getMcpProviderById(id);
@@ -82,7 +83,7 @@ router.get('/:id/tools', async (req: Request, res: Response) => {
 });
 
 // ==================== 查询单个提供商 MCP ====================
-router.get('/:id', async (req: Request, res: Response) => {
+router.get('/:id', requirePermission('mcp', 'view'), async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const provider = await getMcpProviderById(id);
@@ -98,7 +99,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 // ==================== 创建提供商 MCP ====================
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', requirePermission('mcp', 'edit'), async (req: Request, res: Response) => {
   try {
     const body = req.body as McpProviderCreateInput;
     if (
@@ -120,7 +121,7 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // ==================== 更新提供商 MCP ====================
-router.patch('/:id', async (req: Request, res: Response) => {
+router.patch('/:id', requirePermission('mcp', 'edit'), async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const body = req.body as McpProviderUpdateInput;
@@ -139,7 +140,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
 });
 
 // ==================== 删除提供商 MCP ====================
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', requirePermission('mcp', 'edit'), async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const success = await deleteMcpProvider(id);

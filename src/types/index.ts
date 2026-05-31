@@ -2,6 +2,7 @@
 export type * from './common/api';
 export type * from './common/billing';
 export * from './common/config';
+export * from './common/permissions';
 export type * from './common/provider';
 
 // http — HTTP V1 协议层（无状态）

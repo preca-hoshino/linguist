@@ -7,6 +7,7 @@ import { getProviderSupportedChatParameters, getProviderSupportedEmbeddingParame
 import { buildInClause, buildUpdateSet, createLogger, GatewayError, logColors, rateLimiter } from '@/utils';
 import { handleAdminError } from '../error';
 import { validateMetadata } from '../metadata-validator';
+import { requirePermission } from '../permission';
 
 const logger = createLogger('Admin:ProviderModels', logColors.bold + logColors.blue);
 
@@ -252,7 +253,7 @@ function validateSupportedParametersAgainstProviderKind(
 const router: Router = Router();
 
 // ==================== 列出所有提供商模型 ====================
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', requirePermission('models', 'view'), async (req: Request, res: Response) => {
   try {
     const { provider_id, model_type, is_active, search, limit, offset } = req.query;
     const limitNum =
@@ -352,7 +353,7 @@ router.get('/', async (req: Request, res: Response) => {
 });
 
 // ==================== 查询单个提供商模型 ====================
-router.get('/:id', async (req: Request, res: Response) => {
+router.get('/:id', requirePermission('models', 'view'), async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     logger.debug({ id }, 'Getting provider model by ID');
@@ -386,7 +387,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 // ==================== 创建提供商模型 ====================
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', requirePermission('models', 'edit'), async (req: Request, res: Response) => {
   try {
     const body = req.body as ProviderModelBody;
     const {
@@ -488,7 +489,7 @@ router.post('/', async (req: Request, res: Response) => {
 });
 
 // ==================== 更新提供商模型 ====================
-router.patch('/:id', async (req: Request, res: Response) => {
+router.patch('/:id', requirePermission('models', 'edit'), async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     const body = req.body as ProviderModelBody;
@@ -600,7 +601,7 @@ router.patch('/:id', async (req: Request, res: Response) => {
 });
 
 // ==================== 删除提供商模型 ====================
-router.delete('/:id', async (req: Request, res: Response) => {
+router.delete('/:id', requirePermission('models', 'edit'), async (req: Request, res: Response) => {
   try {
     const id = req.params.id as string;
     logger.debug({ id }, 'Deleting provider model');
