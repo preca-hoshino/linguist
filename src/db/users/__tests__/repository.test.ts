@@ -114,6 +114,7 @@ describe('Users Repository', () => {
         'test@new.com',
         'hashed_pass',
         '', // default avatar
+        expect.any(String), // permissions JSONB
       ]);
       expect(result).toEqual(returnedRow);
     });
