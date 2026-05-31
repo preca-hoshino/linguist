@@ -37,6 +37,7 @@ meRouter.get('/', async (_req: Request, res: Response) => {
       email: user.email,
       avatar_url: user.avatar_data ? `/api/users/${user.id}/avatar` : '',
       is_active: user.is_active,
+      permissions: user.permissions,
       created_at: user.created_at,
       updated_at: user.updated_at,
     });

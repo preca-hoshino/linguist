@@ -7,6 +7,7 @@ import { createApp, deleteApp, getAppById, listApps, rotateAppKey, updateApp } f
 import { createLogger, GatewayError, logColors } from '@/utils';
 import { handleAdminError } from './error';
 import { validateMetadata } from './metadata-validator';
+import { requirePermission } from './permission';
 
 const logger = createLogger('Admin:Apps', logColors.bold + logColors.blue);
 
@@ -18,7 +19,7 @@ const router: Router = Router();
 
 // ==================== 列出应用（Offset 分页） ====================
 // GET /admin/apps?limit=10&offset=0&search=xxx
-router.get('/', async (req: Request, res: Response) => {
+router.get('/', requirePermission('apps', 'view'), async (req: Request, res: Response) => {
   try {
     const { limit, offset, search, is_active } = req.query;
     const limitNum = typeof limit === 'string' && limit !== '' ? Math.min(Number.parseInt(limit, 10), 100) : undefined;
@@ -53,7 +54,7 @@ router.get('/', async (req: Request, res: Response) => {
 
 // ==================== 获取应用详情 ====================
 // GET /api/apps/:id
-router.get('/:id', async (req: Request<{ id: string }>, res: Response) => {
+router.get('/:id', requirePermission('apps', 'view'), async (req: Request<{ id: string }>, res: Response) => {
   try {
     const { id } = req.params;
     logger.debug({ id }, 'Getting app by ID');
@@ -71,7 +72,7 @@ router.get('/:id', async (req: Request<{ id: string }>, res: Response) => {
 
 // ==================== 创建应用 ====================
 // POST /api/apps
-router.post('/', async (req: Request, res: Response) => {
+router.post('/', requirePermission('apps', 'edit'), async (req: Request, res: Response) => {
   try {
     const body = req.body as {
       name?: string;
@@ -102,7 +103,7 @@ router.post('/', async (req: Request, res: Response) => {
 
 // ==================== 更新应用（Stripe 风格：PATCH 局部更新） ====================
 // PATCH /api/apps/:id
-router.patch('/:id', async (req: Request<{ id: string }>, res: Response) => {
+router.patch('/:id', requirePermission('apps', 'edit'), async (req: Request<{ id: string }>, res: Response) => {
   try {
     const { id } = req.params;
     const body = req.body as {
@@ -131,7 +132,7 @@ router.patch('/:id', async (req: Request<{ id: string }>, res: Response) => {
 
 // ==================== 删除应用 ====================
 // DELETE /api/apps/:id
-router.delete('/:id', async (req: Request<{ id: string }>, res: Response) => {
+router.delete('/:id', requirePermission('apps', 'edit'), async (req: Request<{ id: string }>, res: Response) => {
   try {
     const { id } = req.params;
     logger.debug({ id }, 'Deleting app');
@@ -154,7 +155,7 @@ router.delete('/:id', async (req: Request<{ id: string }>, res: Response) => {
 
 // ==================== 轮换应用 API Key ====================
 // POST /api/apps/:id/key
-router.post('/:id/key', async (req: Request<{ id: string }>, res: Response) => {
+router.post('/:id/key', requirePermission('apps', 'edit'), async (req: Request<{ id: string }>, res: Response) => {
   try {
     const { id } = req.params;
     logger.debug({ id }, 'Rotating app API key');
