@@ -2,155 +2,63 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "gateway:install-deps",
+      "label": "Backend (Install)",
       "type": "shell",
       "command": "npm",
       "args": ["install"],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "presentation": {
-        "reveal": "silent",
-        "panel": "shared"
-      },
-      "runOptions": {
-        "runOn": "folderOpen"
-      }
+      "options": { "cwd": "${workspaceFolder}" },
+      "presentation": { "reveal": "silent", "panel": "shared", "close": true }
     },
     {
-      "label": "ui:install-deps",
+      "label": "Frontend (Install)",
       "type": "shell",
       "command": "npm",
       "args": ["install"],
-      "options": {
-        "cwd": "${workspaceFolder}/ui"
-      },
-      "presentation": {
-        "reveal": "silent",
-        "panel": "shared"
-      }
+      "options": { "cwd": "${workspaceFolder:Linguist-Admin}" },
+      "presentation": { "reveal": "silent", "panel": "shared", "close": true }
     },
     {
-      "label": "gateway:dev",
+      "label": "Backend",
+      "type": "shell",
+      "command": "npx",
+      "args": ["tsx", "watch", "--inspect", "src/index.ts"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "dependsOn": ["Backend (Install)"],
+      "isBackground": true,
+      "problemMatcher": {
+        "pattern": { "regexp": "^$" },
+        "background": {
+          "activeOnStart": true,
+          "beginsPattern": "tsx",
+          "endsPattern": "listening on|Linguist LLM Gateway started|listening"
+        }
+      },
+      "presentation": { "reveal": "silent", "panel": "dedicated" }
+    },
+    {
+      "label": "Frontend",
       "type": "shell",
       "command": "npm",
       "args": ["run", "dev"],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
+      "options": { "cwd": "${workspaceFolder:Linguist-Admin}" },
+      "dependsOn": ["Frontend (Install)"],
       "isBackground": true,
       "problemMatcher": {
-        "pattern": {
-          "regexp": "^.*$",
-          "file": 1,
-          "location": 2,
-          "message": 3
-        },
+        "pattern": { "regexp": "^$" },
         "background": {
           "activeOnStart": true,
-          "beginsPattern": "^.*ts-node.*",
-          "endsPattern": "^.*listening on.*"
+          "beginsPattern": "vite",
+          "endsPattern": "Local:.*http://localhost"
         }
       },
-      "presentation": {
-        "echo": true,
-        "reveal": "always",
-        "focus": false,
-        "panel": "shared",
-        "showReuseMessage": true
-      }
+      "presentation": { "reveal": "silent", "panel": "dedicated" }
     },
     {
-      "label": "ui:dev",
-      "type": "shell",
-      "command": "npm",
-      "args": ["run", "dev"],
-      "options": {
-        "cwd": "${workspaceFolder}/ui"
-      },
-      "isBackground": true,
-      "problemMatcher": {
-        "pattern": {
-          "regexp": "^.*$",
-          "file": 1,
-          "location": 2,
-          "message": 3
-        },
-        "background": {
-          "activeOnStart": true,
-          "beginsPattern": "^.*vite.*",
-          "endsPattern": "^.*Local:.*http://localhost.*"
-        }
-      },
-      "presentation": {
-        "echo": true,
-        "reveal": "always",
-        "focus": false,
-        "panel": "shared",
-        "showReuseMessage": true
-      }
-    },
-    {
-      "label": "startup:all",
-      "dependsOn": ["gateway:install-deps", "ui:install-deps"],
+      "label": "Full Stack",
+      "dependsOn": ["Backend", "Frontend"],
+      "dependsOrder": "parallel",
       "problemMatcher": [],
-      "presentation": {
-        "reveal": "silent"
-      }
-    },
-    {
-      "label": "gateway:build",
-      "type": "shell",
-      "command": "npm",
-      "args": ["run", "build"],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "group": {
-        "kind": "build",
-        "isDefault": false
-      },
-      "presentation": {
-        "echo": true,
-        "reveal": "always",
-        "panel": "shared"
-      }
-    },
-    {
-      "label": "ui:build",
-      "type": "shell",
-      "command": "npm",
-      "args": ["run", "build"],
-      "options": {
-        "cwd": "${workspaceFolder}/ui"
-      },
-      "group": {
-        "kind": "build",
-        "isDefault": false
-      },
-      "presentation": {
-        "echo": true,
-        "reveal": "always",
-        "panel": "shared"
-      }
-    },
-    {
-      "label": "lint:gateway",
-      "type": "shell",
-      "command": "npm",
-      "args": ["run", "lint"],
-      "options": {
-        "cwd": "${workspaceFolder}"
-      },
-      "group": {
-        "kind": "test",
-        "isDefault": false
-      },
-      "presentation": {
-        "echo": true,
-        "reveal": "always",
-        "panel": "shared"
-      }
+      "presentation": { "reveal": "silent", "close": true }
     }
   ]
 }

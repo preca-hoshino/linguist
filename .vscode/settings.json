@@ -3,10 +3,7 @@
     "source.fixAll.eslint": "explicit"
   },
   "editor.formatOnSave": true,
-  "editor.defaultFormatter": "esbenp.prettier-vscode",
-  "[typescript]": {
-    "editor.defaultFormatter": "esbenp.prettier-vscode"
-  },
+  "editor.defaultFormatter": "biomejs.biome",
   "debug.javascript.terminalOptions": {
     "skipFiles": ["<node_internals>/**"]
   },
@@ -15,17 +12,21 @@
   "search.exclude": {
     "node_modules": true,
     "dist": true,
-    "coverage": true
+    "coverage": true,
+    "*.tsbuildinfo": true
   },
   "files.exclude": {
     "node_modules": true,
     "dist": true,
-    "coverage": true
+    "coverage": true,
+    "*.tsbuildinfo": true
   },
   "[json]": {
     "editor.defaultFormatter": "biomejs.biome"
   },
   "[jsonc]": {
     "editor.defaultFormatter": "biomejs.biome"
-  }
+  },
+  "typescript.tsdk": "node_modules/typescript/lib",
+  "workbench.navigation.openDefaultLinkHandler": "external"
 }

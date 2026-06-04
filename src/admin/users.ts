@@ -106,7 +106,13 @@ usersRouter.post('/', requirePermission('users', 'edit'), async (req: Request, r
       }
     }
 
-    const user = await createUser({ username, email, password, avatar_data: avatar_data ?? '', ...(permissions !== undefined ? { permissions } : {}) });
+    const user = await createUser({
+      username,
+      email,
+      password,
+      avatar_data: avatar_data ?? '',
+      ...(permissions !== undefined ? { permissions } : {}),
+    });
     logger.info({ userId: user.id, username }, 'User created');
     res.status(201).json({
       object: 'user',
@@ -196,7 +202,11 @@ usersRouter.patch('/:id', requirePermission('users', 'edit'), async (req: Reques
       const patchRequestPerms = res.locals.userPermissions as UserPermissions | undefined;
       const targetUser = await findUserById(id);
       if (targetUser && patchRequestPerms && !canManageUser(patchRequestPerms, targetUser.permissions)) {
-        throw new GatewayError(403, 'insufficient_permissions', 'Cannot modify a user with higher permissions than your own');
+        throw new GatewayError(
+          403,
+          'insufficient_permissions',
+          'Cannot modify a user with higher permissions than your own',
+        );
       }
     }
 
@@ -272,7 +282,11 @@ usersRouter.delete('/:id', requirePermission('users', 'edit'), async (req: Reque
     const delRequestPerms = res.locals.userPermissions as UserPermissions | undefined;
     const targetUser = await findUserById(id);
     if (targetUser && delRequestPerms && !canManageUser(delRequestPerms, targetUser.permissions)) {
-      throw new GatewayError(403, 'insufficient_permissions', 'Cannot delete a user with higher permissions than your own');
+      throw new GatewayError(
+        403,
+        'insufficient_permissions',
+        'Cannot delete a user with higher permissions than your own',
+      );
     }
 
     const deleted = await deleteUser(id);

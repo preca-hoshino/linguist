@@ -4,7 +4,8 @@
   "description": "LLM Gateway — 大模型统一网关",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "ts-node -r tsconfig-paths/register src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "dev:debug": "node --import tsx --inspect src/index.ts",
     "build:tsc": "tsc",
     "build:alias": "tsc-alias",
     "build:copy": "node -e \"const{cpSync}=require('fs');cpSync('src/db/migrations','dist/db/migrations',{recursive:true})\"",
@@ -20,11 +21,7 @@
     "db": "ts-node -r tsconfig-paths/register src/db/migrate.ts",
     "db:clear": "ts-node -r tsconfig-paths/register src/db/migrate.ts --clear"
   },
-  "keywords": [
-    "llm",
-    "gateway",
-    "ai"
-  ],
+  "keywords": ["llm", "gateway", "ai"],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
@@ -58,6 +55,7 @@
     "ts-node": "^10.9.2",
     "tsc-alias": "^1.8.16",
     "tsconfig-paths": "^4.2.0",
+    "tsx": "^4.22.4",
     "typescript": "^5.9.3"
   }
 }

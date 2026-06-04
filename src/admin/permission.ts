@@ -54,10 +54,7 @@ export function requirePermission(module: PermissionModule, level: PermissionLev
     }
 
     if (!hasPermission(permissions, module, level)) {
-      logger.warn(
-        { userId, module, level, path: req.path, method: req.method },
-        'Permission denied',
-      );
+      logger.warn({ userId, module, level, path: req.path, method: req.method }, 'Permission denied');
       const body: ApiErrorResponse = {
         error: {
           code: 'insufficient_permissions',
