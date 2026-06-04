@@ -1,9 +1,11 @@
 {
   "recommendations": [
-    "esbenp.prettier-vscode",
+    "biomejs.biome",
     "dbaeumer.vscode-eslint",
-    "oxc.oxc-vscode",
-    "ms-debugger.debugger-for-chrome",
-    "ms-vscode.vscode-typescript-next"
+    "ms-vscode.js-debug",
+    "ms-vscode.js-debug-companion",
+    "christian-kohler.path-intellisense",
+    "humao.rest-client",
+    "mhutchie.git-graph"
   ]
 }
