@@ -2,49 +2,33 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Gateway (Backend)",
+      "name": "Backend",
+      "type": "node",
+      "request": "attach",
+      "port": 9229,
+      "restart": true,
+      "timeout": 15000,
+      "cwd": "${workspaceFolder}",
+      "sourceMaps": true,
+      "skipFiles": ["<node_internals>/**"],
+      "preLaunchTask": "Backend"
+    },
+    {
+      "name": "Frontend",
       "type": "node",
       "request": "launch",
-      "runtimeArgs": ["--nolazy", "-r", "ts-node/register"],
-      "program": "${workspaceFolder}/src/index.ts",
-      "cwd": "${workspaceFolder}",
-      "env": {
-        "NODE_ENV": "development",
-        "TS_NODE_PROJECT": "${workspaceFolder}/tsconfig.json"
-      },
-      "envFile": "${workspaceFolder}/.env",
-      "sourceMaps": true,
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "cwd": "${workspaceFolder:Linguist-Admin}",
       "console": "integratedTerminal",
-      "preLaunchTask": "gateway:install-deps",
-      "skipFiles": ["<node_internals>/**"]
-    },
-    {
-      "name": "Frontend (UI)",
-      "type": "chrome",
-      "request": "launch",
-      "url": "http://localhost:5173",
-      "webRoot": "${workspaceFolder}/ui",
-      "preLaunchTask": "ui:dev"
-    },
-    {
-      "name": "Jest: All Tests",
-      "type": "node",
-      "request": "launch",
-      "program": "${workspaceFolder}/node_modules/jest/bin/jest.js",
-      "args": ["--runInBand"],
-      "cwd": "${workspaceFolder}",
-      "env": {
-        "NODE_ENV": "test"
-      },
-      "envFile": "${workspaceFolder}/.env",
-      "sourceMaps": true,
-      "console": "integratedTerminal"
+      "skipFiles": ["<node_internals>/**"],
+      "preLaunchTask": "Frontend (Install)"
     }
   ],
   "compounds": [
     {
-      "name": "Gateway + UI",
-      "configurations": ["Gateway (Backend)", "Frontend (UI)"],
+      "name": "Full Stack",
+      "configurations": ["Backend", "Frontend"],
       "stopAll": true
     }
   ]
