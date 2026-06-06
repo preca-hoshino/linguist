@@ -2,6 +2,7 @@
 
 import type { ContentPart, InternalMessage } from '@/types';
 import { createLogger, logColors } from '@/utils';
+import { getReasoningContent } from '../../reasoning-cache';
 
 const logger = createLogger('Provider:MiMo', logColors.bold + logColors.blue);
 
@@ -54,11 +55,15 @@ function convertContent(content: string | ContentPart[]): string | Record<string
  * - developer 角色 → 映射为 system（MiMo 支持 developer 角色，但 InternalMessage 无此枚举值，
  *   用户侧 developer 消息进入时已由上游适配器转为 system，此处仅做兜底）
  * - assistant 消息携带 reasoning_content → 原样传递（满足多轮思考对话需求）
+ * - assistant 消息若不携带 reasoning_content 且 backfillReasoning=true：
+ *   从缓存中查找该 content 对应的 reasoning_content 并注入（网关自动回填）
  * - assistant 消息携带 tool_calls → 原样传递
  * - content ContentPart[] → OpenAI image_url 格式
  * - 保留 tool_call_id / name 有效字段
+ *
+ * @param backfillReasoning 是否开启 reasoning_content 自动回填（由 thinking_config 驱动）
  */
-export function normalizeMessages(messages: InternalMessage[]): Record<string, unknown>[] {
+export function normalizeMessages(messages: InternalMessage[], backfillReasoning = false): Record<string, unknown>[] {
   return messages.map((msg) => {
     const normalized: Record<string, unknown> = {
       role: msg.role,
@@ -74,6 +79,12 @@ export function normalizeMessages(messages: InternalMessage[]): Record<string, u
     if (msg.role === 'assistant') {
       if (msg.reasoning_content !== undefined) {
         normalized.reasoning_content = msg.reasoning_content;
+      } else if (backfillReasoning) {
+        // 消息缺少 reasoning_content 且开启回填 → 从缓存查找注入
+        const cached = getReasoningContent(typeof msg.content === 'string' ? msg.content : null);
+        if (cached !== undefined) {
+          normalized.reasoning_content = cached;
+        }
       }
       // 工具调用
       if (msg.tool_calls != null && msg.tool_calls.length > 0) {
