@@ -6,7 +6,8 @@
 // - thinking 配置映射（内部 enabled:boolean → New API type:"enabled"/"disabled"）
 
 import type { ProviderChatRequestAdapter } from '@/model/http/providers/types';
-import type { InternalChatRequest, ThinkingEffortLevel, ToolDefinition } from '@/types';
+import type { InternalChatRequest, ToolDefinition } from '@/types';
+import type { ModelThinkingConfig } from '@/types/common/config';
 import { createLogger, GatewayError, logColors } from '@/utils';
 import { budgetToEffort } from '@/utils/thinking-budget';
 import { normalizeMessages } from './message-converter';
@@ -57,8 +58,8 @@ export class NewApiChatRequestAdapter implements ProviderChatRequestAdapter {
   public toProviderRequest(
     internalReq: InternalChatRequest,
     routedModel: string,
-    modelConfig?: Record<string, unknown>,
-    thinkingEffortLevels?: ThinkingEffortLevel[],
+    _modelConfig?: Record<string, unknown>,
+    thinkingConfig?: ModelThinkingConfig,
   ): Record<string, unknown> {
     logger.debug(
       {
@@ -71,8 +72,11 @@ export class NewApiChatRequestAdapter implements ProviderChatRequestAdapter {
     );
 
     // 消息列表导租：由数据自身决定是否携带 reasoning_content
-    // modelConfig.reasoning_content_backfill=true 时自动从缓存注入缺失的 reasoning_content
-    const messages = normalizeMessages(internalReq.messages, modelConfig);
+    // thinking_config.reasoning_content_backfill=true 时自动从缓存注入缺失的 reasoning_content
+    const messages = normalizeMessages(
+      internalReq.messages,
+      thinkingConfig?.reasoning_content_backfill === true,
+    );
 
     const req: Record<string, unknown> = {
       model: routedModel,
@@ -125,11 +129,12 @@ export class NewApiChatRequestAdapter implements ProviderChatRequestAdapter {
     // 优先使用配置化的 thinking_effort_levels，回退到硬编码默认值
     // New API 代理推理模型时支持 'max' 和 'high' 两档
     if (internalReq.thinking?.budget_tokens !== undefined && (internalReq.max_tokens ?? 0) > 0) {
-      if (thinkingEffortLevels && thinkingEffortLevels.length > 0) {
+      const effortLevels = thinkingConfig?.levels;
+      if (effortLevels && effortLevels.length > 0) {
         const effort = budgetToEffort(
           internalReq.thinking.budget_tokens,
           internalReq.max_tokens as number,
-          thinkingEffortLevels,
+          effortLevels,
         );
         if (effort !== undefined) {
           req.reasoning_effort = effort;
