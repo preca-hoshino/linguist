@@ -2,6 +2,7 @@
 
 import type { ProviderChatRequestAdapter } from '@/model/http/providers/types';
 import type { InternalChatRequest, ToolDefinition } from '@/types';
+import type { ModelThinkingConfig } from '@/types/common/config';
 import { createLogger, GatewayError, logColors } from '@/utils';
 import { normalizeMessages } from './message-converter';
 
@@ -54,7 +55,7 @@ export class MiMoChatRequestAdapter implements ProviderChatRequestAdapter {
     internalReq: InternalChatRequest,
     routedModel: string,
     _modelConfig?: Record<string, unknown>,
-    _thinkingEffortLevels?: import('@/types').ThinkingEffortLevel[],
+    thinkingConfig?: ModelThinkingConfig,
   ): Record<string, unknown> {
     logger.debug(
       {
@@ -67,7 +68,7 @@ export class MiMoChatRequestAdapter implements ProviderChatRequestAdapter {
       'Adapting internal request to MiMo format',
     );
 
-    const messages = normalizeMessages(internalReq.messages);
+    const messages = normalizeMessages(internalReq.messages, thinkingConfig?.reasoning_content_backfill === true);
 
     const req: Record<string, unknown> = {
       model: routedModel,
