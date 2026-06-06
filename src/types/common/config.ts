@@ -52,11 +52,9 @@ export interface ThinkingEffortLevel {
  * 虚拟模型可覆盖提供商模型的 levels 配置。
  */
 export interface ModelThinkingConfig {
-  /** 是否支持思考能力 */
-  enabled: boolean;
   /** 多轮对话时是否自动补全 reasoning_content 字段 */
   reasoning_content_backfill?: boolean | undefined;
-  /** 思考程度级别列表，按 ratio 升序 */
+  /** 思考程度级别列表，按 ratio 升序。空数组或未配置表示不支持思考强度控制 */
   levels?: ThinkingEffortLevel[] | undefined;
 }
 
