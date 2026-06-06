@@ -121,8 +121,7 @@ export class VolcEngineChatRequestAdapter implements ProviderChatRequestAdapter 
       };
     }
 
-    // 推理强度控制：优先使用配置化的 thinking_effort_levels，回退到硬编码默认值
-    // 火山引擎支持 'low' / 'medium' / 'high' 三档
+    // 推理强度控制：仅在配置了 thinking_effort_levels 时生效
     if (internalReq.thinking?.budget_tokens !== undefined && (internalReq.max_tokens ?? 0) > 0) {
       const effortLevels = thinkingConfig?.levels;
       if (effortLevels && effortLevels.length > 0) {
@@ -133,16 +132,6 @@ export class VolcEngineChatRequestAdapter implements ProviderChatRequestAdapter 
         );
         if (effort !== undefined) {
           req.reasoning_effort = effort;
-        }
-      } else {
-        // 回退：硬编码默认值
-        const ratio = internalReq.thinking.budget_tokens / (internalReq.max_tokens as number);
-        if (ratio >= 0.75) {
-          req.reasoning_effort = 'high';
-        } else if (ratio >= 0.4) {
-          req.reasoning_effort = 'medium';
-        } else if (ratio >= 0.1) {
-          req.reasoning_effort = 'low';
         }
       }
     }
