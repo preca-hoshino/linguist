@@ -1,11 +1,24 @@
 // src/providers/mimo/chat/response/index.ts — MiMo 响应适配器
 
+import { extractErrorObj, extractString } from '@/model/http/providers/errors';
 import type { ProviderChatResponseAdapter } from '@/model/http/providers/types';
 import type { FinishReason, InternalChatResponse } from '@/types';
 import { createLogger, GatewayError, logColors } from '@/utils';
 import type { MiMoResponse } from './types';
 
 const logger = createLogger('Provider:MiMo', logColors.bold + logColors.blue);
+
+/**
+ * 从上游响应中检测 OpenAI 格式的错误信息
+ * 某些代理部署（如 one-api）会在 HTTP 200 下返回 `{ "error": {...} }`
+ */
+function detectUpstreamErrorBody(providerRes: Record<string, unknown>): string | null {
+  const errorObj = extractErrorObj(providerRes);
+  if (errorObj === null) {
+    return null;
+  }
+  return extractString(errorObj, 'message') ?? null;
+}
 
 /**
  * MiMo 聊天响应适配器
@@ -33,6 +46,14 @@ export class MiMoChatResponseAdapter implements ProviderChatResponseAdapter {
       throw new GatewayError(502, 'provider_response_invalid', 'MiMo response missing choices array');
     }
     const res = providerRes as MiMoResponse;
+
+    // 检测上游是否返回了 OpenAI 格式的错误（而非标准 chat completion）
+    const upstreamError = detectUpstreamErrorBody(providerRes as Record<string, unknown>);
+    if (upstreamError !== null) {
+      logger.warn({ upstreamError }, 'MiMo returned error in 200 OK response body');
+      throw new GatewayError(502, 'provider_error', `Upstream MiMo error: ${upstreamError}`);
+    }
+
     if (!Array.isArray(res.choices) || res.choices.length === 0) {
       throw new GatewayError(502, 'provider_response_invalid', 'MiMo response missing or empty choices array');
     }
