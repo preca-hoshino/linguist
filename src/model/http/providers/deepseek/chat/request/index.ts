@@ -122,8 +122,7 @@ export class DeepSeekChatRequestAdapter implements ProviderChatRequestAdapter {
     }
 
     // 推理强度控制 (reasoning_effort)
-    // 优先使用配置化的 thinking_effort_levels，回退到硬编码默认值
-    // DeepSeek v4 仅支持 'max' 和 'high' 两档
+    // 仅在配置了 thinking_effort_levels 时生效，未配置则不设置 reasoning_effort
     if (internalReq.thinking?.budget_tokens !== undefined && (internalReq.max_tokens ?? 0) > 0) {
       const effortLevels = thinkingConfig?.levels;
       if (effortLevels && effortLevels.length > 0) {
@@ -134,14 +133,6 @@ export class DeepSeekChatRequestAdapter implements ProviderChatRequestAdapter {
         );
         if (effort !== undefined) {
           req.reasoning_effort = effort;
-        }
-      } else {
-        // 回退：硬编码默认值
-        const ratio = internalReq.thinking.budget_tokens / (internalReq.max_tokens as number);
-        if (ratio >= 0.75) {
-          req.reasoning_effort = 'max';
-        } else if (ratio >= 0.4) {
-          req.reasoning_effort = 'high';
         }
       }
     }
