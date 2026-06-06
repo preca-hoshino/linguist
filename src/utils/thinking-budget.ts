@@ -88,11 +88,7 @@ export function validateModelThinkingConfig(config: unknown): ModelThinkingConfi
 
   // reasoning_content_backfill（可选）
   if (obj.reasoning_content_backfill !== undefined && typeof obj.reasoning_content_backfill !== 'boolean') {
-    throw new GatewayError(
-      400,
-      'invalid_parameter',
-      'thinking_config.reasoning_content_backfill must be a boolean',
-    );
+    throw new GatewayError(400, 'invalid_parameter', 'thinking_config.reasoning_content_backfill must be a boolean');
   }
 
   // levels（可选）
@@ -113,50 +109,46 @@ export function validateModelThinkingConfig(config: unknown): ModelThinkingConfi
 
       for (const [i, item] of levels.entries()) {
         if (item === null || typeof item !== 'object') {
-        throw new GatewayError(
-          400,
-          'invalid_parameter',
-          `thinking_config.levels[${String(i)}] must be an object`,
-        );
-      }
-      const level = item as Record<string, unknown>;
+          throw new GatewayError(400, 'invalid_parameter', `thinking_config.levels[${String(i)}] must be an object`);
+        }
+        const level = item as Record<string, unknown>;
 
-      if (typeof level.name !== 'string' || level.name.length === 0) {
-        throw new GatewayError(
-          400,
-          'invalid_parameter',
-          `thinking_config.levels[${String(i)}].name must be a non-empty string`,
-        );
-      }
-      if (typeof level.ratio !== 'number' || level.ratio <= 0 || level.ratio > 1) {
-        throw new GatewayError(
-          400,
-          'invalid_parameter',
-          `thinking_config.levels[${String(i)}].ratio must be a number in (0, 1]`,
-        );
-      }
+        if (typeof level.name !== 'string' || level.name.length === 0) {
+          throw new GatewayError(
+            400,
+            'invalid_parameter',
+            `thinking_config.levels[${String(i)}].name must be a non-empty string`,
+          );
+        }
+        if (typeof level.ratio !== 'number' || level.ratio <= 0 || level.ratio > 1) {
+          throw new GatewayError(
+            400,
+            'invalid_parameter',
+            `thinking_config.levels[${String(i)}].ratio must be a number in (0, 1]`,
+          );
+        }
 
-      const normalizedName = (level.name as string).toLowerCase();
-      if (seen.has(normalizedName)) {
-        throw new GatewayError(
-          400,
-          'invalid_parameter',
-          `thinking_config.levels[${String(i)}].name "${String(level.name)}" is duplicated`,
-        );
-      }
-      seen.add(normalizedName);
+        const normalizedName = (level.name as string).toLowerCase();
+        if (seen.has(normalizedName)) {
+          throw new GatewayError(
+            400,
+            'invalid_parameter',
+            `thinking_config.levels[${String(i)}].name "${String(level.name)}" is duplicated`,
+          );
+        }
+        seen.add(normalizedName);
 
-      if (level.ratio < prevRatio) {
-        throw new GatewayError(
-          400,
-          'invalid_parameter',
-          `thinking_config.levels must be sorted by ratio in ascending order`,
-        );
-      }
-      prevRatio = level.ratio;
+        if (level.ratio < prevRatio) {
+          throw new GatewayError(
+            400,
+            'invalid_parameter',
+            `thinking_config.levels must be sorted by ratio in ascending order`,
+          );
+        }
+        prevRatio = level.ratio;
 
-      validated.push({ name: level.name as string, ratio: level.ratio as number });
-    }
+        validated.push({ name: level.name as string, ratio: level.ratio as number });
+      }
 
       result.levels = validated;
     }
