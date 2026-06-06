@@ -1,7 +1,8 @@
 // src/providers/chat/volcengine/request/index.ts — 火山引擎请求适配器（精简编排层）
 
 import type { ProviderChatRequestAdapter } from '@/model/http/providers/types';
-import type { InternalChatRequest, ThinkingEffortLevel, ToolDefinition } from '@/types';
+import type { InternalChatRequest, ToolDefinition } from '@/types';
+import type { ModelThinkingConfig } from '@/types/common/config';
 import { createLogger, GatewayError, logColors } from '@/utils';
 import { budgetToEffort } from '@/utils/thinking-budget';
 import { convertMessages } from './message-converter';
@@ -54,7 +55,7 @@ export class VolcEngineChatRequestAdapter implements ProviderChatRequestAdapter 
     internalReq: InternalChatRequest,
     routedModel: string,
     _modelConfig?: Record<string, unknown>,
-    thinkingEffortLevels?: ThinkingEffortLevel[],
+    thinkingConfig?: ModelThinkingConfig,
   ): Record<string, unknown> {
     logger.debug(
       {
@@ -123,11 +124,12 @@ export class VolcEngineChatRequestAdapter implements ProviderChatRequestAdapter 
     // 推理强度控制：优先使用配置化的 thinking_effort_levels，回退到硬编码默认值
     // 火山引擎支持 'low' / 'medium' / 'high' 三档
     if (internalReq.thinking?.budget_tokens !== undefined && (internalReq.max_tokens ?? 0) > 0) {
-      if (thinkingEffortLevels && thinkingEffortLevels.length > 0) {
+      const effortLevels = thinkingConfig?.levels;
+      if (effortLevels && effortLevels.length > 0) {
         const effort = budgetToEffort(
           internalReq.thinking.budget_tokens,
           internalReq.max_tokens as number,
-          thinkingEffortLevels,
+          effortLevels,
         );
         if (effort !== undefined) {
           req.reasoning_effort = effort;
