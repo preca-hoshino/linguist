@@ -64,10 +64,7 @@ function convertContent(content: string | ContentPart[]): string | Record<string
  *
  * @param backfillReasoning 是否开启 reasoning_content 自动回填（由 thinking_config 驱动）
  */
-export function normalizeMessages(
-  messages: InternalMessage[],
-  backfillReasoning = false,
-): Record<string, unknown>[] {
+export function normalizeMessages(messages: InternalMessage[], backfillReasoning = false): Record<string, unknown>[] {
   const shouldBackfill = backfillReasoning;
 
   return messages.map((msg) => {
