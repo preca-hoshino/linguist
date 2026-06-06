@@ -69,10 +69,7 @@ export class DeepSeekChatRequestAdapter implements ProviderChatRequestAdapter {
 
     // 消息列表导租：由数据自身决定是否携带 reasoning_content
     // thinking_config.reasoning_content_backfill=true 时自动从缓存注入缺失的 reasoning_content
-    const messages = normalizeMessages(
-      internalReq.messages,
-      thinkingConfig?.reasoning_content_backfill === true,
-    );
+    const messages = normalizeMessages(internalReq.messages, thinkingConfig?.reasoning_content_backfill === true);
 
     const req: Record<string, unknown> = {
       model: routedModel,
