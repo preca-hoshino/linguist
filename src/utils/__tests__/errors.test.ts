@@ -58,6 +58,7 @@ describe('handleError', () => {
         message: 'Model gpt-5 not found',
         type: 'gateway_error',
       },
+      choices: [],
     });
   });
 
@@ -84,6 +85,7 @@ describe('handleError', () => {
         message: 'Unexpected failure',
         type: 'internal_error',
       },
+      choices: [],
     });
   });
 
