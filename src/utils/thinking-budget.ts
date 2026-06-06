@@ -86,11 +86,6 @@ export function validateModelThinkingConfig(config: unknown): ModelThinkingConfi
   }
   const obj = config as Record<string, unknown>;
 
-  // enabled
-  if (typeof obj.enabled !== 'boolean') {
-    throw new GatewayError(400, 'invalid_parameter', 'thinking_config.enabled must be a boolean');
-  }
-
   // reasoning_content_backfill（可选）
   if (obj.reasoning_content_backfill !== undefined && typeof obj.reasoning_content_backfill !== 'boolean') {
     throw new GatewayError(
@@ -102,7 +97,6 @@ export function validateModelThinkingConfig(config: unknown): ModelThinkingConfi
 
   // levels（可选）
   const result: ModelThinkingConfig = {
-    enabled: obj.enabled as boolean,
     reasoning_content_backfill: obj.reasoning_content_backfill as boolean | undefined,
   };
 
@@ -111,16 +105,14 @@ export function validateModelThinkingConfig(config: unknown): ModelThinkingConfi
       throw new GatewayError(400, 'invalid_parameter', 'thinking_config.levels must be an array');
     }
     const levels = obj.levels as unknown[];
-    if (levels.length === 0) {
-      throw new GatewayError(400, 'invalid_parameter', 'thinking_config.levels must not be empty');
-    }
+    // 空数组表示不支持思考强度控制，直接跳过校验
+    if (levels.length > 0) {
+      const seen = new Set<string>();
+      let prevRatio = 0;
+      const validated: ThinkingEffortLevel[] = [];
 
-    const seen = new Set<string>();
-    let prevRatio = 0;
-    const validated: ThinkingEffortLevel[] = [];
-
-    for (const [i, item] of levels.entries()) {
-      if (item === null || typeof item !== 'object') {
+      for (const [i, item] of levels.entries()) {
+        if (item === null || typeof item !== 'object') {
         throw new GatewayError(
           400,
           'invalid_parameter',
@@ -166,7 +158,8 @@ export function validateModelThinkingConfig(config: unknown): ModelThinkingConfi
       validated.push({ name: level.name as string, ratio: level.ratio as number });
     }
 
-    result.levels = validated;
+      result.levels = validated;
+    }
   }
 
   return result;
