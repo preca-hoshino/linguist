@@ -54,6 +54,7 @@ export class MiMoChatRequestAdapter implements ProviderChatRequestAdapter {
     internalReq: InternalChatRequest,
     routedModel: string,
     _modelConfig?: Record<string, unknown>,
+    _thinkingEffortLevels?: import('@/types').ThinkingEffortLevel[],
   ): Record<string, unknown> {
     logger.debug(
       {

@@ -21,6 +21,7 @@ export interface ProviderChatRequestAdapter {
     internalReq: InternalChatRequest,
     routedModel: string,
     modelConfig?: Record<string, unknown>,
+    thinkingEffortLevels?: import('@/types').ThinkingEffortLevel[],
   ) => Record<string, unknown>;
 }
 

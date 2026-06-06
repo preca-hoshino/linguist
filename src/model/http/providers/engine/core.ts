@@ -76,7 +76,7 @@ export async function callProvider<TReq, TRes extends InternalResponse>(
   const { requestAdapter, responseAdapter, client } = getAdapterSet(ctx.route.providerKind, ctx.route.providerConfig);
   providerLogger.debug({ requestId: ctx.id }, `[dispatch] ${label.toLowerCase()} adapter initialized`);
 
-  const rawProviderReqBody = requestAdapter.toProviderRequest(request, ctx.route.model, ctx.route.modelConfig);
+  const rawProviderReqBody = requestAdapter.toProviderRequest(request, ctx.route.model, ctx.route.modelConfig, ctx.route.thinkingConfig?.levels);
   const providerReqBody = applyBodyOverrides(rawProviderReqBody, ctx.route.requestOverrides?.body);
   ctx.audit.providerRequest = { body: providerReqBody };
   providerLogger.debug({ requestId: ctx.id }, `[dispatch] ${label.toLowerCase()} request serialized`);
@@ -191,7 +191,7 @@ async function tryStreamConnect(
   providerLogger.debug({ requestId: ctx.id }, '[dispatch] stream adapter initialized');
 
   const strippedRequest = stripUnsupportedChatParams(chatRequest, candidate.supportedParameters, ctx.id);
-  const rawProviderReqBody = requestAdapter.toProviderRequest(strippedRequest, ctx.route.model, candidate.modelConfig);
+  const rawProviderReqBody = requestAdapter.toProviderRequest(strippedRequest, ctx.route.model, candidate.modelConfig, ctx.route.thinkingConfig?.levels);
   const providerReqBody = applyBodyOverrides(rawProviderReqBody, candidate.requestOverrides?.body);
   ctx.audit.providerRequest = { body: providerReqBody };
   providerLogger.debug({ requestId: ctx.id }, '[dispatch] stream request serialized');

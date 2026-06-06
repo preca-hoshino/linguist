@@ -1,8 +1,9 @@
 // src/providers/chat/deepseek/request/index.ts — DeepSeek 请求适配器（精简编排层）
 
 import type { ProviderChatRequestAdapter } from '@/model/http/providers/types';
-import type { InternalChatRequest, ToolDefinition } from '@/types';
+import type { InternalChatRequest, ThinkingEffortLevel, ToolDefinition } from '@/types';
 import { createLogger, GatewayError, logColors } from '@/utils';
+import { budgetToEffort } from '@/utils/thinking-budget';
 import { normalizeMessages } from './message-converter';
 
 const logger = createLogger('Provider:DeepSeek', logColors.bold + logColors.green);
@@ -53,6 +54,7 @@ export class DeepSeekChatRequestAdapter implements ProviderChatRequestAdapter {
     internalReq: InternalChatRequest,
     routedModel: string,
     modelConfig?: Record<string, unknown>,
+    thinkingEffortLevels?: ThinkingEffortLevel[],
   ): Record<string, unknown> {
     logger.debug(
       {
@@ -116,17 +118,27 @@ export class DeepSeekChatRequestAdapter implements ProviderChatRequestAdapter {
     }
 
     // 推理强度控制 (reasoning_effort)
-    // 由统一类型的 thinking.budget_tokens / max_tokens 比率推断，而非直接透传 reasoning_effort 字段。
-    // DeepSeek v4 仅支持 'max' 和 'high' 两档。
-    // 比率 >= 0.75 → 'max'； >= 0.40 → 'high'；其余 → 不传，由提供商默认处理
+    // 优先使用配置化的 thinking_effort_levels，回退到硬编码默认值
+    // DeepSeek v4 仅支持 'max' 和 'high' 两档
     if (internalReq.thinking?.budget_tokens !== undefined && (internalReq.max_tokens ?? 0) > 0) {
-      const ratio = internalReq.thinking.budget_tokens / (internalReq.max_tokens as number);
-      if (ratio >= 0.75) {
-        req.reasoning_effort = 'max';
-      } else if (ratio >= 0.4) {
-        req.reasoning_effort = 'high';
+      if (thinkingEffortLevels && thinkingEffortLevels.length > 0) {
+        const effort = budgetToEffort(
+          internalReq.thinking.budget_tokens,
+          internalReq.max_tokens as number,
+          thinkingEffortLevels,
+        );
+        if (effort !== undefined) {
+          req.reasoning_effort = effort;
+        }
+      } else {
+        // 回退：硬编码默认值
+        const ratio = internalReq.thinking.budget_tokens / (internalReq.max_tokens as number);
+        if (ratio >= 0.75) {
+          req.reasoning_effort = 'max';
+        } else if (ratio >= 0.4) {
+          req.reasoning_effort = 'high';
+        }
       }
-      // ratio < 0.4：不传该字段
     }
 
     // 响应格式（JSON mode）
