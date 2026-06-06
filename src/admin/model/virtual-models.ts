@@ -314,7 +314,17 @@ router.get('/:id', requirePermission('models', 'view'), async (req: Request, res
 router.post('/', requirePermission('models', 'edit'), async (req: Request, res: Response) => {
   try {
     const body = req.body as VirtualModelBody;
-    const { name, description, model_type, routing_strategy, backends, rpm_limit, tpm_limit, thinking_config, metadata } = body;
+    const {
+      name,
+      description,
+      model_type,
+      routing_strategy,
+      backends,
+      rpm_limit,
+      tpm_limit,
+      thinking_config,
+      metadata,
+    } = body;
     logger.debug({ name, model_type, routingStrategy: routing_strategy }, 'Creating virtual model');
 
     if (typeof name !== 'string' || name === '') {
@@ -377,7 +387,16 @@ router.post('/', requirePermission('models', 'edit'), async (req: Request, res: 
       await tx.query(
         `INSERT INTO virtual_models (id, name, description, model_type, routing_strategy, rpm_limit, tpm_limit, thinking_config)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [id, name, description ?? '', model_type, strategy, rpm_limit ?? null, tpm_limit ?? null, JSON.stringify(thinking_config ?? {})],
+        [
+          id,
+          name,
+          description ?? '',
+          model_type,
+          strategy,
+          rpm_limit ?? null,
+          tpm_limit ?? null,
+          JSON.stringify(thinking_config ?? {}),
+        ],
       );
 
       const backendRows = backends.map((b) => [id, b.provider_model_id, b.weight ?? 1, b.priority ?? 0]);
@@ -402,8 +421,18 @@ router.patch('/:id', requirePermission('models', 'edit'), async (req: Request, r
   try {
     const id = req.params.id as string;
     const body = req.body as VirtualModelBody;
-    const { name, description, model_type, routing_strategy, backends, is_active, rpm_limit, tpm_limit, thinking_config, metadata } =
-      body;
+    const {
+      name,
+      description,
+      model_type,
+      routing_strategy,
+      backends,
+      is_active,
+      rpm_limit,
+      tpm_limit,
+      thinking_config,
+      metadata,
+    } = body;
     logger.debug({ id }, 'Updating virtual model');
 
     validateMetadata(metadata);
