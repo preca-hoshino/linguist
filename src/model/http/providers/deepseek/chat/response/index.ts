@@ -1,24 +1,11 @@
 // src/providers/chat/deepseek/response/index.ts — DeepSeek 响应适配器（精简编排层）
 
-import { extractErrorObj, extractString } from '@/model/http/providers/errors';
 import type { ProviderChatResponseAdapter } from '@/model/http/providers/types';
 import type { FinishReason, InternalChatResponse } from '@/types';
 import { createLogger, GatewayError, logColors } from '@/utils';
 import type { DeepSeekResponse } from './types';
 
 const logger = createLogger('Provider:DeepSeek', logColors.bold + logColors.green);
-
-/**
- * 从上游响应中检测 OpenAI 格式的错误信息
- * 某些代理部署（如 one-api）会在 HTTP 200 下返回 `{ "error": {...} }`
- */
-function detectUpstreamErrorBody(providerRes: Record<string, unknown>): string | null {
-  const errorObj = extractErrorObj(providerRes);
-  if (errorObj === null) {
-    return null;
-  }
-  return extractString(errorObj, 'message') ?? null;
-}
 
 /**
  * DeepSeek 聊天响应适配器
@@ -34,14 +21,6 @@ export class DeepSeekChatResponseAdapter implements ProviderChatResponseAdapter 
       throw new GatewayError(502, 'provider_response_invalid', 'DeepSeek response missing choices array');
     }
     const res = providerRes as DeepSeekResponse;
-
-    // 检测上游是否返回了 OpenAI 格式的错误（而非标准 chat completion）
-    const upstreamError = detectUpstreamErrorBody(providerRes as Record<string, unknown>);
-    if (upstreamError !== null) {
-      logger.warn({ upstreamError }, 'DeepSeek returned error in 200 OK response body');
-      throw new GatewayError(502, 'provider_error', `Upstream DeepSeek error: ${upstreamError}`);
-    }
-
     if (!Array.isArray(res.choices)) {
       throw new GatewayError(502, 'provider_response_invalid', 'DeepSeek response missing choices array');
     }
