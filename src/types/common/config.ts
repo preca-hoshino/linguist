@@ -35,6 +35,29 @@ export interface CopilotCredential {
 /** 提供商凭证（判别联合） */
 export type ProviderCredential = ApiKeyCredential | OAuth2Credential | CopilotCredential | NoCredential;
 
+// ==================== 思考配置 ====================
+
+/** 单个思考程度级别 */
+export interface ThinkingEffortLevel {
+  /** 级别名称（如 'low', 'medium', 'high', 'max'） */
+  name: string;
+  /** budget_tokens = max_tokens × ratio (0~1) */
+  ratio: number;
+}
+
+/**
+ * 模型思考配置（存储在 thinking_config JSONB 列）
+ *
+ * 对所有提供商模型开放，不绑定特定 providerKind。
+ * 虚拟模型可覆盖提供商模型的 levels 配置。
+ */
+export interface ModelThinkingConfig {
+  /** 多轮对话时是否自动补全 reasoning_content 字段 */
+  reasoning_content_backfill?: boolean | undefined;
+  /** 思考程度级别列表，按 ratio 升序。空数组或未配置表示不支持思考强度控制 */
+  levels?: ThinkingEffortLevel[] | undefined;
+}
+
 // ==================== 高级配置 ====================
 
 /** 提供商高级配置（存储在 config JSONB 列） */
@@ -110,6 +133,8 @@ export interface VirtualModelBackend {
     | undefined;
   /** API 调用超时时间（毫秒）。undefined = 使用系统默认常量 */
   timeoutMs?: number | undefined;
+  /** 提供商模型的思考配置（来自 model_provider_models.thinking_config） */
+  thinkingConfig?: ModelThinkingConfig | undefined;
 }
 
 /**
@@ -128,6 +153,8 @@ export interface VirtualModelConfig {
   rpmLimit?: number | undefined;
   /** 每分钟 Token 数上限（undefined = 不限制） */
   tpmLimit?: number | undefined;
+  /** 虚拟模型级覆盖的思考配置（来自 virtual_models.thinking_config） */
+  thinkingConfig?: ModelThinkingConfig | undefined;
   /** 模型首创时间 */
   createdAt: Date;
 }
@@ -165,4 +192,6 @@ export interface ResolvedRoute {
   timeoutMs?: number | undefined;
   /** 提供商模型级专属配置（来自 model_provider_models.model_config） */
   modelConfig?: Record<string, unknown> | undefined;
+  /** 最终生效的思考配置（虚拟模型 > 提供商模型） */
+  thinkingConfig?: ModelThinkingConfig | undefined;
 }

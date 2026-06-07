@@ -2,7 +2,9 @@
 
 import type { ProviderChatRequestAdapter } from '@/model/http/providers/types';
 import type { InternalChatRequest, ToolDefinition } from '@/types';
+import type { ModelThinkingConfig } from '@/types/common/config';
 import { createLogger, GatewayError, logColors } from '@/utils';
+import { budgetToEffort } from '@/utils/thinking-budget';
 import { convertMessages } from './message-converter';
 
 const logger = createLogger('Provider:VolcEngine', logColors.bold + logColors.magenta);
@@ -53,6 +55,7 @@ export class VolcEngineChatRequestAdapter implements ProviderChatRequestAdapter 
     internalReq: InternalChatRequest,
     routedModel: string,
     _modelConfig?: Record<string, unknown>,
+    thinkingConfig?: ModelThinkingConfig,
   ): Record<string, unknown> {
     logger.debug(
       {
@@ -118,19 +121,19 @@ export class VolcEngineChatRequestAdapter implements ProviderChatRequestAdapter 
       };
     }
 
-    // 推理强度控制：由 thinking.budget_tokens / max_tokens 比率推断
-    // 火山引擎支持 'low' / 'medium' / 'high' 三档
-    // 比率 >= 0.75 → 'high'；>= 0.4 → 'medium'；>= 0.1 → 'low'；其余 → 不传（由提供商默认处理）
+    // 推理强度控制：仅在配置了 thinking_effort_levels 时生效
     if (internalReq.thinking?.budget_tokens !== undefined && (internalReq.max_tokens ?? 0) > 0) {
-      const ratio = internalReq.thinking.budget_tokens / (internalReq.max_tokens as number);
-      if (ratio >= 0.75) {
-        req.reasoning_effort = 'high';
-      } else if (ratio >= 0.4) {
-        req.reasoning_effort = 'medium';
-      } else if (ratio >= 0.1) {
-        req.reasoning_effort = 'low';
+      const effortLevels = thinkingConfig?.levels;
+      if (effortLevels && effortLevels.length > 0) {
+        const effort = budgetToEffort(
+          internalReq.thinking.budget_tokens,
+          internalReq.max_tokens as number,
+          effortLevels,
+        );
+        if (effort !== undefined) {
+          req.reasoning_effort = effort;
+        }
       }
-      // ratio < 0.1：不传该字段
     }
 
     // 响应格式（JSON mode）

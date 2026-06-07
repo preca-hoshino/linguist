@@ -90,6 +90,8 @@ export interface ModelHttpContext {
     timeoutMs?: number | undefined;
     /** 提供商模型级专属配置（来自 model_provider_models.model_config） */
     modelConfig?: Record<string, unknown> | undefined;
+    /** 模型思考能力配置（thinking effort levels、reasoning_content_backfill 等） */
+    thinkingConfig?: import('@/types/common/config').ModelThinkingConfig | undefined;
   };
 
   // --- 核心载荷 (Payload) ---
@@ -226,5 +228,7 @@ export type RoutedModelHttpContext = ModelHttpContext & {
       | undefined;
     /** API 调用超时时间（毫秒）。undefined = 使用系统默认常量 */
     timeoutMs?: number | undefined;
+    /** 模型思考能力配置（thinking effort levels、reasoning_content_backfill 等） */
+    thinkingConfig?: import('@/types/common/config').ModelThinkingConfig | undefined;
   };
 };

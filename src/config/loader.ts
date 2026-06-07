@@ -1,6 +1,7 @@
 // src/config/loader.ts — 从数据库加载提供商与虚拟模型配置
 
 import type {
+  ModelThinkingConfig,
   ModelType,
   ProviderAdvancedConfig,
   ProviderConfig,
@@ -101,6 +102,7 @@ export async function loadAllFromDb(): Promise<LoadedConfig> {
     routing_strategy: string;
     vm_rpm_limit: number | null;
     vm_tpm_limit: number | null;
+    vm_thinking_config: Record<string, unknown> | null;
     vm_created_at: Date;
     pm_id: string;
     pm_name: string;
@@ -111,6 +113,7 @@ export async function loadAllFromDb(): Promise<LoadedConfig> {
     pm_tpm_limit: number | null;
     pm_timeout_ms: number | null;
     pm_model_config: Record<string, unknown> | null;
+    pm_thinking_config: Record<string, unknown> | null;
     pm_request_overrides: {
       headers?: Record<string, string | null>;
       body?: Record<string, string | null>;
@@ -132,6 +135,7 @@ export async function loadAllFromDb(): Promise<LoadedConfig> {
         vm.routing_strategy,
         vm.rpm_limit       AS vm_rpm_limit,
         vm.tpm_limit       AS vm_tpm_limit,
+        vm.thinking_config AS vm_thinking_config,
         vm.created_at      AS vm_created_at,
         pm.id              AS pm_id,
         pm.name            AS pm_name,
@@ -142,6 +146,7 @@ export async function loadAllFromDb(): Promise<LoadedConfig> {
         pm.tpm_limit       AS pm_tpm_limit,
         pm.timeout_ms      AS pm_timeout_ms,
         pm.model_config    AS pm_model_config,
+        pm.thinking_config AS pm_thinking_config,
         pm.request_overrides AS pm_request_overrides,
         vmb.weight,
         vmb.priority,
@@ -171,6 +176,7 @@ export async function loadAllFromDb(): Promise<LoadedConfig> {
         backends: [],
         rpmLimit: row.vm_rpm_limit ?? undefined,
         tpmLimit: row.vm_tpm_limit ?? undefined,
+        thinkingConfig: (row.vm_thinking_config as ModelThinkingConfig | null) ?? undefined,
         createdAt: row.vm_created_at,
       };
       newVirtualModels.set(row.vm_name, config);
@@ -200,6 +206,7 @@ export async function loadAllFromDb(): Promise<LoadedConfig> {
       tpmLimit: row.pm_tpm_limit ?? undefined,
       timeoutMs: row.pm_timeout_ms ?? undefined,
       modelConfig: row.pm_model_config ?? {},
+      thinkingConfig: (row.pm_thinking_config as ModelThinkingConfig | null) ?? undefined,
       requestOverrides: row.pm_request_overrides ?? {},
     });
   }

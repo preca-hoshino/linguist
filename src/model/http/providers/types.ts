@@ -21,6 +21,7 @@ export interface ProviderChatRequestAdapter {
     internalReq: InternalChatRequest,
     routedModel: string,
     modelConfig?: Record<string, unknown>,
+    thinkingConfig?: import('@/types/common/config').ModelThinkingConfig,
   ) => Record<string, unknown>;
 }
 

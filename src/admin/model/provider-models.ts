@@ -5,6 +5,7 @@ import { Router } from 'express';
 import { db, generateShortId } from '@/db';
 import { getProviderSupportedChatParameters, getProviderSupportedEmbeddingParameters } from '@/model/http/providers';
 import { buildInClause, buildUpdateSet, createLogger, GatewayError, logColors, rateLimiter } from '@/utils';
+import { validateModelThinkingConfig } from '@/utils/thinking-budget';
 import { handleAdminError } from '../error';
 import { validateMetadata } from '../metadata-validator';
 import { requirePermission } from '../permission';
@@ -78,6 +79,8 @@ interface ProviderModelBody {
   supported_parameters?: string[] | undefined;
   /** 提供商模型级专属配置（如 Copilot 端点覆盖、特殊 Header 等，无深层校验） */
   model_config?: Record<string, unknown> | undefined;
+  /** 模型思考能力配置（thinking effort levels、reasoning_content_backfill 等） */
+  thinking_config?: Record<string, unknown> | undefined;
   /** 请求规则重写 */
   request_overrides?:
     | {
@@ -317,7 +320,7 @@ router.get('/', requirePermission('models', 'view'), async (req: Request, res: R
 
     const sql = `
       SELECT pm.id, pm.provider_id, pm.name, pm.model_type, pm.capabilities, pm.supported_parameters,
-             pm.model_config, pm.request_overrides, pm.max_tokens, pm.is_active, pm.pricing_tiers, pm.rpm_limit, pm.tpm_limit,
+             pm.model_config, pm.thinking_config, pm.request_overrides, pm.max_tokens, pm.is_active, pm.pricing_tiers, pm.rpm_limit, pm.tpm_limit,
              pm.timeout_ms, pm.created_at, pm.updated_at,
              p.name AS provider_name, p.kind AS provider_kind
       FROM model_provider_models pm
@@ -360,7 +363,7 @@ router.get('/:id', requirePermission('models', 'view'), async (req: Request, res
 
     const result = await db.query(
       `SELECT pm.id, pm.provider_id, pm.name, pm.model_type, pm.capabilities, pm.supported_parameters,
-              pm.model_config, pm.request_overrides, pm.max_tokens, pm.is_active, pm.pricing_tiers, pm.rpm_limit, pm.tpm_limit,
+              pm.model_config, pm.thinking_config, pm.request_overrides, pm.max_tokens, pm.is_active, pm.pricing_tiers, pm.rpm_limit, pm.tpm_limit,
               pm.timeout_ms, pm.created_at, pm.updated_at,
               p.name AS provider_name, p.kind AS provider_kind
        FROM model_provider_models pm
@@ -397,6 +400,7 @@ router.post('/', requirePermission('models', 'edit'), async (req: Request, res: 
       capabilities,
       supported_parameters,
       model_config,
+      thinking_config,
       request_overrides,
       max_tokens,
       pricing_tiers,
@@ -408,6 +412,9 @@ router.post('/', requirePermission('models', 'edit'), async (req: Request, res: 
     logger.debug({ provider_id, name, model_type }, 'Creating provider model');
 
     validateMetadata(metadata);
+    if (thinking_config !== undefined) {
+      validateModelThinkingConfig(thinking_config as unknown as import('@/types/common/config').ModelThinkingConfig);
+    }
 
     if (
       typeof provider_id !== 'string' ||
@@ -460,9 +467,9 @@ router.post('/', requirePermission('models', 'edit'), async (req: Request, res: 
     }
 
     const result = await db.query(
-      `INSERT INTO model_provider_models (id, provider_id, name, model_type, capabilities, supported_parameters, model_config, request_overrides, max_tokens, pricing_tiers, rpm_limit, tpm_limit, timeout_ms)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-       RETURNING id, provider_id, name, model_type, capabilities, supported_parameters, model_config, request_overrides, max_tokens, pricing_tiers, rpm_limit, tpm_limit, timeout_ms, is_active, created_at, updated_at`,
+      `INSERT INTO model_provider_models (id, provider_id, name, model_type, capabilities, supported_parameters, model_config, thinking_config, request_overrides, max_tokens, pricing_tiers, rpm_limit, tpm_limit, timeout_ms)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+       RETURNING id, provider_id, name, model_type, capabilities, supported_parameters, model_config, thinking_config, request_overrides, max_tokens, pricing_tiers, rpm_limit, tpm_limit, timeout_ms, is_active, created_at, updated_at`,
       [
         await generateShortId('model_provider_models'),
         provider_id,
@@ -471,6 +478,7 @@ router.post('/', requirePermission('models', 'edit'), async (req: Request, res: 
         capabilities ?? [],
         supported_parameters ?? [],
         JSON.stringify(model_config ?? {}),
+        JSON.stringify(thinking_config ?? {}),
         JSON.stringify(request_overrides ?? {}),
         finalMaxTokens,
         JSON.stringify(pricing_tiers ?? []),
@@ -499,6 +507,7 @@ router.patch('/:id', requirePermission('models', 'edit'), async (req: Request, r
       capabilities,
       supported_parameters,
       model_config,
+      thinking_config,
       request_overrides,
       max_tokens,
       is_active,
@@ -511,6 +520,9 @@ router.patch('/:id', requirePermission('models', 'edit'), async (req: Request, r
     logger.debug({ id }, 'Updating provider model');
 
     validateMetadata(metadata);
+    if (thinking_config !== undefined) {
+      validateModelThinkingConfig(thinking_config as unknown as import('@/types/common/config').ModelThinkingConfig);
+    }
 
     if (model_type !== undefined && !['chat', 'embedding', 'rerank', 'image', 'audio'].includes(model_type)) {
       throw new GatewayError(
@@ -568,6 +580,7 @@ router.patch('/:id', requirePermission('models', 'edit'), async (req: Request, r
       capabilities,
       supported_parameters,
       model_config: model_config === undefined ? undefined : JSON.stringify(model_config),
+      thinking_config: thinking_config === undefined ? undefined : JSON.stringify(thinking_config),
       request_overrides: request_overrides === undefined ? undefined : JSON.stringify(request_overrides),
       max_tokens,
       is_active,
@@ -584,7 +597,7 @@ router.patch('/:id', requirePermission('models', 'edit'), async (req: Request, r
     update.values.push(id);
     const result = await db.query(
       `UPDATE model_provider_models SET ${update.setClause} WHERE id = $${String(update.nextIdx)}
-       RETURNING id, provider_id, name, model_type, capabilities, supported_parameters, model_config, request_overrides, max_tokens, pricing_tiers, rpm_limit, tpm_limit, timeout_ms, is_active, created_at, updated_at`,
+       RETURNING id, provider_id, name, model_type, capabilities, supported_parameters, model_config, thinking_config, request_overrides, max_tokens, pricing_tiers, rpm_limit, tpm_limit, timeout_ms, is_active, created_at, updated_at`,
 
       update.values,
     );

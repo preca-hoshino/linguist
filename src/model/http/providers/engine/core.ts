@@ -17,6 +17,7 @@ import { fetchHeadersToRecord } from '../http-utils';
 import { getProviderChatAdapterSet, getProviderEmbeddingAdapterSet } from '../index';
 import type { ProviderCallOptions } from '../types';
 import { cacheReasoningContent as cacheDeepSeekReasoning } from '../deepseek/reasoning-cache';
+import { cacheReasoningContent as cacheMiMoReasoning } from '../mimo/reasoning-cache';
 import { cacheReasoningContent as cacheNewApiReasoning } from '../newapi/reasoning-cache';
 import { applyBodyOverrides, stripUnsupportedChatParams, stripUnsupportedEmbeddingParams } from './strip';
 import { handleProviderError } from './errors';
@@ -26,22 +27,25 @@ import { createChunkGenerator } from './stream';
 // ========== 推理内容缓存 ==========
 
 /**
- * 若当前请求属于支持推理缓存的提供商（DeepSeek / New API）且开启了 reasoning_content_backfill，
  * 从响应中提取 reasoning_content 按 assistant content 缓存供后续多轮对话自动回填。
+ * 使用 thinking_config.reasoning_content_backfill 配置驱动，不绑定特定 providerKind。
  */
 export function cacheReasoningFromResponse(ctx: RoutedModelHttpContext): void {
-  const { providerKind } = ctx.route;
-  if (providerKind !== 'deepseek' && providerKind !== 'newapi') {
-    return;
-  }
-  if (ctx.route.modelConfig?.reasoning_content_backfill !== true) {
+  if (ctx.route.thinkingConfig?.reasoning_content_backfill !== true) {
     return;
   }
   const response = ctx.response as InternalChatResponse | undefined;
   if (!response?.choices) {
     return;
   }
-  const cacheFn = providerKind === 'deepseek' ? cacheDeepSeekReasoning : cacheNewApiReasoning;
+  // 按提供商选择独立缓存实例（避免跨提供商语义混淆）
+  const { providerKind } = ctx.route;
+  const cacheFn =
+    providerKind === 'deepseek'
+      ? cacheDeepSeekReasoning
+      : providerKind === 'mimo'
+        ? cacheMiMoReasoning
+        : cacheNewApiReasoning;
   for (const choice of response.choices) {
     const content = choice.message.content;
     const reasoning = choice.message.reasoning_content;
@@ -55,7 +59,12 @@ export function cacheReasoningFromResponse(ctx: RoutedModelHttpContext): void {
 
 interface AdapterSet<TReq, TRes> {
   requestAdapter: {
-    toProviderRequest: (req: TReq, model: string, modelConfig?: Record<string, unknown>) => Record<string, unknown>;
+    toProviderRequest: (
+      req: TReq,
+      model: string,
+      modelConfig?: Record<string, unknown>,
+      thinkingConfig?: import('@/types/common/config').ModelThinkingConfig,
+    ) => Record<string, unknown>;
   };
   responseAdapter: { fromProviderResponse: (res: unknown) => TRes };
   client: {
@@ -76,7 +85,12 @@ export async function callProvider<TReq, TRes extends InternalResponse>(
   const { requestAdapter, responseAdapter, client } = getAdapterSet(ctx.route.providerKind, ctx.route.providerConfig);
   providerLogger.debug({ requestId: ctx.id }, `[dispatch] ${label.toLowerCase()} adapter initialized`);
 
-  const rawProviderReqBody = requestAdapter.toProviderRequest(request, ctx.route.model, ctx.route.modelConfig);
+  const rawProviderReqBody = requestAdapter.toProviderRequest(
+    request,
+    ctx.route.model,
+    ctx.route.modelConfig,
+    ctx.route.thinkingConfig,
+  );
   const providerReqBody = applyBodyOverrides(rawProviderReqBody, ctx.route.requestOverrides?.body);
   ctx.audit.providerRequest = { body: providerReqBody };
   providerLogger.debug({ requestId: ctx.id }, `[dispatch] ${label.toLowerCase()} request serialized`);
@@ -191,7 +205,12 @@ async function tryStreamConnect(
   providerLogger.debug({ requestId: ctx.id }, '[dispatch] stream adapter initialized');
 
   const strippedRequest = stripUnsupportedChatParams(chatRequest, candidate.supportedParameters, ctx.id);
-  const rawProviderReqBody = requestAdapter.toProviderRequest(strippedRequest, ctx.route.model, candidate.modelConfig);
+  const rawProviderReqBody = requestAdapter.toProviderRequest(
+    strippedRequest,
+    ctx.route.model,
+    candidate.modelConfig,
+    ctx.route.thinkingConfig,
+  );
   const providerReqBody = applyBodyOverrides(rawProviderReqBody, candidate.requestOverrides?.body);
   ctx.audit.providerRequest = { body: providerReqBody };
   providerLogger.debug({ requestId: ctx.id }, '[dispatch] stream request serialized');

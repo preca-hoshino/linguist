@@ -91,6 +91,7 @@ function toRoute(backend: VirtualModelBackend, config: VirtualModelConfig): Reso
     routingStrategy: config.routingStrategy,
     timeoutMs: backend.timeoutMs,
     modelConfig: backend.modelConfig,
+    thinkingConfig: config.thinkingConfig ?? backend.thinkingConfig,
   };
 }
 

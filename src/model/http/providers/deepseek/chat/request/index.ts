@@ -2,7 +2,9 @@
 
 import type { ProviderChatRequestAdapter } from '@/model/http/providers/types';
 import type { InternalChatRequest, ToolDefinition } from '@/types';
+import type { ModelThinkingConfig } from '@/types/common/config';
 import { createLogger, GatewayError, logColors } from '@/utils';
+import { budgetToEffort } from '@/utils/thinking-budget';
 import { normalizeMessages } from './message-converter';
 
 const logger = createLogger('Provider:DeepSeek', logColors.bold + logColors.green);
@@ -52,7 +54,8 @@ export class DeepSeekChatRequestAdapter implements ProviderChatRequestAdapter {
   public toProviderRequest(
     internalReq: InternalChatRequest,
     routedModel: string,
-    modelConfig?: Record<string, unknown>,
+    _modelConfig?: Record<string, unknown>,
+    thinkingConfig?: ModelThinkingConfig,
   ): Record<string, unknown> {
     logger.debug(
       {
@@ -65,8 +68,8 @@ export class DeepSeekChatRequestAdapter implements ProviderChatRequestAdapter {
     );
 
     // 消息列表导租：由数据自身决定是否携带 reasoning_content
-    // modelConfig.reasoning_content_backfill=true 时自动从缓存注入缺失的 reasoning_content
-    const messages = normalizeMessages(internalReq.messages, modelConfig);
+    // thinking_config.reasoning_content_backfill=true 时自动从缓存注入缺失的 reasoning_content
+    const messages = normalizeMessages(internalReq.messages, thinkingConfig?.reasoning_content_backfill === true);
 
     const req: Record<string, unknown> = {
       model: routedModel,
@@ -116,17 +119,19 @@ export class DeepSeekChatRequestAdapter implements ProviderChatRequestAdapter {
     }
 
     // 推理强度控制 (reasoning_effort)
-    // 由统一类型的 thinking.budget_tokens / max_tokens 比率推断，而非直接透传 reasoning_effort 字段。
-    // DeepSeek v4 仅支持 'max' 和 'high' 两档。
-    // 比率 >= 0.75 → 'max'； >= 0.40 → 'high'；其余 → 不传，由提供商默认处理
+    // 仅在配置了 thinking_effort_levels 时生效，未配置则不设置 reasoning_effort
     if (internalReq.thinking?.budget_tokens !== undefined && (internalReq.max_tokens ?? 0) > 0) {
-      const ratio = internalReq.thinking.budget_tokens / (internalReq.max_tokens as number);
-      if (ratio >= 0.75) {
-        req.reasoning_effort = 'max';
-      } else if (ratio >= 0.4) {
-        req.reasoning_effort = 'high';
+      const effortLevels = thinkingConfig?.levels;
+      if (effortLevels && effortLevels.length > 0) {
+        const effort = budgetToEffort(
+          internalReq.thinking.budget_tokens,
+          internalReq.max_tokens as number,
+          effortLevels,
+        );
+        if (effort !== undefined) {
+          req.reasoning_effort = effort;
+        }
       }
-      // ratio < 0.4：不传该字段
     }
 
     // 响应格式（JSON mode）

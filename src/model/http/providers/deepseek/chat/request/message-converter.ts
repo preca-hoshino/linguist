@@ -56,17 +56,16 @@ function convertContent(content: string | ContentPart[]): string | Record<string
  *
  * 设计原则：忠实于统一数据类型 InternalMessage，由数据自身决定输出结构：
  * - assistant 消息若携带 reasoning_content，则原样传递给 DeepSeek（满足多轮对话需求）
- * - assistant 消息若不携带 reasoning_content 且 modelConfig.reasoning_content_backfill=true：
+ * - assistant 消息若不携带 reasoning_content 且 backfillReasoning=true：
  *   从缓存中查找该 content 对应的 reasoning_content 并注入（网关自动回填）
  * - assistant 消息若不携带 reasoning_content 且未开启回填：不注入默认值
  * - content ContentPart[] → OpenAI image_url 格式
  * - 保留 tool_calls / tool_call_id / name 有效字段
+ *
+ * @param backfillReasoning 是否开启 reasoning_content 自动回填（由 thinking_config 驱动）
  */
-export function normalizeMessages(
-  messages: InternalMessage[],
-  modelConfig?: Record<string, unknown>,
-): Record<string, unknown>[] {
-  const shouldBackfill = modelConfig?.reasoning_content_backfill === true;
+export function normalizeMessages(messages: InternalMessage[], backfillReasoning = false): Record<string, unknown>[] {
+  const shouldBackfill = backfillReasoning;
 
   return messages.map((msg) => {
     const normalized: Record<string, unknown> = {

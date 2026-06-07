@@ -12,6 +12,7 @@ import {
   logColors,
   rateLimiter,
 } from '@/utils';
+import { validateModelThinkingConfig } from '@/utils/thinking-budget';
 import { handleAdminError } from '../error';
 import { validateMetadata } from '../metadata-validator';
 import { requirePermission } from '../permission';
@@ -45,6 +46,7 @@ interface VirtualModelRow {
   is_active: boolean;
   rpm_limit: number | null;
   tpm_limit: number | null;
+  thinking_config: Record<string, unknown> | null;
   created_at: string;
   updated_at: string;
 }
@@ -66,6 +68,7 @@ interface VirtualModelBody {
   backends?: BackendInput[] | undefined;
   rpm_limit?: number | null | undefined;
   tpm_limit?: number | null | undefined;
+  thinking_config?: Record<string, unknown> | undefined;
   metadata?: Record<string, string> | undefined;
 }
 
@@ -76,7 +79,7 @@ async function loadVirtualModelWithBackends(
   vmId: string,
 ): Promise<(VirtualModelRow & { backends: BackendRow[] }) | null> {
   const vmResult = await db.query<VirtualModelRow>(
-    'SELECT id, name, description, model_type, routing_strategy, is_active, rpm_limit, tpm_limit, created_at, updated_at FROM virtual_models WHERE id = $1',
+    'SELECT id, name, description, model_type, routing_strategy, is_active, rpm_limit, tpm_limit, thinking_config, created_at, updated_at FROM virtual_models WHERE id = $1',
     [vmId],
   );
   if (vmResult.rowCount === 0) {
@@ -193,7 +196,7 @@ router.get('/', requirePermission('models', 'view'), async (req: Request, res: R
 
     const sql = `
       SELECT id, name, description, model_type, routing_strategy, is_active, rpm_limit, tpm_limit,
-             created_at, updated_at
+             thinking_config, created_at, updated_at
       FROM virtual_models
       ${whereClause}
       ORDER BY created_at DESC
@@ -281,7 +284,7 @@ router.get('/:id', requirePermission('models', 'view'), async (req: Request, res
     // 如果未指示深度展开，直接拿取骨架即可
     if (!expandBackends) {
       const vmResult = await db.query<VirtualModelRow>(
-        'SELECT id, name, description, model_type, routing_strategy, is_active, rpm_limit, tpm_limit, created_at, updated_at FROM virtual_models WHERE id = $1',
+        'SELECT id, name, description, model_type, routing_strategy, is_active, rpm_limit, tpm_limit, thinking_config, created_at, updated_at FROM virtual_models WHERE id = $1',
         [id],
       );
       if (vmResult.rowCount === 0) {
@@ -311,7 +314,17 @@ router.get('/:id', requirePermission('models', 'view'), async (req: Request, res
 router.post('/', requirePermission('models', 'edit'), async (req: Request, res: Response) => {
   try {
     const body = req.body as VirtualModelBody;
-    const { name, description, model_type, routing_strategy, backends, rpm_limit, tpm_limit, metadata } = body;
+    const {
+      name,
+      description,
+      model_type,
+      routing_strategy,
+      backends,
+      rpm_limit,
+      tpm_limit,
+      thinking_config,
+      metadata,
+    } = body;
     logger.debug({ name, model_type, routingStrategy: routing_strategy }, 'Creating virtual model');
 
     if (typeof name !== 'string' || name === '') {
@@ -319,6 +332,9 @@ router.post('/', requirePermission('models', 'edit'), async (req: Request, res: 
     }
 
     validateMetadata(metadata);
+    if (thinking_config !== undefined) {
+      validateModelThinkingConfig(thinking_config as unknown as import('@/types/common/config').ModelThinkingConfig);
+    }
 
     if (typeof model_type !== 'string' || !['chat', 'embedding'].includes(model_type)) {
       throw new GatewayError(
@@ -369,9 +385,18 @@ router.post('/', requirePermission('models', 'edit'), async (req: Request, res: 
     const id = await generateShortId('virtual_models');
     await withTransaction(async (tx) => {
       await tx.query(
-        `INSERT INTO virtual_models (id, name, description, model_type, routing_strategy, rpm_limit, tpm_limit)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-        [id, name, description ?? '', model_type, strategy, rpm_limit ?? null, tpm_limit ?? null],
+        `INSERT INTO virtual_models (id, name, description, model_type, routing_strategy, rpm_limit, tpm_limit, thinking_config)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          id,
+          name,
+          description ?? '',
+          model_type,
+          strategy,
+          rpm_limit ?? null,
+          tpm_limit ?? null,
+          JSON.stringify(thinking_config ?? {}),
+        ],
       );
 
       const backendRows = backends.map((b) => [id, b.provider_model_id, b.weight ?? 1, b.priority ?? 0]);
@@ -396,11 +421,24 @@ router.patch('/:id', requirePermission('models', 'edit'), async (req: Request, r
   try {
     const id = req.params.id as string;
     const body = req.body as VirtualModelBody;
-    const { name, description, model_type, routing_strategy, backends, is_active, rpm_limit, tpm_limit, metadata } =
-      body;
+    const {
+      name,
+      description,
+      model_type,
+      routing_strategy,
+      backends,
+      is_active,
+      rpm_limit,
+      tpm_limit,
+      thinking_config,
+      metadata,
+    } = body;
     logger.debug({ id }, 'Updating virtual model');
 
     validateMetadata(metadata);
+    if (thinking_config !== undefined) {
+      validateModelThinkingConfig(thinking_config as unknown as import('@/types/common/config').ModelThinkingConfig);
+    }
 
     // 检查虚拟模型是否存在
     const existCheck = await db.query<{ id: string; model_type: string }>(
@@ -433,6 +471,7 @@ router.patch('/:id', requirePermission('models', 'edit'), async (req: Request, r
       is_active,
       rpm_limit: rpm_limit === undefined ? undefined : rpm_limit,
       tpm_limit: tpm_limit === undefined ? undefined : tpm_limit,
+      thinking_config: thinking_config === undefined ? undefined : JSON.stringify(thinking_config),
     });
 
     // 如果提供了后端列表，则替换
