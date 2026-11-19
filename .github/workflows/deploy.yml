@@ -14,12 +14,7 @@ on:
 jobs:
   deploy:
     name: Deploy Release to Server
-    if: >
-      (github.event_name == 'workflow_dispatch') ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event != 'pull_request' &&
-       github.event.workflow_run.head_branch == 'main' &&
-       vars.ENABLE_AUTO_DEPLOY == 'true')
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event != 'pull_request' && github.event.workflow_run.head_branch == 'main' && vars.ENABLE_AUTO_DEPLOY == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout templates

@@ -55,6 +55,7 @@ jobs:
     needs: check
     runs-on: ${{ matrix.os }}
     permissions:
+      contents: read
       id-token: write
       attestations: write
     strategy:
