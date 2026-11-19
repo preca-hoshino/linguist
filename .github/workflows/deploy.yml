@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout templates
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
@@ -67,9 +67,10 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
 
-          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p '${DEPLOY_DIR}'"
+          SSH_OPTS="-i ~/.ssh/deploy_key -o ServerAliveInterval=15 -o ServerAliveCountMax=6"
+          ssh ${SSH_OPTS} -p "$DEPLOY_PORT" "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p '${DEPLOY_DIR}'"
 
-          scp -i ~/.ssh/deploy_key -P "$DEPLOY_PORT" \
+          scp -C ${SSH_OPTS} -P "$DEPLOY_PORT" \
             "deploy_pkg/linguist-${TARGET_OS}" \
             "deploy_pkg/linguist.d.ts" \
             "deploy_pkg/config.example.toml" \
@@ -78,8 +79,14 @@ jobs:
             "deploy_pkg/routes.example.json" \
             "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}/"
 
-          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "${DEPLOY_USER}@${DEPLOY_HOST}" bash -s << 'EOS'
+          ssh ${SSH_OPTS} -p "$DEPLOY_PORT" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+            bash -s -- "${DEPLOY_DIR}" "${TARGET_OS}" "${DEPLOY_SERVICE_NAME}" "${DEPLOY_HEALTH_URL}" << 'EOS'
             set -euo pipefail
+            DEPLOY_DIR="$1"
+            TARGET_OS="$2"
+            DEPLOY_SERVICE_NAME="$3"
+            DEPLOY_HEALTH_URL="$4"
+
             if [ "$(id -u)" -eq 0 ]; then
               SYSTEMCTL="systemctl"
             else
