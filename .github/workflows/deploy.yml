@@ -1,0 +1,122 @@
+name: Deploy to Server
+
+on:
+  workflow_run:
+    workflows: ["CI & Release Pipeline"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to deploy (leave empty for latest)"
+        required: false
+        default: ""
+
+jobs:
+  deploy:
+    name: Deploy Release to Server
+    if: >
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event != 'pull_request' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       vars.ENABLE_AUTO_DEPLOY == 'true')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout templates
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download release binary & verify SHA256
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET_OS: ${{ vars.DEPLOY_TARGET_OS || 'linux-x64' }}
+          INPUT_TAG: ${{ inputs.release_tag }}
+        run: |
+          mkdir -p deploy_pkg
+          if [ -n "${INPUT_TAG}" ]; then
+            TAG="${INPUT_TAG}"
+          else
+            TAG=$(gh release list --repo "${{ github.repository }}" --limit 1 --json tagName --jq '.[0].tagName')
+          fi
+          if [ -z "${TAG}" ]; then
+            echo "No release found to deploy" >&2
+            exit 1
+          fi
+          echo "Deploying release tag: ${TAG}"
+          gh release download "${TAG}" \
+            --repo "${{ github.repository }}" \
+            --pattern "linguist-${TARGET_OS}*" \
+            --pattern "${TARGET_OS}.sha256" \
+            --dir deploy_pkg
+          (cd deploy_pkg && sha256sum -c "${TARGET_OS}.sha256" --ignore-missing)
+          cp linguist.d.ts deploy_pkg/linguist.d.ts
+          cp config.example.toml deploy_pkg/config.example.toml
+          cp chatLanguageModels.example.json deploy_pkg/chatLanguageModels.example.json
+          cp projects.json deploy_pkg/projects.example.json
+          cp routes.json deploy_pkg/routes.example.json
+
+      - name: Atomic SSH Deploy with Health Probe & Automatic Rollback
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER || 'root' }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/opt/linguist' }}
+          DEPLOY_SERVICE_NAME: ${{ vars.DEPLOY_SERVICE_NAME || 'linguist.service' }}
+          DEPLOY_HEALTH_URL: ${{ vars.DEPLOY_HEALTH_URL || 'http://127.0.0.1:9527/healthz' }}
+          TARGET_OS: ${{ vars.DEPLOY_TARGET_OS || 'linux-x64' }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p '${DEPLOY_DIR}'"
+
+          scp -i ~/.ssh/deploy_key -P "$DEPLOY_PORT" \
+            "deploy_pkg/linguist-${TARGET_OS}" \
+            "deploy_pkg/linguist.d.ts" \
+            "deploy_pkg/config.example.toml" \
+            "deploy_pkg/chatLanguageModels.example.json" \
+            "deploy_pkg/projects.example.json" \
+            "deploy_pkg/routes.example.json" \
+            "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}/"
+
+          ssh -i ~/.ssh/deploy_key -p "$DEPLOY_PORT" "${DEPLOY_USER}@${DEPLOY_HOST}" bash -s << 'EOS'
+            set -euo pipefail
+            if [ "$(id -u)" -eq 0 ]; then
+              SYSTEMCTL="systemctl"
+            else
+              SYSTEMCTL="sudo systemctl"
+            fi
+
+            cd "${DEPLOY_DIR}"
+            mv "linguist-${TARGET_OS}" linguist.new
+            chmod +x linguist.new
+
+            ${SYSTEMCTL} stop "${DEPLOY_SERVICE_NAME}" || true
+            if [ -f linguist ]; then
+              cp -f linguist linguist.prev
+            fi
+            mv -f linguist.new linguist
+            ln -sf "${DEPLOY_DIR}/linguist" /usr/local/bin/linguist
+            ${SYSTEMCTL} start "${DEPLOY_SERVICE_NAME}"
+
+            for i in $(seq 1 10); do
+              if curl -fsS "${DEPLOY_HEALTH_URL}" >/dev/null 2>&1; then
+                echo "Health check succeeded on attempt ${i}"
+                exit 0
+              fi
+              sleep 2
+            done
+
+            echo "Health probe failed; rolling back to linguist.prev" >&2
+            ${SYSTEMCTL} stop "${DEPLOY_SERVICE_NAME}" || true
+            if [ -f linguist.prev ]; then
+              mv -f linguist.prev linguist
+              ${SYSTEMCTL} start "${DEPLOY_SERVICE_NAME}" || true
+            fi
+            journalctl -u "${DEPLOY_SERVICE_NAME}" -n 50 --no-pager || true
+            exit 1
+          EOS

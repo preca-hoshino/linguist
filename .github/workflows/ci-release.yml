@@ -1,0 +1,249 @@
+name: CI & Release Pipeline
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Quality Gate (Format, Lint, Types, Deps, Tests)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-machete
+        uses: taiki-e/install-action@cargo-machete
+
+      - name: Frontend install, typecheck, lint & build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run typecheck
+          npm run lint
+          npm run build
+
+      - name: Rust check-format, check-lint, check-deps & check-test
+        run: |
+          cargo fmt --all -- --check
+          cargo clippy --all-targets --all-features -- -D warnings
+          cargo machete
+          cargo test --locked
+
+  build:
+    name: Build (${{ matrix.name }})
+    needs: check
+    runs-on: ${{ matrix.os }}
+    permissions:
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            arch: x64
+            bin_name: linguist.exe
+            artifact_name: linguist-windows-x64.exe
+            is_windows: true
+          - name: windows-arm64
+            os: windows-latest
+            target: aarch64-pc-windows-msvc
+            arch: x64_arm64
+            bin_name: linguist.exe
+            artifact_name: linguist-windows-arm64.exe
+            is_windows: true
+          - name: linux-x64
+            os: ubuntu-latest
+            target: x86_64-unknown-linux-musl
+            arch: x64
+            bin_name: linguist
+            artifact_name: linguist-linux-x64
+            is_windows: false
+          - name: linux-arm64
+            os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            arch: arm64
+            bin_name: linguist
+            artifact_name: linguist-linux-arm64
+            is_windows: false
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node.js & build embedded frontend
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend dist
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Setup MSVC developer environment
+        if: matrix.is_windows
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+
+      - name: Install Linux musl cross-compile dependencies
+        if: ${{ matrix.target == 'x86_64-unknown-linux-musl' }}
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Install Linux ARM64 cross-compile dependencies
+        if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+
+      - name: Build release binary (Windows)
+        if: matrix.is_windows
+        env:
+          RUSTFLAGS: "-C link-arg=/OPT:REF,ICF"
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build release binary (Linux x64 musl)
+        if: ${{ matrix.target == 'x86_64-unknown-linux-musl' }}
+        env:
+          CC_x86_64_unknown_linux_musl: musl-gcc
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Build release binary (Linux arm64)
+        if: ${{ matrix.target == 'aarch64-unknown-linux-gnu' }}
+        env:
+          CC_aarch64_unknown_linux_gnu: aarch64-linux-gnu-gcc
+          CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Stage artifact & SHA256
+        shell: bash
+        run: |
+          mkdir -p staging
+          TARGET_DIR="target/${{ matrix.target }}/release"
+          cp "${TARGET_DIR}/${{ matrix.bin_name }}" "staging/${{ matrix.artifact_name }}"
+          if [ "${{ matrix.name }}" = "windows-x64" ]; then
+            cp "${TARGET_DIR}/linguist.exe" "staging/linguist.exe"
+          fi
+          (cd staging && sha256sum * > "${{ matrix.name }}.sha256")
+
+      - name: Generate build provenance attestation
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: staging/${{ matrix.artifact_name }}
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.name }}
+          path: staging/*
+          if-no-files-found: error
+
+  publish:
+    name: Publish Release
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      release_tag: ${{ steps.gen_tag.outputs.release_tag }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Download all built binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          merge-multiple: true
+          path: dist
+
+      - name: Generate Version Tag
+        id: gen_tag
+        run: |
+          CARGO_VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-6)
+          RELEASE_TAG="v${CARGO_VERSION}-b${{ github.run_number }}-${SHORT_SHA}"
+          echo "release_tag=${RELEASE_TAG}" >> $GITHUB_OUTPUT
+          echo "RELEASE_TAG=${RELEASE_TAG}" >> $GITHUB_ENV
+
+      - name: Publish Release & Upload Templates
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          cp linguist.d.ts dist/linguist.d.ts
+          cp config.example.toml dist/config.example.toml
+          cp chatLanguageModels.example.json dist/chatLanguageModels.example.json
+          cp projects.json dist/projects.example.json
+          cp routes.json dist/routes.example.json
+
+          cat << EOF > release_notes.md
+          ### 下载说明
+          - **Windows x64**：\`linguist-windows-x64.exe\`（或 \`linguist.exe\`）
+          - **Windows ARM64**：\`linguist-windows-arm64.exe\`
+          - **Linux x64（静态 musl）**：\`linguist-linux-x64\`
+          - **Linux ARM64**：\`linguist-linux-arm64\`
+
+          **变更摘要**：
+          > ${COMMIT_MSG}
+
+          **验证构建来源 (GitHub Attestations)**：
+          \`\`\`bash
+          gh attestation verify linguist-linux-x64 --repo ${{ github.repository }}
+          \`\`\`
+          EOF
+
+          gh release create "${RELEASE_TAG}" \
+            dist/* \
+            --title "${RELEASE_TAG}" \
+            --notes-file release_notes.md
+
+      - name: Cleanup Older Releases (Keep Latest 5)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release list --limit 100 --json tagName --jq '.[5:][].tagName' | while read -r old_tag; do
+            if [ -n "$old_tag" ]; then
+              echo "Deleting old release and tag: $old_tag"
+              gh release delete "$old_tag" --yes --cleanup-tag || true
+            fi
+          done
