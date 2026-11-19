@@ -1,0 +1,56 @@
+[
+  {
+    "id": "coding-smart-coder",
+    "name": "编码助手智能极速路由",
+    "enabled": true,
+    "priority": 100,
+    "match": {
+      "projectIds": ["coding"],
+      "callModelIds": ["smart-coder"]
+    },
+    "candidates": {
+      "allow": ["deepseek/*", "opencode/qwen3.8-max", "opencode/kimi-k3", "antigravity/*"],
+      "deny": []
+    },
+    "rewriteResponseModel": true,
+    "script": [
+      "// ③ 中间路由脚本：候选条目结构与 chatLanguageModels.json 完全一致 (c.provider / c.model)",
+      "const pool = ctx.route.candidates.filter(c => {",
+      "  if (ctx.request.signals.hasVisionImages && !c.model.vision) return false;",
+      "  if (ctx.request.signals.hasTools && !c.model.toolCalling) return false;",
+      "  return true;",
+      "});",
+      "if (pool.length === 0) {",
+      "  ctx.reject = { statusCode: 400, message: 'No eligible upstream model' };",
+      "  return;",
+      "}",
+      "pool.sort((a, b) => (b.metrics.avgDecodeTps ?? 80) - (a.metrics.avgDecodeTps ?? 80));",
+      "ctx.route.target = { providerId: pool[0].provider.id, modelId: pool[0].model.id };",
+      "ctx.route.fallbacks = pool.slice(1, 3).map(c => ({ providerId: c.provider.id, modelId: c.model.id }));"
+    ]
+  },
+  {
+    "id": "default-passthrough",
+    "name": "通用同名匹配兜底路由",
+    "enabled": true,
+    "priority": 0,
+    "match": {
+      "projectIds": ["*"],
+      "callModelIds": ["*"]
+    },
+    "rewriteResponseModel": false,
+    "script": [
+      "const raw = ctx.callModel.id;",
+      "const pool = raw.includes('/')",
+      "  ? ctx.route.candidates.filter(c => `${c.provider.id}/${c.model.id}` === raw)",
+      "  : ctx.route.candidates.filter(c => c.model.id === raw);",
+      "if (pool.length === 0) {",
+      "  ctx.reject = { statusCode: 404, message: `Model not found: ${raw}` };",
+      "  return;",
+      "}",
+      "pool.sort((a, b) => (b.metrics.avgDecodeTps ?? 0) - (a.metrics.avgDecodeTps ?? 0));",
+      "ctx.route.target = { providerId: pool[0].provider.id, modelId: pool[0].model.id };",
+      "ctx.route.fallbacks = pool.slice(1, 3).map(c => ({ providerId: c.provider.id, modelId: c.model.id }));"
+    ]
+  }
+]

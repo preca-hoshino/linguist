@@ -1,0 +1,59 @@
+[
+  {
+    "id": "deepseek",
+    "name": "深度求索",
+    "apiKey": "sk-your-deepseek-key",
+    "icon": "deepseek-color",
+    "models": [
+      {
+        "id": "deepseek-v4-pro",
+        "name": "DeepSeek V4 Pro",
+        "icon": "deepseek-color",
+        "url": "https://api.deepseek.com",
+        "supportsReasoningEffort": ["max", "high", "low"],
+        "toolCalling": true,
+        "vision": false,
+        "thinking": true,
+        "streaming": true,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 384000
+      }
+    ]
+  },
+  {
+    "id": "opencode",
+    "name": "Opencode",
+    "apiKey": "sk-your-opencode-key",
+    "icon": "opencode",
+    "script": [
+      "// ⑤ 提供商脚本：统一注入通道头",
+      "ctx.request.headers['accept'] = 'application/json';",
+      "ctx.request.headers['x-opencode-session'] = String(ctx.project.meta.sessionId ?? '1');"
+    ],
+    "models": [
+      {
+        "id": "qwen3.8-max",
+        "name": "Qwen3.8 Max",
+        "icon": "qwen-color",
+        "url": "https://opencode.ai/zen/go/v1",
+        "supportsReasoningEffort": ["low", "medium", "xhigh"],
+        "toolCalling": true,
+        "vision": true,
+        "thinking": true,
+        "streaming": true,
+        "maxInputTokens": 1000000,
+        "maxOutputTokens": 131072,
+        "script": [
+          "// ④ 模型脚本：参数安全适配",
+          "const supported = ctx.model?.supportsReasoningEffort ?? [];",
+          "if (ctx.request.body.reasoning_effort === 'high' && !supported.includes('high') && supported.includes('xhigh')) {",
+          "  ctx.request.body.reasoning_effort = 'xhigh';",
+          "}",
+          "if (ctx.model?.maxOutputTokens && typeof ctx.request.body.max_tokens === 'number') {",
+          "  ctx.request.body.max_tokens = Math.min(ctx.request.body.max_tokens, ctx.model.maxOutputTokens);",
+          "}"
+        ]
+      }
+    ]
+  }
+]

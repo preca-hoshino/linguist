@@ -1,0 +1,40 @@
+[server]
+host = "127.0.0.1"
+port = 9527
+upstream_timeout_secs = 600
+
+[database]
+# PostgreSQL 仅用作日志与统计存储，启动时自动建库建表
+url = "postgres://linguist:password@127.0.0.1:5432/linguist"
+max_connections = 10
+log_error_payload = true
+log_full_payload = false
+
+[configs]
+# 当前配置源为 "json_files"，未来切换 PG 配置中心时仅需改为 "postgres" 并抛弃以下 JSON 路径
+source = "json_files"
+providers_path = "./chatLanguageModels.json"
+projects_path = "./projects.json"
+routes_path = "./routes.json"
+watch_reload = true
+
+[script_engine]
+timeout_ms = 50
+memory_limit_mb = 32
+fallback_status_codes = [429, 500, 502, 503, 504]
+
+[metrics]
+# 实时测速滑动窗口（反哺 ③ 路由脚本 candidates[].metrics）
+sliding_window_minutes = 60
+warmup_days_from_db = 7
+
+[icons]
+lobe_icons_dir = "./icons/lobe"
+custom_icons_dir = "./icons/custom"
+registry_url = "https://registry.npmmirror.com/@lobehub/icons-static-svg/latest"
+
+[ui]
+title = "Linguist Gateway & Telemetry"
+timezone = "Asia/Shanghai"
+default_days_range = 30
+leaderboard_min_requests = 1
