@@ -112,9 +112,66 @@ jobs:
 
       - name: Setup MSVC developer environment
         if: matrix.is_windows
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: ${{ matrix.arch }}
+        shell: pwsh
+        run: |
+          $arch = '${{ matrix.arch }}'
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          if (-not $vsPath) {
+            $vsPath = & $vswhere -latest -products * -property installationPath
+          }
+          if (-not $vsPath) { throw "Visual Studio installation not found" }
+          $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
+          if (-not (Test-Path $vcvars)) { throw "vcvarsall.bat not found at $vcvars" }
+
+          $before = [hashtable]::new([System.StringComparer]::OrdinalIgnoreCase)
+          foreach ($line in (cmd.exe /s /c "set")) {
+            $idx = $line.IndexOf("=")
+            if ($idx -gt 0) { $before[$line.Substring(0, $idx)] = $line.Substring($idx + 1) }
+          }
+
+          $envDump = cmd.exe /s /c "`"$vcvars`" $arch && echo __MSVC_ENV__&& set"
+          if ($LASTEXITCODE -ne 0) {
+            $envDump | Write-Host
+            throw "vcvarsall.bat failed with exit code $LASTEXITCODE for arch '$arch'"
+          }
+
+          $inEnv = $false
+          $envBlock = [System.Text.StringBuilder]::new()
+          $newPaths = [System.Collections.Generic.List[string]]::new()
+          foreach ($line in $envDump) {
+            if (-not $inEnv) {
+              if ($line.Trim() -eq "__MSVC_ENV__") { $inEnv = $true }
+              continue
+            }
+            $idx = $line.IndexOf("=")
+            if ($idx -le 0) { continue }
+            $name = $line.Substring(0, $idx)
+            $val = $line.Substring($idx + 1)
+            if ($name -ieq "Path") {
+              $oldSet = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+              foreach ($p in (($before["Path"] ?? "") -split ";")) {
+                if ($p.Trim()) { [void]$oldSet.Add($p.Trim().TrimEnd("\")) }
+              }
+              foreach ($p in ($val -split ";")) {
+                $trimmed = $p.Trim()
+                if ($trimmed -and -not $oldSet.Contains($trimmed.TrimEnd("\"))) {
+                  $newPaths.Add($trimmed)
+                }
+              }
+            } elseif (-not $before.ContainsKey($name) -or $before[$name] -cne $val) {
+              [void]$envBlock.Append("$name<<__GH_MSVC_ENV__`n$val`n__GH_MSVC_ENV__`n")
+            }
+          }
+
+          $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+          if ($envBlock.Length -gt 0) {
+            [System.IO.File]::AppendAllText($env:GITHUB_ENV, $envBlock.ToString(), $utf8NoBom)
+          }
+          if ($newPaths.Count -gt 0) {
+            $newPaths.Reverse()
+            [System.IO.File]::AppendAllText($env:GITHUB_PATH, (($newPaths -join "`n") + "`n"), $utf8NoBom)
+          }
 
       - name: Install Linux musl cross-compile dependencies
         if: ${{ matrix.target == 'x86_64-unknown-linux-musl' }}
