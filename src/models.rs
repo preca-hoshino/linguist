@@ -230,7 +230,7 @@ pub struct RawProjectConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RawCallModelConfig {
-    /// Call model identifier (or `"*"` wildcard).
+    /// Call model identifier clients send as `model` (`"*"` is not allowed).
     pub id: String,
     /// Display name.
     pub name: String,
@@ -267,7 +267,7 @@ pub struct ProjectConfig {
 /// Normalized consume-side call-model configuration.
 #[derive(Debug, Clone)]
 pub struct CallModelConfig {
-    /// Call model identifier (or `"*"`).
+    /// Call model identifier clients send as `model`.
     pub id: String,
     /// Display name.
     pub name: String,
@@ -1111,18 +1111,10 @@ impl ProjectConfig {
 impl CallModelConfig {
     /// Converts into sanitized `CallModelMeta` for `ScriptContext` (without `script`).
     #[must_use]
-    pub fn to_meta(&self, requested_model_id: &str) -> CallModelMeta {
+    pub fn to_meta(&self) -> CallModelMeta {
         CallModelMeta {
-            id: if self.id == "*" {
-                requested_model_id.to_string()
-            } else {
-                self.id.clone()
-            },
-            name: if self.id == "*" {
-                requested_model_id.to_string()
-            } else {
-                self.name.clone()
-            },
+            id: self.id.clone(),
+            name: self.name.clone(),
             icon: Some(self.icon.clone()),
             meta: self.meta.clone(),
         }

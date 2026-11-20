@@ -208,8 +208,8 @@ fn e2e_projects() -> Vec<ProjectConfig> {
             meta: Map::new(),
             script: None,
             call_models: vec![CallModelConfig {
-                id: "*".to_string(),
-                name: "Passthrough".to_string(),
+                id: "m-fallback".to_string(),
+                name: "Fallback Passthrough".to_string(),
                 icon: "codex-color".to_string(),
                 meta: Map::new(),
                 script: None,
@@ -407,7 +407,7 @@ async fn gateway_e2e_project_scoped_auth_fallback_snapshot_and_rewrite() {
         );
     }
 
-    // 3. Wildcard passthrough project `default` (explicit `provider`-less model id).
+    // 3. Same-name routing project `default`: only declared callModels are reachable.
     let passthrough = post_chat(
         &client,
         format!("{gw_url}/model/default/v1/chat/completions"),
@@ -420,7 +420,21 @@ async fn gateway_e2e_project_scoped_auth_fallback_snapshot_and_rewrite() {
     let passthrough_json: Value = passthrough.json().await.unwrap();
     assert_eq!(passthrough_json["model"], json!("m-fallback"));
 
-    // 4. `/models` lists only the project's own models; wildcard projects expand candidates.
+    // An upstream model that exists but is not declared as a callModel must not be callable,
+    // neither by bare id nor by `provider/model`.
+    for undeclared in ["m-primary", "fallback-prov/m-fallback", "*"] {
+        let resp = post_chat(
+            &client,
+            format!("{gw_url}/model/default/v1/chat/completions"),
+            Some("lin-proj-default-secret"),
+            undeclared,
+            false,
+        )
+        .await;
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND, "{undeclared}");
+    }
+
+    // 4. `/models` lists exactly the project's declared callModels.
     let coding_models: Value = client
         .get(format!("{gw_url}/model/coding/v1/models"))
         .bearer_auth("lin-proj-coding-secret")
@@ -453,10 +467,7 @@ async fn gateway_e2e_project_scoped_auth_fallback_snapshot_and_rewrite() {
         .iter()
         .filter_map(|m| m["id"].as_str())
         .collect();
-    assert_eq!(
-        default_ids,
-        vec!["primary-prov/m-primary", "fallback-prov/m-fallback"]
-    );
+    assert_eq!(default_ids, vec!["m-fallback"]);
 
     let models_unauth = client
         .get(format!("{gw_url}/model/coding/v1/models"))

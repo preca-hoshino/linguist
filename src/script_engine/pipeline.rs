@@ -79,7 +79,7 @@ pub async fn run_routing_stages(
     let mut ctx = ScriptContext {
         stage: ScriptStage::Project,
         project: project.to_meta(),
-        call_model: call_model.to_meta(requested_model),
+        call_model: call_model.to_meta(),
         provider: None,
         model: None,
         route: RouteState {
@@ -142,15 +142,9 @@ pub async fn run_routing_stages(
         }
     }
 
-    let call_model_name = if call_model.id == "*" {
-        requested_model.to_string()
-    } else {
-        call_model.name.clone()
-    };
-
     Ok(StageOutcome::Ready(RoutingPlan {
         project_name: project.name.clone(),
-        call_model_name,
+        call_model_name: call_model.name.clone(),
         endpoints,
         snapshot_ctx: ctx,
     }))

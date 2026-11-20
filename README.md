@@ -36,8 +36,9 @@ curl https://linguist.example.com/model/default/v1/chat/completions \
 ```
 
 - Unknown projects, wrong keys and missing keys all return `401`.
-- `/models` lists the project's own `callModels`; a project with a `"*"` callModel additionally
-  lists the `provider/model` candidates allowed by its matching route rule.
+- `/models` lists exactly the project's declared `callModels`.
+- Downstream clients can only call models declared in the project's `callModels`; every request
+  goes through that project's route rule to an upstream provider. Wildcard (`"*"`) or undeclared
+  call models are not supported (a `"*"` callModel id is rejected when the config loads).
 - The legacy `/v1/*`, `/g/{project}/v1/*` and `/p/{provider}/v1/*` endpoints were removed and
-  return `404`. For direct provider access, give a project a `"*"` callModel and a route rule that
-  maps `provider/model` ids.
+  return `404`.

@@ -94,8 +94,8 @@ impl RuntimeCatalog {
             .and_then(|&idx| self.projects.get(idx))
     }
 
-    /// Resolves `(project, callModel)` for a request, falling back to a `"*"` wildcard
-    /// `callModel` entry inside the project if exact match is absent.
+    /// Resolves `(project, callModel)` by exact match of the requested model against the
+    /// project's declared `callModels` (there is no wildcard fallback).
     #[must_use]
     pub fn resolve_project_and_call_model(
         &self,
@@ -103,18 +103,11 @@ impl RuntimeCatalog {
         requested_model: &str,
     ) -> Option<(&ProjectConfig, &CallModelConfig)> {
         let project = self.find_project(project_id)?;
-        if let Some(exact) = project
-            .call_models
-            .iter()
-            .find(|cm| cm.id == requested_model)
-        {
-            return Some((project, exact));
-        }
         project
             .call_models
             .iter()
-            .find(|cm| cm.id == "*")
-            .map(|wild| (project, wild))
+            .find(|cm| cm.id == requested_model)
+            .map(|cm| (project, cm))
     }
 
     /// Finds the highest-priority enabled route rule matching `(project_id, call_model_id)`.
@@ -156,47 +149,25 @@ impl RuntimeCatalog {
         out
     }
 
-    /// Builds the OpenAI-compatible model list for `/model/{project_id}/v1/models`.
-    ///
-    /// Only the project's own `callModels` are listed. If the project declares a `"*"`
-    /// wildcard `callModel`, the `provider/model` candidates allowed by the matching route rule
-    /// are listed as well. Unknown projects yield an empty list.
+    /// Builds the OpenAI-compatible model list for `/model/{project_id}/v1/models`:
+    /// exactly the project's declared `callModels`. Unknown projects yield an empty list.
     #[must_use]
     pub fn list_openai_models(&self, project_id: &str) -> Vec<Value> {
         let Some(project) = self.find_project(project_id) else {
             return Vec::new();
         };
-
-        let mut items = Vec::new();
-        let mut has_wildcard = false;
-        for cm in &project.call_models {
-            if cm.id == "*" {
-                has_wildcard = true;
-                continue;
-            }
-            items.push(json!({
-                "id": cm.id,
-                "object": "model",
-                "owned_by": project.id,
-                "display_name": cm.name
-            }));
-        }
-
-        if has_wildcard && let Some(rule) = self.match_route_rule(project_id, "*") {
-            for provider in &self.providers {
-                for model in &provider.models {
-                    if candidate_allowed(&rule.candidates, &provider.id, &model.id) {
-                        items.push(json!({
-                            "id": format!("{}/{}", provider.id, model.id),
-                            "object": "model",
-                            "owned_by": provider.id,
-                            "display_name": model.name
-                        }));
-                    }
-                }
-            }
-        }
-        items
+        project
+            .call_models
+            .iter()
+            .map(|cm| {
+                json!({
+                    "id": cm.id,
+                    "object": "model",
+                    "owned_by": project.id,
+                    "display_name": cm.name
+                })
+            })
+            .collect()
     }
     /// Total count of configured models across all supply providers.
     #[must_use]

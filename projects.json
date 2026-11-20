@@ -7,9 +7,15 @@
     "meta": {},
     "callModels": [
       {
-        "id": "*",
-        "name": "直通调用模型",
-        "icon": "codex-color",
+        "id": "deepseek-v4-pro",
+        "name": "DeepSeek V4 Pro",
+        "icon": "deepseek-color",
+        "meta": {}
+      },
+      {
+        "id": "qwen3.8-max",
+        "name": "Qwen 3.8 Max",
+        "icon": "qwen-color",
         "meta": {}
       }
     ]

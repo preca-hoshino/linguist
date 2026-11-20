@@ -286,6 +286,14 @@ fn load_projects(path: &Path, engine: &ScriptEngine) -> Result<Vec<ProjectConfig
 
         let mut call_models = Vec::with_capacity(raw.call_models.len());
         for rcm in raw.call_models {
+            if rcm.id.trim().is_empty() || rcm.id.trim() == "*" {
+                return Err(anyhow!(
+                    "project '{}' has an invalid callModel id '{}': wildcard or empty ids are not \
+                     allowed, declare every callModel explicitly",
+                    raw.id,
+                    rcm.id
+                ));
+            }
             let cm_icon = rcm
                 .icon
                 .clone()
@@ -514,7 +522,7 @@ mod tests {
         assert!(
             fs::write(
                 &projects_path,
-                r#"[{"id":"default","name":"Default","apiKey":"k-default","callModels":[{"id":"*","name":"Passthrough"}]}]"#,
+                r#"[{"id":"default","name":"Default","apiKey":"k-default","callModels":[{"id":"deepseek-v4-pro","name":"Passthrough"}]}]"#,
             )
             .is_ok()
         );
@@ -576,6 +584,12 @@ mod tests {
             r#"[{"id":"a/b","name":"A","apiKey":"k","callModels":[]}]"#,
         );
         assert!(bad_id.is_err_and(|e| e.to_string().contains("invalid")));
+
+        let wildcard = load(
+            "wildcard.json",
+            r#"[{"id":"a","name":"A","apiKey":"k","callModels":[{"id":"*","name":"Any"}]}]"#,
+        );
+        assert!(wildcard.is_err_and(|e| e.to_string().contains("callModel")));
 
         let ok = load(
             "ok.json",
