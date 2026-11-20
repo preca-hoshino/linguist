@@ -1,5 +1,5 @@
-//! OpenAI-compatible HTTP gateway endpoints (`/g/{project}/v1/...`, `/v1/...`,
-//! `/p/{provider}/v1/...`), authentication, fallback execution, and zero-hook streaming.
+//! OpenAI-compatible HTTP gateway endpoints (`/model/{project_id}/v1/...`), project
+//! authentication, fallback execution, and zero-hook streaming.
 
 pub mod stream_inspector;
 
@@ -26,26 +26,22 @@ use crate::proxy::stream_inspector::{
     CompletionCallback, InspectedByteStream, InspectionMetadata, StreamTelemetryTracker,
 };
 use crate::script_engine::pipeline::{
-    RoutingPlan, StageOutcome, build_direct_provider_plan, prepare_attempt_context,
-    run_routing_stages,
+    RoutingPlan, StageOutcome, prepare_attempt_context, run_routing_stages,
 };
 use crate::state::AppState;
 
-/// Registers OpenAI-compatible proxy endpoints and `/healthz` on the Axum router.
+/// Registers project-scoped OpenAI-compatible proxy endpoints and `/healthz` on the Axum router.
+///
+/// The only model endpoints are `/model/{project_id}/v1/models` and
+/// `/model/{project_id}/v1/chat/completions`.
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/healthz", get(healthz_handler))
-        .route("/v1/chat/completions", post(unified_chat_completions))
-        .route("/v1/models", get(unified_list_models))
         .route(
-            "/g/{project_id}/v1/chat/completions",
+            "/model/{project_id}/v1/chat/completions",
             post(project_chat_completions),
         )
-        .route("/g/{project_id}/v1/models", get(project_list_models))
-        .route(
-            "/p/{provider_id}/v1/chat/completions",
-            post(direct_provider_chat_completions),
-        )
+        .route("/model/{project_id}/v1/models", get(project_list_models))
 }
 
 /// Service and database readiness endpoint used by deployments and monitoring.
@@ -76,53 +72,21 @@ async fn healthz_handler(State(state): State<AppState>) -> Response {
     }
 }
 
-/// Unified `/v1/models` handler.
-async fn unified_list_models(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    let catalog = state.catalog.load();
-    let project_id = resolve_project_id_from_headers(&catalog, &headers);
-    if let Some(err_resp) = verify_project_auth(&catalog, &project_id, &headers) {
-        return err_resp;
-    }
-    let models = catalog.list_openai_models(Some(&project_id));
-    Json(json!({ "object": "list", "data": models })).into_response()
-}
-
-/// Project-scoped `/g/{project_id}/v1/models` handler.
+/// Project-scoped `/model/{project_id}/v1/models` handler.
 async fn project_list_models(
     State(state): State<AppState>,
     Path(project_id): Path<String>,
     headers: HeaderMap,
 ) -> Response {
     let catalog = state.catalog.load();
-    if catalog.find_project(&project_id).is_none() {
-        return openai_error(
-            StatusCode::NOT_FOUND,
-            &format!("Project '{project_id}' not found"),
-            "not_found_error",
-        );
-    }
     if let Some(err_resp) = verify_project_auth(&catalog, &project_id, &headers) {
         return err_resp;
     }
-    let models = catalog.list_openai_models(Some(&project_id));
+    let models = catalog.list_openai_models(&project_id);
     Json(json!({ "object": "list", "data": models })).into_response()
 }
 
-/// Unified `/v1/chat/completions` entrypoint resolving project via header, bearer key, or `"default"`.
-async fn unified_chat_completions(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    Json(body): Json<Value>,
-) -> Response {
-    let catalog = state.catalog.load();
-    let project_id = resolve_project_id_from_headers(&catalog, &headers);
-    if let Some(err_resp) = verify_project_auth(&catalog, &project_id, &headers) {
-        return err_resp;
-    }
-    handle_routed_chat(state, &catalog, &project_id, body).await
-}
-
-/// Project-scoped `/g/{project_id}/v1/chat/completions` entrypoint.
+/// Project-scoped `/model/{project_id}/v1/chat/completions` entrypoint.
 async fn project_chat_completions(
     State(state): State<AppState>,
     Path(project_id): Path<String>,
@@ -130,61 +94,13 @@ async fn project_chat_completions(
     Json(body): Json<Value>,
 ) -> Response {
     let catalog = state.catalog.load();
-    if catalog.find_project(&project_id).is_none() {
-        return openai_error(
-            StatusCode::NOT_FOUND,
-            &format!("Project '{project_id}' not found"),
-            "not_found_error",
-        );
-    }
     if let Some(err_resp) = verify_project_auth(&catalog, &project_id, &headers) {
         return err_resp;
     }
     handle_routed_chat(state, &catalog, &project_id, body).await
 }
 
-/// Direct provider debug entrypoint `/p/{provider_id}/v1/chat/completions`, skipping Stages ①..③
-/// while executing Stages ④ and ⑤ and full telemetry inspection.
-async fn direct_provider_chat_completions(
-    State(state): State<AppState>,
-    Path(provider_id): Path<String>,
-    Json(body): Json<Value>,
-) -> Response {
-    let Some(body_map) = body.as_object().cloned() else {
-        return openai_error(
-            StatusCode::BAD_REQUEST,
-            "Request body must be a JSON object",
-            "invalid_request_error",
-        );
-    };
-    let Some(requested_model) = body_map
-        .get("model")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    else {
-        return openai_error(
-            StatusCode::BAD_REQUEST,
-            "Missing required 'model' string field",
-            "invalid_request_error",
-        );
-    };
-
-    let catalog = state.catalog.load();
-    let Some((provider, model)) = catalog.find_model(&provider_id, requested_model) else {
-        return openai_error(
-            StatusCode::NOT_FOUND,
-            &format!("Model '{provider_id}/{requested_model}' not found"),
-            "not_found_error",
-        );
-    };
-
-    let parent_uid = Uuid::new_v4();
-    let plan = build_direct_provider_plan(provider, model, parent_uid, body_map);
-    dispatch_plan(&state, &catalog, parent_uid, plan).await
-}
-
-/// Shared Stages ①..③ + upstream dispatch pipeline for `/g/{project}` and `/v1`.
+/// Shared Stages ①..③ + upstream dispatch pipeline for `/model/{project_id}/v1/...`.
 async fn handle_routed_chat(
     state: AppState,
     catalog: &crate::catalog::RuntimeCatalog,
@@ -661,56 +577,40 @@ async fn buffer_json_response(
     (status, resp_headers, rewritten).into_response()
 }
 
-/// Resolves project ID on `/v1/...` routes via `X-Linguist-Project` (or `X-TokPulse-Project`),
-/// then matching `projects[].apiKey` Bearer token, then `"default"`.
-fn resolve_project_id_from_headers(
-    catalog: &crate::catalog::RuntimeCatalog,
-    headers: &HeaderMap,
-) -> String {
-    if let Some(explicit) = headers
-        .get("x-linguist-project")
-        .or_else(|| headers.get("x-tokpulse-project"))
-        .and_then(|v| v.to_str().ok())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
-        return explicit.to_string();
-    }
-
-    if let Some(token) = extract_bearer_token(headers)
-        && let Some(project) = catalog.find_project_by_api_key(token)
-    {
-        return project.id.clone();
-    }
-
-    "default".to_string()
-}
-
-/// Verifies `projects[].apiKey` against the request's `Authorization: Bearer <token>`
-/// header when the project defines an API key, returning `Some(Response)` on failure.
+/// Verifies the request's `Authorization: Bearer <token>` against the path project's `apiKey`.
+///
+/// Unknown projects, projects without a configured key, and wrong/missing tokens all produce the
+/// same `401` response so project IDs cannot be enumerated.
 fn verify_project_auth(
     catalog: &crate::catalog::RuntimeCatalog,
     project_id: &str,
     headers: &HeaderMap,
 ) -> Option<Response> {
-    let Some(project) = catalog.find_project(project_id) else {
-        return Some(openai_error(
-            StatusCode::NOT_FOUND,
-            &format!("Project '{project_id}' not found"),
-            "not_found_error",
-        ));
-    };
+    let authorized = catalog
+        .find_project(project_id)
+        .and_then(|project| project.api_key.as_deref())
+        .zip(extract_bearer_token(headers))
+        .is_some_and(|(expected, provided)| constant_time_eq(expected, provided));
 
-    let expected_key = project.api_key.as_deref()?;
-
-    match extract_bearer_token(headers) {
-        Some(provided) if provided == expected_key => None,
-        _ => Some(openai_error(
+    if authorized {
+        None
+    } else {
+        Some(openai_error(
             StatusCode::UNAUTHORIZED,
             "Invalid or missing project Bearer API key",
             "authentication_error",
-        )),
+        ))
     }
+}
+
+/// Compares two secrets without short-circuiting on the first differing byte.
+fn constant_time_eq(a: &str, b: &str) -> bool {
+    let (a, b) = (a.as_bytes(), b.as_bytes());
+    let mut diff = a.len() ^ b.len();
+    for i in 0..a.len().max(b.len()) {
+        diff |= usize::from(a.get(i).copied().unwrap_or(0) ^ b.get(i).copied().unwrap_or(0));
+    }
+    diff == 0
 }
 
 /// Extracts Bearer token from `Authorization` header.

@@ -94,14 +94,6 @@ impl RuntimeCatalog {
             .and_then(|&idx| self.projects.get(idx))
     }
 
-    /// Resolves a project by Bearer token (matching `projects[].apiKey`) if present.
-    #[must_use]
-    pub fn find_project_by_api_key(&self, token: &str) -> Option<&ProjectConfig> {
-        self.projects
-            .iter()
-            .find(|p| p.api_key.as_deref() == Some(token))
-    }
-
     /// Resolves `(project, callModel)` for a request, falling back to a `"*"` wildcard
     /// `callModel` entry inside the project if exact match is absent.
     #[must_use]
@@ -164,38 +156,48 @@ impl RuntimeCatalog {
         out
     }
 
-    /// Builds OpenAI-compatible `/v1/models` list items for a given project or globally.
+    /// Builds the OpenAI-compatible model list for `/model/{project_id}/v1/models`.
+    ///
+    /// Only the project's own `callModels` are listed. If the project declares a `"*"`
+    /// wildcard `callModel`, the `provider/model` candidates allowed by the matching route rule
+    /// are listed as well. Unknown projects yield an empty list.
     #[must_use]
-    pub fn list_openai_models(&self, project_id: Option<&str>) -> Vec<Value> {
+    pub fn list_openai_models(&self, project_id: &str) -> Vec<Value> {
+        let Some(project) = self.find_project(project_id) else {
+            return Vec::new();
+        };
+
         let mut items = Vec::new();
-        if let Some(pid) = project_id
-            && let Some(project) = self.find_project(pid)
-        {
-            for cm in &project.call_models {
-                if cm.id != "*" {
-                    items.push(json!({
-                        "id": cm.id,
-                        "object": "model",
-                        "owned_by": project.id,
-                        "display_name": cm.name
-                    }));
-                }
+        let mut has_wildcard = false;
+        for cm in &project.call_models {
+            if cm.id == "*" {
+                has_wildcard = true;
+                continue;
             }
+            items.push(json!({
+                "id": cm.id,
+                "object": "model",
+                "owned_by": project.id,
+                "display_name": cm.name
+            }));
         }
 
-        for provider in &self.providers {
-            for model in &provider.models {
-                items.push(json!({
-                    "id": format!("{}/{}", provider.id, model.id),
-                    "object": "model",
-                    "owned_by": provider.id,
-                    "display_name": model.name
-                }));
+        if has_wildcard && let Some(rule) = self.match_route_rule(project_id, "*") {
+            for provider in &self.providers {
+                for model in &provider.models {
+                    if candidate_allowed(&rule.candidates, &provider.id, &model.id) {
+                        items.push(json!({
+                            "id": format!("{}/{}", provider.id, model.id),
+                            "object": "model",
+                            "owned_by": provider.id,
+                            "display_name": model.name
+                        }));
+                    }
+                }
             }
         }
         items
     }
-
     /// Total count of configured models across all supply providers.
     #[must_use]
     pub fn total_models(&self) -> usize {

@@ -9,13 +9,12 @@ use uuid::Uuid;
 use crate::catalog::RuntimeCatalog;
 use crate::metrics_cache::MetricsCache;
 use crate::models::{
-    CallModelMeta, ModelConfig, ProjectMeta, ProviderConfig, RejectDirective, RequestState,
-    RouteEndpoint, RouteState, ScriptContext, ScriptStage, extract_request_signals,
-    normalize_chat_completions_url,
+    ModelConfig, ProviderConfig, RejectDirective, RequestState, RouteEndpoint, RouteState,
+    ScriptContext, ScriptStage, extract_request_signals, normalize_chat_completions_url,
 };
 use crate::script_engine::ScriptEngine;
 
-/// Prepared routing plan after running Stages ① -> ③ (or direct `/p/{provider}` setup).
+/// Prepared routing plan after running Stages ① -> ③.
 #[derive(Debug, Clone)]
 pub struct RoutingPlan {
     /// Consume-side project display name.
@@ -155,67 +154,6 @@ pub async fn run_routing_stages(
         endpoints,
         snapshot_ctx: ctx,
     }))
-}
-
-/// Builds a direct provider-debug `RoutingPlan` for `/p/{provider_id}/v1/chat/completions`,
-/// skipping Stages ①..③ while still preparing Stage ④ & ⑤ execution and telemetry.
-#[must_use]
-pub fn build_direct_provider_plan(
-    provider: &ProviderConfig,
-    model: &ModelConfig,
-    request_uid: Uuid,
-    incoming_body: Map<String, Value>,
-) -> RoutingPlan {
-    let signals = extract_request_signals(&incoming_body);
-    let mut headers = BTreeMap::new();
-    headers.insert("content-type".to_string(), "application/json".to_string());
-
-    let endpoint = RouteEndpoint {
-        provider_id: provider.id.clone(),
-        model_id: model.id.clone(),
-    };
-
-    let snapshot_ctx = ScriptContext {
-        stage: ScriptStage::Route,
-        project: ProjectMeta {
-            id: "direct".to_string(),
-            name: "Direct Provider".to_string(),
-            icon: Some(provider.icon.clone()),
-            meta: Map::new(),
-        },
-        call_model: CallModelMeta {
-            id: model.id.clone(),
-            name: model.name.clone(),
-            icon: Some(model.icon.clone()),
-            meta: Map::new(),
-        },
-        provider: None,
-        model: None,
-        route: RouteState {
-            rule_id: "direct-provider".to_string(),
-            candidates: Vec::new(),
-            target: Some(endpoint.clone()),
-            fallbacks: Vec::new(),
-            rewrite_response_model: false,
-        },
-        request: RequestState {
-            uid: request_uid.to_string(),
-            attempt: 1,
-            url: String::new(),
-            headers,
-            body: incoming_body,
-            signals,
-        },
-        state: Map::new(),
-        reject: None,
-    };
-
-    RoutingPlan {
-        project_name: "Direct Provider".to_string(),
-        call_model_name: model.name.clone(),
-        endpoints: vec![endpoint],
-        snapshot_ctx,
-    }
 }
 
 /// Clones the Post-Stage-③ snapshot and executes Stages ④ (`model`) and ⑤ (`provider`)

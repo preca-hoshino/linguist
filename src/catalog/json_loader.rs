@@ -251,6 +251,26 @@ fn load_projects(path: &Path, engine: &ScriptEngine) -> Result<Vec<ProjectConfig
     let mut projects = Vec::with_capacity(raw_list.len());
 
     for raw in raw_list {
+        if raw.id.is_empty()
+            || !raw
+                .id
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            return Err(anyhow!(
+                "project id '{}' is invalid: only ASCII letters, digits, '_' and '-' are allowed \
+                 because it is used in the /model/{{project_id}}/v1 endpoint path",
+                raw.id
+            ));
+        }
+        let Some(api_key) = raw.api_key.clone().filter(|s| !s.trim().is_empty()) else {
+            return Err(anyhow!(
+                "project '{}' must define a non-empty apiKey (required by /model/{}/v1)",
+                raw.id,
+                raw.id
+            ));
+        };
+
         let p_icon = raw
             .icon
             .clone()
@@ -291,7 +311,7 @@ fn load_projects(path: &Path, engine: &ScriptEngine) -> Result<Vec<ProjectConfig
         projects.push(ProjectConfig {
             id: raw.id,
             name: raw.name,
-            api_key: raw.api_key.filter(|s| !s.trim().is_empty()),
+            api_key: Some(api_key),
             icon: p_icon,
             meta: raw.meta,
             script: p_script,
@@ -494,7 +514,7 @@ mod tests {
         assert!(
             fs::write(
                 &projects_path,
-                r#"[{"id":"default","name":"Default","callModels":[{"id":"*","name":"Passthrough"}]}]"#,
+                r#"[{"id":"default","name":"Default","apiKey":"k-default","callModels":[{"id":"*","name":"Passthrough"}]}]"#,
             )
             .is_ok()
         );
@@ -529,5 +549,40 @@ mod tests {
         }
 
         let _ = fs::remove_dir_all(&temp_dir);
+    }
+
+    #[test]
+    fn rejects_projects_without_api_key_or_with_unsafe_id() {
+        let dir = std::env::temp_dir().join(format!("linguist-projects-{}", std::process::id()));
+        assert!(fs::create_dir_all(&dir).is_ok());
+        let engine = ScriptEngine::new(ScriptEngineConfig::default());
+        let load = |name: &str, json: &str| {
+            let path = dir.join(name);
+            assert!(fs::write(&path, json).is_ok());
+            load_projects(&path, &engine)
+        };
+
+        let no_key = load("no_key.json", r#"[{"id":"a","name":"A","callModels":[]}]"#);
+        assert!(no_key.is_err_and(|e| e.to_string().contains("apiKey")));
+
+        let blank_key = load(
+            "blank_key.json",
+            r#"[{"id":"a","name":"A","apiKey":"  ","callModels":[]}]"#,
+        );
+        assert!(blank_key.is_err());
+
+        let bad_id = load(
+            "bad_id.json",
+            r#"[{"id":"a/b","name":"A","apiKey":"k","callModels":[]}]"#,
+        );
+        assert!(bad_id.is_err_and(|e| e.to_string().contains("invalid")));
+
+        let ok = load(
+            "ok.json",
+            r#"[{"id":"team-1_a","name":"A","apiKey":"k","callModels":[]}]"#,
+        );
+        assert!(ok.is_ok());
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

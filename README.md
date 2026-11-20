@@ -17,3 +17,27 @@ cargo run -- seed-demo --days 180
 # Start gateway & embedded telemetry dashboard on http://127.0.0.1:9527
 cargo run -- serve
 ```
+
+## API Endpoints
+
+All model traffic is project-scoped. The project ID is part of the URL and the request must carry
+that project's `apiKey` (required for every project in `projects.json`) as a Bearer token:
+
+```text
+GET  /model/{project_id}/v1/models
+POST /model/{project_id}/v1/chat/completions
+Authorization: Bearer <project apiKey>
+```
+
+```bash
+curl https://linguist.example.com/model/default/v1/chat/completions \
+  -H "Authorization: Bearer <apiKey>" -H "Content-Type: application/json" \
+  -d '{"model":"deepseek-v4-pro","messages":[{"role":"user","content":"hi"}]}'
+```
+
+- Unknown projects, wrong keys and missing keys all return `401`.
+- `/models` lists the project's own `callModels`; a project with a `"*"` callModel additionally
+  lists the `provider/model` candidates allowed by its matching route rule.
+- The legacy `/v1/*`, `/g/{project}/v1/*` and `/p/{provider}/v1/*` endpoints were removed and
+  return `404`. For direct provider access, give a project a `"*"` callModel and a route rule that
+  maps `provider/model` ids.

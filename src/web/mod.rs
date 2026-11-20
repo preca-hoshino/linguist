@@ -3,11 +3,13 @@
 
 pub mod stats_api;
 
+use axum::Json;
 use axum::Router;
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
+use serde_json::json;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
@@ -67,14 +69,28 @@ async fn serve_icon_handler(
 }
 
 /// Serves embedded `frontend/dist` files and falls back to `index.html` for SPA routes,
-/// returning HTTP 404 for unmatched `/api`, `/v1`, `/g`, `/p`, or `/icons` paths.
+/// returning HTTP 404 for unmatched `/api`, `/model`, or `/icons` paths. The removed legacy
+/// endpoints (`/v1`, `/g`, `/p`) return a JSON 404 pointing at `/model/{project_id}/v1`.
 async fn spa_fallback_handler(uri: Uri) -> Response {
     let raw_path = uri.path().trim_start_matches('/');
 
+    if raw_path.starts_with("v1/") || raw_path.starts_with("g/") || raw_path.starts_with("p/") {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(json!({
+                "error": {
+                    "code": 404,
+                    "message": "Endpoint removed. Use /model/{project_id}/v1/chat/completions \
+                                or /model/{project_id}/v1/models",
+                    "type": "not_found_error"
+                }
+            })),
+        )
+            .into_response();
+    }
+
     if raw_path.starts_with("api/")
-        || raw_path.starts_with("v1/")
-        || raw_path.starts_with("g/")
-        || raw_path.starts_with("p/")
+        || raw_path.starts_with("model/")
         || raw_path.starts_with("icons/")
     {
         return (StatusCode::NOT_FOUND, "Not Found").into_response();

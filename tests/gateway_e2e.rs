@@ -203,7 +203,7 @@ fn e2e_projects() -> Vec<ProjectConfig> {
         ProjectConfig {
             id: "default".to_string(),
             name: "Default".to_string(),
-            api_key: None,
+            api_key: Some("lin-proj-default-secret".to_string()),
             icon: "copilot-color".to_string(),
             meta: Map::new(),
             script: None,
@@ -305,39 +305,74 @@ async fn spawn_gateway(mock_base_url: &str) -> String {
     format!("http://{addr}")
 }
 
+/// Sends a chat request to `path` with an optional Bearer key and returns the HTTP response.
+async fn post_chat(
+    client: &reqwest::Client,
+    url: String,
+    key: Option<&str>,
+    model: &str,
+    stream: bool,
+) -> reqwest::Response {
+    let mut req = client.post(url).json(&json!({
+        "model": model,
+        "stream": stream,
+        "messages": [{"role": "user", "content": "hi"}]
+    }));
+    if let Some(key) = key {
+        req = req.bearer_auth(key);
+    }
+    req.send().await.unwrap()
+}
+
 #[tokio::test]
-async fn gateway_e2e_auth_fallback_snapshot_rewrite_and_direct_provider() {
+#[allow(clippy::too_many_lines)]
+async fn gateway_e2e_project_scoped_auth_fallback_snapshot_and_rewrite() {
     let (mock_url, mock_state) = spawn_mock_upstream().await;
     let gw_url = spawn_gateway(&mock_url).await;
     let client = reqwest::Client::new();
+    let coding = format!("{gw_url}/model/coding/v1/chat/completions");
 
-    // 1. Project auth enforcement on `/g/coding/v1/chat/completions`.
-    let unauth = client
-        .post(format!("{gw_url}/g/coding/v1/chat/completions"))
-        .json(&json!({
-            "model": "smart-coder",
-            "messages": [{"role": "user", "content": "hi"}]
-        }))
-        .send()
-        .await
-        .unwrap();
+    // 1. Auth enforcement on `/model/{project_id}/v1/chat/completions`.
+    let unauth = post_chat(&client, coding.clone(), None, "smart-coder", false).await;
     assert_eq!(unauth.status(), StatusCode::UNAUTHORIZED);
 
-    // 2. Streaming request on `/g/coding/v1/chat/completions`:
+    let wrong = post_chat(&client, coding.clone(), Some("nope"), "smart-coder", false).await;
+    assert_eq!(wrong.status(), StatusCode::UNAUTHORIZED);
+
+    // A key from another project must not unlock this project's path.
+    let cross = post_chat(
+        &client,
+        coding.clone(),
+        Some("lin-proj-default-secret"),
+        "smart-coder",
+        false,
+    )
+    .await;
+    assert_eq!(cross.status(), StatusCode::UNAUTHORIZED);
+
+    // Unknown projects look exactly like bad keys (no project enumeration).
+    let unknown = post_chat(
+        &client,
+        format!("{gw_url}/model/nonexistent/v1/chat/completions"),
+        Some("lin-proj-coding-secret"),
+        "smart-coder",
+        false,
+    )
+    .await;
+    assert_eq!(unknown.status(), StatusCode::UNAUTHORIZED);
+
+    // 2. Streaming request:
     //    - Primary gets 429 (with reasoning_effort='xhigh' from Stage ④)
     //    - Fallback rolls back to Stage ③ snapshot (`reasoning_effort='high'`), receives Stage ⑤ header
     //    - Response SSE `model` is rewritten back to `smart-coder`.
-    let sse_resp = client
-        .post(format!("{gw_url}/g/coding/v1/chat/completions"))
-        .bearer_auth("lin-proj-coding-secret")
-        .json(&json!({
-            "model": "smart-coder",
-            "stream": true,
-            "messages": [{"role": "user", "content": "hi"}]
-        }))
-        .send()
-        .await
-        .unwrap();
+    let sse_resp = post_chat(
+        &client,
+        coding.clone(),
+        Some("lin-proj-coding-secret"),
+        "smart-coder",
+        true,
+    )
+    .await;
     assert_eq!(sse_resp.status(), StatusCode::OK);
 
     let mut stream = sse_resp.bytes_stream();
@@ -372,35 +407,97 @@ async fn gateway_e2e_auth_fallback_snapshot_rewrite_and_direct_provider() {
         );
     }
 
-    // 3. Unified `/v1/chat/completions` passthrough to `default` project.
-    let unified = client
-        .post(format!("{gw_url}/v1/chat/completions"))
-        .json(&json!({
-            "model": "m-fallback",
-            "messages": [{"role": "user", "content": "ping"}]
-        }))
+    // 3. Wildcard passthrough project `default` (explicit `provider`-less model id).
+    let passthrough = post_chat(
+        &client,
+        format!("{gw_url}/model/default/v1/chat/completions"),
+        Some("lin-proj-default-secret"),
+        "m-fallback",
+        false,
+    )
+    .await;
+    assert_eq!(passthrough.status(), StatusCode::OK);
+    let passthrough_json: Value = passthrough.json().await.unwrap();
+    assert_eq!(passthrough_json["model"], json!("m-fallback"));
+
+    // 4. `/models` lists only the project's own models; wildcard projects expand candidates.
+    let coding_models: Value = client
+        .get(format!("{gw_url}/model/coding/v1/models"))
+        .bearer_auth("lin-proj-coding-secret")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let coding_ids: Vec<&str> = coding_models["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|m| m["id"].as_str())
+        .collect();
+    assert_eq!(coding_ids, vec!["smart-coder"]);
+
+    let default_models: Value = client
+        .get(format!("{gw_url}/model/default/v1/models"))
+        .bearer_auth("lin-proj-default-secret")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let default_ids: Vec<&str> = default_models["data"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|m| m["id"].as_str())
+        .collect();
+    assert_eq!(
+        default_ids,
+        vec!["primary-prov/m-primary", "fallback-prov/m-fallback"]
+    );
+
+    let models_unauth = client
+        .get(format!("{gw_url}/model/coding/v1/models"))
         .send()
         .await
         .unwrap();
-    assert_eq!(unified.status(), StatusCode::OK);
-    let unified_json: Value = unified.json().await.unwrap();
-    assert_eq!(unified_json["model"], json!("m-fallback"));
+    assert_eq!(models_unauth.status(), StatusCode::UNAUTHORIZED);
 
-    // 4. Direct provider debug `/p/fallback-prov/v1/chat/completions` skips ①..③ and executes ④..⑤.
-    let direct = client
-        .post(format!("{gw_url}/p/fallback-prov/v1/chat/completions"))
-        .json(&json!({
-            "model": "m-fallback",
-            "messages": [{"role": "user", "content": "direct"}]
-        }))
+    // 5. Removed legacy endpoints answer 404 (even with valid keys and the old project header).
+    for legacy in [
+        "/v1/chat/completions",
+        "/g/default/v1/chat/completions",
+        "/p/fallback-prov/v1/chat/completions",
+    ] {
+        let resp = client
+            .post(format!("{gw_url}{legacy}"))
+            .bearer_auth("lin-proj-default-secret")
+            .header("x-linguist-project", "default")
+            .json(&json!({"model": "m-fallback", "messages": []}))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND, "{legacy}");
+        let body: Value = resp.json().await.unwrap();
+        assert!(
+            body["error"]["message"]
+                .as_str()
+                .unwrap()
+                .contains("/model/{project_id}/v1"),
+            "{legacy}"
+        );
+    }
+    let legacy_models = client
+        .get(format!("{gw_url}/v1/models"))
+        .bearer_auth("lin-proj-default-secret")
         .send()
         .await
         .unwrap();
-    assert_eq!(direct.status(), StatusCode::OK);
-    let direct_json: Value = direct.json().await.unwrap();
-    assert_eq!(direct_json["choices"][0]["message"]["content"], json!("ok"));
+    assert_eq!(legacy_models.status(), StatusCode::NOT_FOUND);
 
-    // 5. Health check `/healthz`
+    // 6. Health check `/healthz`
     let health = client
         .get(format!("{gw_url}/healthz"))
         .send()

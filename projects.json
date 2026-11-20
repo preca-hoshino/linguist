@@ -2,6 +2,7 @@
   {
     "id": "default",
     "name": "默认项目",
+    "apiKey": "lin-proj-default-change-me",
     "icon": "copilot-color",
     "meta": {},
     "callModels": [
