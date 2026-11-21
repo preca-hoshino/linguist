@@ -10,6 +10,12 @@ APP_NAME="linguist-app-$$-${RANDOM}"
 HOST_PORT="${LINGUIST_TEST_PORT:-19527}"
 
 cleanup() {
+  local rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "==> Container logs on failure (rc=${rc}):"
+    docker logs "$APP_NAME" 2>&1 || true
+    docker logs "$MOCK_NAME" 2>&1 || true
+  fi
   docker rm -f "$APP_NAME" "$MOCK_NAME" "$PG_NAME" >/dev/null 2>&1 || true
   docker network rm "$NET_NAME" >/dev/null 2>&1 || true
   rm -rf "$WORKDIR"
@@ -244,6 +250,8 @@ cat > "$WORKDIR/mock/server.py" <<'PY'
 import http.server, json, ssl
 
 class Handler(http.server.BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
     def do_POST(self):
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(length)
@@ -252,6 +260,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if payload.get("stream"):
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Transfer-Encoding", "chunked")
+            self.send_header("Connection", "close")
             self.end_headers()
             chunks = [
                 'data: {"id":"cmpl-1","model":"mock-model","choices":[{"index":0,"delta":{"content":"Hello "}}]}\n\n',
@@ -259,8 +269,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 'data: [DONE]\n\n',
             ]
             for c in chunks:
-                self.wfile.write(c.encode("utf-8"))
+                data = c.encode("utf-8")
+                self.wfile.write(f"{len(data):x}\r\n".encode("ascii") + data + b"\r\n")
                 self.wfile.flush()
+            self.wfile.write(b"0\r\n\r\n")
+            self.wfile.flush()
         else:
             body = json.dumps({
                 "id": "cmpl-1",
@@ -272,8 +285,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("Connection", "close")
             self.end_headers()
             self.wfile.write(body)
+            self.wfile.flush()
 
     def log_message(self, format, *args):
         pass
