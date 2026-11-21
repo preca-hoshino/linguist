@@ -13,6 +13,7 @@ cleanup() {
   local rc=$?
   if [ "$rc" -ne 0 ]; then
     echo "==> Container logs on failure (rc=${rc}):"
+    docker logs "$PG_NAME" 2>&1 || true
     docker logs "$APP_NAME" 2>&1 || true
     docker logs "$MOCK_NAME" 2>&1 || true
   fi
@@ -238,13 +239,15 @@ docker run -d --name "$PG_NAME" --network "$NET_NAME" --network-alias linguist-p
   postgres:17-alpine \
   sh -c 'cp /certs/server.key /tmp/server.key && chown postgres:postgres /tmp/server.key && chmod 600 /tmp/server.key && exec docker-entrypoint.sh postgres -c ssl=on -c ssl_cert_file=/certs/server.crt -c ssl_key_file=/tmp/server.key -c ssl_ca_file=/certs/ca.crt' >/dev/null
 
-for _ in $(seq 1 30); do
-  if docker exec "$PG_NAME" pg_isready -U linguist -d linguist >/dev/null 2>&1; then
+pg_ready=0
+for _ in $(seq 1 45); do
+  if docker exec "$PG_NAME" env PGPASSWORD=linguistpass psql -h 127.0.0.1 -U linguist -d linguist -c "SELECT 1" >/dev/null 2>&1; then
+    pg_ready=1
     break
   fi
   sleep 1
 done
-docker exec "$PG_NAME" pg_isready -U linguist -d linguist >/dev/null
+test "$pg_ready" = "1"
 
 cat > "$WORKDIR/mock/server.py" <<'PY'
 import http.server, json, ssl
@@ -405,8 +408,8 @@ OVERVIEW_JSON="$(curl -fsS "http://127.0.0.1:${HOST_PORT}/api/v1/stats/overview"
 python3 -c '
 import json, sys
 data = json.loads(sys.stdin.read())
-total = data["summary"]["total_requests"]
-print("Persisted total_requests:", total)
+total = data["summary"]["totalRequests"]
+print("Persisted totalRequests:", total)
 assert total >= 2, f"Expected >= 2 persisted requests, got {total}"
 ' <<< "$OVERVIEW_JSON"
 
