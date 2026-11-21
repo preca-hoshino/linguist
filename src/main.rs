@@ -1,4 +1,4 @@
-//! Linguist CLI entrypoint (`serve`, `sync-icons`, `check-config`, `seed-demo`).
+//! Linguist CLI entrypoint (`serve`, `check-config`, `seed-demo`).
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -16,7 +16,6 @@ use linguist::catalog::CatalogProvider;
 use linguist::catalog::json_loader::JsonFileCatalogProvider;
 use linguist::config::AppConfig;
 use linguist::db::{self, LogWriterHandle};
-use linguist::icons;
 use linguist::metrics_cache::MetricsCache;
 use linguist::script_engine::ScriptEngine;
 use linguist::state::AppState;
@@ -44,8 +43,6 @@ struct Cli {
 enum Commands {
     /// Start the HTTP proxy gateway and embedded telemetry web dashboard.
     Serve,
-    /// Download and unpack `@lobehub/icons-static-svg` icons locally.
-    SyncIcons,
     /// Validate `config.toml`, JSON catalogs, and compile all 5-stage TS/JS scripts offline.
     CheckConfig,
     /// Initialize PostgreSQL schema and populate realistic multi-day demo telemetry.
@@ -66,13 +63,6 @@ async fn main() -> Result<()> {
     let cfg = AppConfig::load_from_path(&cli.config)?;
 
     match cli.command.unwrap_or(Commands::Serve) {
-        Commands::SyncIcons => {
-            let count = icons::sync_icons(&cfg.icons).await?;
-            println!(
-                "Synced {count} LobeHub SVG icons into {}",
-                cfg.icons.lobe_icons_dir.display()
-            );
-        }
         Commands::CheckConfig => {
             let engine = ScriptEngine::new(cfg.script_engine.clone());
             let loader = JsonFileCatalogProvider::new(cfg.configs.clone(), engine);
@@ -135,10 +125,6 @@ async fn main() -> Result<()> {
 /// Boots the PostgreSQL pool, catalog loader, hot-reload watcher, metrics cache,
 /// and Axum HTTP server.
 async fn run_serve(cfg: AppConfig) -> Result<()> {
-    if let Err(err) = icons::ensure_fallback_icons(&cfg.icons.lobe_icons_dir) {
-        warn!(error = %err, "failed to write fallback icon cache");
-    }
-
     let engine = ScriptEngine::new(cfg.script_engine.clone());
     let loader = JsonFileCatalogProvider::new(cfg.configs.clone(), engine.clone());
     let initial_catalog = loader.load_catalog().await?;

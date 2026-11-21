@@ -28,11 +28,6 @@ fallback_status_codes = [429, 500, 502, 503, 504]
 sliding_window_minutes = 60
 warmup_days_from_db = 7
 
-[icons]
-lobe_icons_dir = "./icons/lobe"
-custom_icons_dir = "./icons/custom"
-registry_url = "https://registry.npmmirror.com/@lobehub/icons-static-svg/latest"
-
 [ui]
 title = "Linguist Gateway & Telemetry"
 timezone = "Asia/Shanghai"

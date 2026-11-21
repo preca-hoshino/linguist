@@ -72,3 +72,22 @@ impl AppState {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{MetricsConfig, ScriptEngineConfig};
+
+    #[test]
+    fn app_state_initializes_http_client_with_system_and_webpki_roots() {
+        let state = AppState::new(
+            AppConfig::default(),
+            Arc::new(ArcSwap::from_pointee(RuntimeCatalog::default())),
+            MetricsCache::new(&MetricsConfig::default()),
+            ScriptEngine::new(ScriptEngineConfig::default()),
+            None,
+            None,
+        );
+        assert!(state.is_ok());
+    }
+}

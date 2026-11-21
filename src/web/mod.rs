@@ -5,7 +5,7 @@ pub mod stats_api;
 
 use axum::Json;
 use axum::Router;
-use axum::extract::{Path, State};
+use axum::extract::Path;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
@@ -47,12 +47,9 @@ pub fn build_router(state: AppState) -> Router {
         .with_state(state)
 }
 
-/// Serves `LobeHub` or custom override SVG icons from disk (with built-in fallback).
-async fn serve_icon_handler(
-    State(state): State<AppState>,
-    Path(icon_name): Path<String>,
-) -> Response {
-    let Some(svg) = icons::resolve_icon_svg(&state.config.icons, &icon_name) else {
+/// Serves built-in fallback `LobeHub` SVG icons from memory.
+async fn serve_icon_handler(Path(icon_name): Path<String>) -> Response {
+    let Some(svg) = icons::resolve_icon_svg(&icon_name) else {
         return (StatusCode::NOT_FOUND, "Icon not found").into_response();
     };
 

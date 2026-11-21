@@ -20,8 +20,6 @@ pub struct AppConfig {
     pub script_engine: ScriptEngineConfig,
     /// In-memory sliding window speed cache settings.
     pub metrics: MetricsConfig,
-    /// `LobeHub` and custom SVG icon asset settings.
-    pub icons: IconsConfig,
     /// Read-only dashboard presentation settings.
     pub ui: UiConfig,
 }
@@ -142,29 +140,6 @@ impl Default for MetricsConfig {
     }
 }
 
-/// Icon directory and NPM mirror registry configuration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct IconsConfig {
-    /// Directory where synced `LobeHub` SVG icons live.
-    pub lobe_icons_dir: PathBuf,
-    /// Directory for user-provided custom override SVG icons.
-    pub custom_icons_dir: PathBuf,
-    /// NPM registry metadata endpoint for `@lobehub/icons-static-svg`.
-    pub registry_url: String,
-}
-
-impl Default for IconsConfig {
-    fn default() -> Self {
-        Self {
-            lobe_icons_dir: PathBuf::from("./icons/lobe"),
-            custom_icons_dir: PathBuf::from("./icons/custom"),
-            registry_url: "https://registry.npmmirror.com/@lobehub/icons-static-svg/latest"
-                .to_string(),
-        }
-    }
-}
-
 /// Frontend presentation preferences.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -210,8 +185,6 @@ impl AppConfig {
         config.configs.providers_path = resolve_relative(base_dir, &config.configs.providers_path);
         config.configs.projects_path = resolve_relative(base_dir, &config.configs.projects_path);
         config.configs.routes_path = resolve_relative(base_dir, &config.configs.routes_path);
-        config.icons.lobe_icons_dir = resolve_relative(base_dir, &config.icons.lobe_icons_dir);
-        config.icons.custom_icons_dir = resolve_relative(base_dir, &config.icons.custom_icons_dir);
 
         Ok(config)
     }
@@ -235,6 +208,21 @@ mod tests {
         let toml_str = toml::to_string(&AppConfig::default()).ok();
         assert!(toml_str.is_some());
         let parsed: Result<AppConfig, _> = toml::from_str(toml_str.as_deref().unwrap_or(""));
+        assert!(parsed.is_ok());
+    }
+
+    #[test]
+    fn legacy_icons_section_is_ignored() {
+        let raw = r#"
+[server]
+host = "0.0.0.0"
+port = 9527
+
+[icons]
+lobe_icons_dir = "./icons/lobe"
+custom_icons_dir = "./icons/custom"
+"#;
+        let parsed: Result<AppConfig, _> = toml::from_str(raw);
         assert!(parsed.is_ok());
     }
 }

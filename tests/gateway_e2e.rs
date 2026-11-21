@@ -508,11 +508,27 @@ async fn gateway_e2e_project_scoped_auth_fallback_snapshot_and_rewrite() {
         .unwrap();
     assert_eq!(legacy_models.status(), StatusCode::NOT_FOUND);
 
-    // 6. Health check `/healthz`
+    // 6. Health check `/healthz` and built-in read-only icon fallback `/icons/*`
     let health = client
         .get(format!("{gw_url}/healthz"))
         .send()
         .await
         .unwrap();
     assert_eq!(health.status(), StatusCode::OK);
+
+    let builtin_icon = client
+        .get(format!("{gw_url}/icons/deepseek-color.svg"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(builtin_icon.status(), StatusCode::OK);
+    let icon_body = builtin_icon.text().await.unwrap();
+    assert!(icon_body.contains("<svg"));
+
+    let missing_icon = client
+        .get(format!("{gw_url}/icons/nonexistent-custom.svg"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(missing_icon.status(), StatusCode::NOT_FOUND);
 }

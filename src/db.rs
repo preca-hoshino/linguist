@@ -6,11 +6,13 @@ use std::str::FromStr;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
+use rustls::RootCertStore;
+use rustls::pki_types::CertificateDer;
 use serde_json::{Value, json};
 use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
 use sqlx::{PgPool, Row};
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::catalog::RuntimeCatalog;
@@ -70,6 +72,12 @@ impl LogWriterHandle {
 pub async fn init_db_pool(config: &DatabaseConfig) -> Result<PgPool> {
     let connect_opts = PgConnectOptions::from_str(&config.url)
         .with_context(|| format!("invalid PostgreSQL connection URL '{}'", config.url))?;
+    let pg_ssl_root_cert = std::env::var_os("PGSSLROOTCERT")
+        .and_then(|v| v.into_string().ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let connect_opts =
+        apply_system_ca_roots(connect_opts, &config.url, pg_ssl_root_cert.as_deref());
     let target_db = connect_opts
         .get_database()
         .unwrap_or("linguist")
@@ -157,6 +165,115 @@ async fn ensure_database_exists(base_opts: &PgConnectOptions, target_db: &str) -
 
     maint_pool.close().await;
     Ok(true)
+}
+
+/// Base64 alphabet for encoding DER X.509 certificates as PEM blocks.
+const B64_TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/// Checks whether a PostgreSQL connection URL explicitly sets a root CA query parameter.
+fn url_has_ssl_root_cert(url: &str) -> bool {
+    let Some((_, query_and_frag)) = url.split_once('?') else {
+        return false;
+    };
+    let query = query_and_frag
+        .split_once('#')
+        .map_or(query_and_frag, |(q, _)| q);
+    query.split('&').any(|pair| {
+        let key = pair.split_once('=').map_or(pair, |(k, _)| k);
+        matches!(
+            key.to_ascii_lowercase().as_str(),
+            "sslrootcert" | "ssl-root-cert" | "ssl-ca"
+        )
+    })
+}
+
+/// Applies `PGSSLROOTCERT` or OS/environment system CA certificates (`SSL_CERT_FILE`,
+/// `SSL_CERT_DIR`, platform trust store) onto `connect_opts` when the URL does not
+/// explicitly specify `sslrootcert`.
+fn apply_system_ca_roots(
+    connect_opts: PgConnectOptions,
+    url: &str,
+    pg_ssl_root_cert: Option<&str>,
+) -> PgConnectOptions {
+    if url_has_ssl_root_cert(url) {
+        return connect_opts;
+    }
+
+    if let Some(pg_root) = pg_ssl_root_cert.map(str::trim).filter(|s| !s.is_empty()) {
+        if pg_root.starts_with("-----BEGIN ") {
+            return connect_opts.ssl_root_cert_from_pem(pg_root.as_bytes().to_vec());
+        }
+        return connect_opts.ssl_root_cert(pg_root);
+    }
+
+    let Some((pem, count)) = load_valid_native_certs_pem() else {
+        return connect_opts;
+    };
+    debug!(count, "loaded system CA certificates for PostgreSQL TLS");
+    connect_opts.ssl_root_cert_from_pem(pem)
+}
+
+/// Loads native system/env CA certificates, skips entries rejected by `rustls`, and
+/// encodes valid certificates as PEM bytes for `PgConnectOptions::ssl_root_cert_from_pem`.
+fn load_valid_native_certs_pem() -> Option<(Vec<u8>, usize)> {
+    let load_results = rustls_native_certs::load_native_certs();
+    for err in &load_results.errors {
+        warn!(error = %err, "error loading system CA certificates");
+    }
+
+    let mut store = RootCertStore::empty();
+    let mut valid_certs = Vec::new();
+    for cert in load_results.certs {
+        if store.add(cert.clone()).is_ok() {
+            valid_certs.push(cert);
+        }
+    }
+
+    if valid_certs.is_empty() {
+        return None;
+    }
+
+    let count = valid_certs.len();
+    Some((encode_certificates_pem(&valid_certs), count))
+}
+
+/// Encodes DER X.509 certificates as concatenated PEM certificate blocks.
+fn encode_certificates_pem(certs: &[CertificateDer<'_>]) -> Vec<u8> {
+    let mut pem = String::new();
+    for cert in certs {
+        pem.push_str("-----BEGIN CERTIFICATE-----\n");
+        let mut col = 0usize;
+        for chunk in cert.as_ref().chunks(3) {
+            let b0 = usize::from(chunk[0]);
+            let b1 = usize::from(chunk.get(1).copied().unwrap_or(0));
+            let b2 = usize::from(chunk.get(2).copied().unwrap_or(0));
+            let triple = (b0 << 16) | (b1 << 8) | b2;
+
+            pem.push(char::from(B64_TABLE[(triple >> 18) & 0x3F]));
+            pem.push(char::from(B64_TABLE[(triple >> 12) & 0x3F]));
+            pem.push(if chunk.len() > 1 {
+                char::from(B64_TABLE[(triple >> 6) & 0x3F])
+            } else {
+                '='
+            });
+            pem.push(if chunk.len() > 2 {
+                char::from(B64_TABLE[triple & 0x3F])
+            } else {
+                '='
+            });
+
+            col += 4;
+            if col >= 64 {
+                pem.push('\n');
+                col = 0;
+            }
+        }
+        if col > 0 {
+            pem.push('\n');
+        }
+        pem.push_str("-----END CERTIFICATE-----\n");
+    }
+    pem.into_bytes()
 }
 
 /// Records an operational lifecycle event into `system_events`.
@@ -1086,4 +1203,39 @@ pub async fn query_recent_requests(
     }
 
     Ok(items)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rustls::pki_types::pem::PemObject;
+
+    #[test]
+    fn url_ssl_root_cert_detection_matches_sqlx_keys() {
+        assert!(url_has_ssl_root_cert(
+            "postgres://u:p@db:5432/linguist?sslmode=verify-full&sslrootcert=/config/ca.pem"
+        ));
+        assert!(url_has_ssl_root_cert(
+            "postgres://u:p@db:5432/linguist?ssl-root-cert=/ca.pem"
+        ));
+        assert!(url_has_ssl_root_cert(
+            "postgres://u:p@db:5432/linguist?SSL-CA=/ca.pem"
+        ));
+        assert!(!url_has_ssl_root_cert(
+            "postgres://u:p@db:5432/linguist?sslmode=verify-full"
+        ));
+        assert!(!url_has_ssl_root_cert("postgres://u:p@db:5432/linguist"));
+    }
+
+    #[test]
+    fn pem_encoding_roundtrips_der_certificates() {
+        let sample_bytes: Vec<u8> = (0u8..=70).collect();
+        let certs = [CertificateDer::from(sample_bytes.clone())];
+        let pem = encode_certificates_pem(&certs);
+        let decoded: Vec<CertificateDer<'static>> = CertificateDer::pem_slice_iter(&pem)
+            .filter_map(Result::ok)
+            .collect();
+        assert_eq!(decoded.len(), 1);
+        assert_eq!(decoded[0].as_ref(), sample_bytes.as_slice());
+    }
 }

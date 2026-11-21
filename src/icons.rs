@@ -1,32 +1,6 @@
-//! `LobeHub` SVG icon pack synchronization and local resolution.
+//! Built-in fallback `LobeHub` SVG icon assets served read-only from memory.
 
-use std::fs;
-use std::io::Read;
-use std::path::{Path, PathBuf};
-
-use anyhow::{Context, Result};
-use flate2::read::GzDecoder;
-use serde::Deserialize;
-use tar::Archive;
-use tracing::{info, warn};
-
-use crate::config::IconsConfig;
-
-/// NPM registry latest package metadata subset used to locate the tarball URL.
-#[derive(Debug, Deserialize)]
-struct RegistryLatestMeta {
-    /// Distribution metadata block.
-    dist: RegistryDistMeta,
-}
-
-/// Distribution metadata containing the `.tgz` tarball download URL.
-#[derive(Debug, Deserialize)]
-struct RegistryDistMeta {
-    /// Direct URL to the `.tgz` tarball.
-    tarball: String,
-}
-
-/// Core fallback SVG icons written/served if offline or missing from the downloaded pack.
+/// Core fallback SVG icons served read-only from memory when `/icons/{slug}.svg` is requested.
 const FALLBACK_SVGS: &[(&str, &str)] = &[
     (
         "deepseek-color",
@@ -98,133 +72,10 @@ const FALLBACK_SVGS: &[(&str, &str)] = &[
     ),
 ];
 
-/// Downloads `@lobehub/icons-static-svg` from the configured NPM registry and
-/// extracts all `.svg` assets into `config.lobe_icons_dir`.
-///
-/// # Errors
-/// Returns an error if directories cannot be created or registry/tarball extraction fails.
-pub async fn sync_icons(config: &IconsConfig) -> Result<usize> {
-    fs::create_dir_all(&config.lobe_icons_dir).with_context(|| {
-        format!(
-            "failed to create lobe icons dir {}",
-            config.lobe_icons_dir.display()
-        )
-    })?;
-    fs::create_dir_all(&config.custom_icons_dir).with_context(|| {
-        format!(
-            "failed to create custom icons dir {}",
-            config.custom_icons_dir.display()
-        )
-    })?;
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
-        .context("failed to initialize HTTP client for icon sync")?;
-
-    info!(url = %config.registry_url, "fetching @lobehub/icons-static-svg registry metadata");
-    let meta: RegistryLatestMeta = client
-        .get(&config.registry_url)
-        .send()
-        .await
-        .context("failed to request LobeHub icon registry")?
-        .error_for_status()
-        .context("LobeHub icon registry returned HTTP error")?
-        .json()
-        .await
-        .context("failed to parse LobeHub icon registry JSON")?;
-
-    info!(tarball = %meta.dist.tarball, "downloading LobeHub SVG tarball");
-    let tgz_bytes = client
-        .get(&meta.dist.tarball)
-        .send()
-        .await
-        .context("failed to download LobeHub SVG tarball")?
-        .error_for_status()
-        .context("LobeHub SVG tarball download returned HTTP error")?
-        .bytes()
-        .await
-        .context("failed to read LobeHub SVG tarball body")?;
-
-    let lobe_dir = config.lobe_icons_dir.clone();
-    let extracted = tokio::task::spawn_blocking(move || extract_svg_tarball(&tgz_bytes, &lobe_dir))
-        .await
-        .context("tarball extraction task panicked")??;
-
-    // Fill in any built-in fallback SVGs that were absent from the tarball.
-    ensure_fallback_icons(&config.lobe_icons_dir)?;
-    info!(
-        extracted,
-        dir = %config.lobe_icons_dir.display(),
-        "LobeHub SVG icons synchronized"
-    );
-    Ok(extracted)
-}
-
-/// Extracts `.svg` entries from a gzipped npm `.tgz` archive into `dest_dir`.
-fn extract_svg_tarball(tgz_bytes: &[u8], dest_dir: &Path) -> Result<usize> {
-    let decoder = GzDecoder::new(tgz_bytes);
-    let mut archive = Archive::new(decoder);
-    let mut count = 0usize;
-
-    let entries = archive
-        .entries()
-        .context("failed to iterate LobeHub tarball entries")?;
-
-    for entry_res in entries {
-        let mut entry = entry_res.context("failed to read tarball entry")?;
-        let path = entry
-            .path()
-            .context("failed to read tarball entry path")?
-            .to_path_buf();
-
-        if !entry.header().entry_type().is_file() {
-            continue;
-        }
-        let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
-            continue;
-        };
-        if !ext.eq_ignore_ascii_case("svg") {
-            continue;
-        }
-        let Some(file_name) = path.file_name() else {
-            continue;
-        };
-
-        let target_path = dest_dir.join(file_name);
-        let mut buf = Vec::new();
-        entry
-            .read_to_end(&mut buf)
-            .with_context(|| format!("failed to read SVG entry {}", path.display()))?;
-        fs::write(&target_path, buf)
-            .with_context(|| format!("failed to write SVG file {}", target_path.display()))?;
-        count = count.saturating_add(1);
-    }
-
-    Ok(count)
-}
-
-/// Ensures built-in fallback SVG files exist if missing from `lobe_icons_dir`.
-///
-/// # Errors
-/// Returns an error if `lobe_dir` cannot be created.
-pub fn ensure_fallback_icons(lobe_dir: &Path) -> Result<()> {
-    fs::create_dir_all(lobe_dir)?;
-    for (slug, svg) in FALLBACK_SVGS {
-        let path = lobe_dir.join(format!("{slug}.svg"));
-        if !path.exists()
-            && let Err(err) = fs::write(&path, svg)
-        {
-            warn!(slug, error = %err, "failed to write fallback SVG");
-        }
-    }
-    Ok(())
-}
-
-/// Resolves an SVG string for a requested icon name (`slug` or `slug.svg`).
-/// Checks `custom_icons_dir`, then `lobe_icons_dir`, then strips `-color`, then built-in fallback.
+/// Resolves a built-in SVG string for a requested icon name (`slug` or `slug.svg`).
+/// Tries exact slug first, then strips `-color`.
 #[must_use]
-pub fn resolve_icon_svg(config: &IconsConfig, raw_name: &str) -> Option<String> {
+pub fn resolve_icon_svg(raw_name: &str) -> Option<&'static str> {
     let slug = sanitize_icon_slug(raw_name)?;
     let mut candidates = vec![slug.clone()];
     if let Some(base) = slug.strip_suffix("-color") {
@@ -232,27 +83,12 @@ pub fn resolve_icon_svg(config: &IconsConfig, raw_name: &str) -> Option<String> 
     }
 
     for candidate in &candidates {
-        if let Some(svg) = read_svg_from_dir(&config.custom_icons_dir, candidate) {
-            return Some(svg);
-        }
-        if let Some(svg) = read_svg_from_dir(&config.lobe_icons_dir, candidate) {
-            return Some(svg);
-        }
-    }
-
-    for candidate in &candidates {
         if let Some((_, svg)) = FALLBACK_SVGS.iter().find(|(name, _)| name == candidate) {
-            return Some((*svg).to_string());
+            return Some(*svg);
         }
     }
 
     None
-}
-
-/// Reads `<dir>/<slug>.svg` if present and valid UTF-8.
-fn read_svg_from_dir(dir: &Path, slug: &str) -> Option<String> {
-    let file_path: PathBuf = dir.join(format!("{slug}.svg"));
-    fs::read_to_string(file_path).ok()
 }
 
 /// Validates and normalizes an icon slug to prevent path traversal.
@@ -294,10 +130,10 @@ mod tests {
     }
 
     #[test]
-    fn fallback_icon_resolution_works_with_color_strip() {
-        let cfg = IconsConfig::default();
-        let svg = resolve_icon_svg(&cfg, "deepseek-color.svg");
+    fn fallback_icon_resolution_works_from_memory() {
+        let svg = resolve_icon_svg("deepseek-color.svg");
         assert!(svg.is_some());
         assert!(svg.unwrap_or_default().contains("<svg"));
+        assert!(resolve_icon_svg("unknown-model-icon").is_none());
     }
 }
