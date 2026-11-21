@@ -1,0 +1,45 @@
+# Linguist Docker Compose 示范配置（仅运行 Linguist，PostgreSQL 由外部提供）
+#
+# 快速准备示范配置目录：
+#   mkdir -p docker/config
+#   cp config.docker.example.toml docker/config/config.toml
+#   cp chatLanguageModels.example.json docker/config/chatLanguageModels.json
+#   cp projects.json docker/config/projects.json
+#   cp routes.json docker/config/routes.json
+#
+# 与本地二进制一致的 CLI 用法：
+#   docker compose run --rm linguist check-config   # 等价于本地: linguist check-config
+#   docker compose up -d                            # 等价于本地: linguist serve
+
+services:
+  linguist:
+    # 生产环境建议固定版本号或 @sha256:... digest，例如:
+    # image: ghcr.io/preca-hoshino/linguist:v0.1.0-b12-abcdef
+    image: ghcr.io/preca-hoshino/linguist:latest
+    container_name: linguist
+    restart: unless-stopped
+    user: "65532:65532"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    ports:
+      - "127.0.0.1:9527:9527"
+    volumes:
+      # 整目录只读挂载（支持 JSON 热重载、@file: 脚本及可选 certs/ 私有 CA）
+      - ./docker/config:/config:ro
+    # 如需连接宿主机上的 PostgreSQL（Linux 常见场景），取消下面注释：
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
+    # 如上游模型 API 或外部 PostgreSQL 使用私有 CA，将证书放到 ./docker/config/certs/ca.pem
+    # 并取消下面注释（会与内置 WebPKI 公共根证书叠加，不破坏公网 HTTPS）：
+    # environment:
+    #   - SSL_CERT_FILE=/config/certs/ca.pem
+    logging:
+      driver: json-file
+      options:
+        max-size: "20m"
+        max-file: "5"

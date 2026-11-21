@@ -1,0 +1,37 @@
+[server]
+# 容器内需监听 0.0.0.0，宿主机通过 Compose ports 映射 127.0.0.1:9527
+host = "0.0.0.0"
+port = 9527
+upstream_timeout_secs = 600
+
+[database]
+# 请替换为外部 PostgreSQL 地址与凭据；特殊字符需按 URL 百分号编码（如 @ -> %40）
+# 宿主机数据库（Compose 启用 extra_hosts 后）可使用 host.docker.internal
+# 远程 TLS 连接建议追加 ?sslmode=verify-full（如需单独指定 PG CA，可追加 &sslrootcert=/config/certs/pg-ca.pem）
+url = "postgres://linguist:CHANGE_ME@host.docker.internal:5432/linguist"
+max_connections = 10
+log_error_payload = true
+log_full_payload = false
+
+[configs]
+# 相对于容器内 /config/config.toml 解析
+source = "json_files"
+providers_path = "./chatLanguageModels.json"
+projects_path = "./projects.json"
+routes_path = "./routes.json"
+watch_reload = true
+
+[script_engine]
+timeout_ms = 50
+memory_limit_mb = 32
+fallback_status_codes = [429, 500, 502, 503, 504]
+
+[metrics]
+sliding_window_minutes = 60
+warmup_days_from_db = 7
+
+[ui]
+title = "Linguist Gateway & Telemetry"
+timezone = "Asia/Shanghai"
+default_days_range = 30
+leaderboard_min_requests = 1
