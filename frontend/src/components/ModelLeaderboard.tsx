@@ -141,17 +141,6 @@ export function ModelLeaderboard({
 
                 <div className="metric-col">
                   <div className="metric-primary">{primary.label} {primary.value} {primary.unit}</div>
-                  <div className="metric-secondary">E2E Avg {item.avgE2eTps.toFixed(1)} tok/s</div>
-                </div>
-
-                <div className="metric-col leaderboard-hide-sm">
-                  <div className="metric-primary">P50 {item.p50DecodeTps.toFixed(1)} tok/s</div>
-                  <div className="metric-secondary">P90 {item.p90DecodeTps.toFixed(1)} tok/s</div>
-                </div>
-
-                <div className="metric-col leaderboard-hide-sm">
-                  <div className="metric-primary">{Math.round(item.avgTtftMs)} ms</div>
-                  <div className="metric-secondary">Avg TTFT</div>
                 </div>
 
                 <div className="metric-col">
