@@ -72,26 +72,25 @@ jobs:
           ssh ${SSH_OPTS} -p "$DEPLOY_PORT" "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p '${DEPLOY_DIR}/examples'"
           scp -r -C ${SSH_OPTS} -P "$DEPLOY_PORT" deploy_pkg/examples/* "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}/examples/"
 
+          # 若配置了 GHCR_TOKEN（私有仓库场景），通过 stdin 安全登录 GHCR
+          if [ -n "${CR_PAT}" ]; then
+            printf '%s\n' "${CR_PAT}" | ssh ${SSH_OPTS} -p "$DEPLOY_PORT" "${DEPLOY_USER}@${DEPLOY_HOST}" \
+              "docker login ghcr.io -u '${CR_USER}' --password-stdin >/dev/null"
+          fi
+
           # 在 ${DEPLOY_DIR} (/docker/linguist) 下执行 Docker Compose 更新、探活与自动回滚
           ssh ${SSH_OPTS} -p "$DEPLOY_PORT" "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            bash -s -- "${DEPLOY_DIR}" "${DEPLOY_TAG}" "${DEPLOY_HEALTH_URL}" "${CR_USER}" "${CR_PAT}" << 'EOS'
+            bash -s -- "${DEPLOY_DIR}" "${DEPLOY_TAG}" "${DEPLOY_HEALTH_URL}" << 'EOS'
             set -euo pipefail
             DEPLOY_DIR="$1"
             TARGET_TAG="$2"
             DEPLOY_HEALTH_URL="$3"
-            CR_USER="$4"
-            CR_PAT="$5"
 
             cd "${DEPLOY_DIR}"
 
             if [ ! -f docker-compose.yml ] && [ ! -f compose.yaml ]; then
               echo "Missing docker-compose.yml or compose.yaml in ${DEPLOY_DIR}" >&2
               exit 1
-            fi
-
-            # 若配置了 GHCR PAT（私有仓库场景），提前登录
-            if [ -n "${CR_PAT}" ]; then
-              echo "${CR_PAT}" | docker login ghcr.io -u "${CR_USER}" --password-stdin >/dev/null 2>&1 || true
             fi
 
             # 1. 记录部署前版本并安全更新 .env 中的 LINGUIST_TAG（保留其余环境变量）
