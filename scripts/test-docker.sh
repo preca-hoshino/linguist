@@ -341,6 +341,19 @@ curl -fsS "http://127.0.0.1:${HOST_PORT}/icons/deepseek-color.svg" | grep -q "<s
 curl -fsS "http://127.0.0.1:${HOST_PORT}/icons/doubao-color.svg" | grep -q "Doubao"
 curl -fsS "http://127.0.0.1:${HOST_PORT}/icons/lobehub.svg" | grep -q "<svg"
 
+ICON_COUNT=0
+while IFS= read -r -d '' icon_file; do
+  icon_slug="${icon_file##*/}"
+  icon_slug="${icon_slug%.svg}"
+  if ! curl -fsS "http://127.0.0.1:${HOST_PORT}/icons/${icon_slug}.svg" | cmp -s - "${icon_file}"; then
+    echo "Embedded icon does not match the bundled SVG: ${icon_file}" >&2
+    exit 1
+  fi
+  ICON_COUNT=$((ICON_COUNT + 1))
+done < <(find icons/lobe -type f -name '*.svg' -print0)
+test "${ICON_COUNT}" -eq 997
+echo "==> Verified all ${ICON_COUNT} bundled SVG icons byte for byte"
+
 UNAUTH_CODE="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${HOST_PORT}/model/coding/v1/models")"
 test "$UNAUTH_CODE" = "401"
 MODELS_JSON="$(curl -fsS -H "Authorization: Bearer lin-proj-coding-secret" "http://127.0.0.1:${HOST_PORT}/model/coding/v1/models")"

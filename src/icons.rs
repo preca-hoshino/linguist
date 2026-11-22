@@ -64,6 +64,21 @@ mod tests {
     }
 
     #[test]
+    fn every_bundled_icon_is_a_valid_embedded_svg() {
+        let icon_names: Vec<String> = LobeIcons::iter().collect();
+        assert_eq!(icon_names.len(), 997);
+
+        for icon_name in icon_names {
+            assert!(icon_name.ends_with(".svg"), "unexpected asset: {icon_name}");
+            assert!(
+                LobeIcons::get(&icon_name)
+                    .is_some_and(|icon| icon.data.starts_with(b"<svg")),
+                "icon is missing or invalid in the embedded asset pack: {icon_name}"
+            );
+        }
+    }
+
+    #[test]
     fn missing_color_icon_falls_back_to_its_bundled_monochrome_icon() {
         assert_eq!(
             resolve_icon_svg("xiaomimimo-color.svg"),
