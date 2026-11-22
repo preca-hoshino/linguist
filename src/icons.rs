@@ -65,14 +65,13 @@ mod tests {
 
     #[test]
     fn every_bundled_icon_is_a_valid_embedded_svg() {
-        let icon_names: Vec<String> = LobeIcons::iter().collect();
+        let icon_names: Vec<_> = LobeIcons::iter().collect();
         assert_eq!(icon_names.len(), 997);
 
         for icon_name in icon_names {
             assert!(icon_name.ends_with(".svg"), "unexpected asset: {icon_name}");
             assert!(
-                LobeIcons::get(&icon_name)
-                    .is_some_and(|icon| icon.data.starts_with(b"<svg")),
+                LobeIcons::get(&icon_name).is_some_and(|icon| icon.data.starts_with(b"<svg")),
                 "icon is missing or invalid in the embedded asset pack: {icon_name}"
             );
         }
