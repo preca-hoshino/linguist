@@ -1,5 +1,6 @@
-# Linguist Docker Compose 示范配置（仅运行 Linguist，PostgreSQL 由外部提供）
-#
+# ==============================================================================
+# Linguist — 可编程路由 OpenAI Chat API 网关与 Token 统计看板
+# ==============================================================================
 # 快速准备示范配置目录：
 #   mkdir -p docker/config
 #   cp config.docker.example.toml docker/config/config.toml
@@ -7,17 +8,22 @@
 #   cp projects.json docker/config/projects.json
 #   cp routes.json docker/config/routes.json
 #
-# 与本地二进制一致的 CLI 用法：
-#   docker compose run --rm linguist check-config   # 等价于本地: linguist check-config
-#   docker compose up -d                            # 等价于本地: linguist serve
+# 用法（与本地二进制 CLI 完全一致）：
+#   docker compose run --rm linguist check-config   # 校验配置与脚本编译
+#   docker compose up -d                            # 后台启动网关与看板
+#   docker compose logs -f linguist                 # 查看实时日志
+# ==============================================================================
 
 services:
   linguist:
-    # 生产环境建议固定版本号或 @sha256:... digest，例如:
-    # image: ghcr.io/preca-hoshino/linguist:v0.1.0-b12-abcdef
-    image: ghcr.io/preca-hoshino/linguist:latest
+    # 生产环境建议通过 .env 中的 LINGUIST_TAG 固定版本号，例如 v0.1.0-b12-abcdef
+    image: ghcr.io/preca-hoshino/linguist:${LINGUIST_TAG:-latest}
     container_name: linguist
     restart: unless-stopped
+    # ─── 端口映射（默认仅监听本机回环，供 Nginx / OpenResty / Caddy 反向代理）───
+    ports:
+      - "127.0.0.1:9527:9527"
+    # ─── 容器运行安全加固（scratch 无壳只读极简容器）───
     user: "65532:65532"
     read_only: true
     security_opt:
@@ -26,20 +32,30 @@ services:
       - ALL
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=16m
-    ports:
-      - "127.0.0.1:9527:9527"
+    # ─── 配置挂载与宿主机时区 / CA 证书同步 ───
     volumes:
       # 整目录只读挂载（支持 JSON 热重载、@file: 脚本及可选 certs/ 私有 CA）
       - ./docker/config:/config:ro
-    # 如需连接宿主机上的 PostgreSQL（Linux 常见场景），取消下面注释：
-    # extra_hosts:
-    #   - "host.docker.internal:host-gateway"
-    # 如上游模型 API 或外部 PostgreSQL 使用私有 CA，将证书放到 ./docker/config/certs/ca.pem
-    # 并取消下面注释（会与内置 WebPKI 公共根证书叠加，不破坏公网 HTTPS）：
+      # 时区与时间同步
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+      # 宿主机 CA 证书信任
+      - /etc/ssl/certs:/etc/ssl/certs:ro
+      - /usr/local/share/ca-certificates:/usr/local/share/ca-certificates:ro
+    # ─── 宿主机 PostgreSQL 连通性（若使用外部共享网络可替换为 networks）───
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    # ─── 如上游模型 API 或 PostgreSQL 使用私有 CA，将证书放到 ./docker/config/certs/ca.pem 并启用 ───
     # environment:
     #   - SSL_CERT_FILE=/config/certs/ca.pem
+    # ─── 资源限制与日志轮转 ───
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 256M
     logging:
       driver: json-file
       options:
-        max-size: "20m"
-        max-file: "5"
+        max-size: "10m"
+        max-file: "3"

@@ -17,50 +17,49 @@ jobs:
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event != 'pull_request' && github.event.workflow_run.head_branch == 'main' && vars.ENABLE_AUTO_DEPLOY == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout templates
+      - name: Checkout repository
         uses: actions/checkout@v7
         with:
           fetch-depth: 1
 
-      - name: Download release binary & verify SHA256
+      - name: Prepare deployment payload
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TARGET_OS: ${{ vars.DEPLOY_TARGET_OS || 'linux-x64' }}
           INPUT_TAG: ${{ inputs.release_tag }}
         run: |
-          mkdir -p deploy_pkg
+          mkdir -p deploy_pkg/examples
           if [ -n "${INPUT_TAG}" ]; then
             TAG="${INPUT_TAG}"
           else
             TAG=$(gh release list --repo "${{ github.repository }}" --limit 1 --json tagName --jq '.[0].tagName')
           fi
           if [ -z "${TAG}" ]; then
-            echo "No release found to deploy" >&2
-            exit 1
+            echo "No release found to deploy; defaulting to latest"
+            TAG="latest"
           fi
+          echo "DEPLOY_TAG=${TAG}" >> "$GITHUB_ENV"
           echo "Deploying release tag: ${TAG}"
-          gh release download "${TAG}" \
-            --repo "${{ github.repository }}" \
-            --pattern "linguist-${TARGET_OS}*" \
-            --pattern "${TARGET_OS}.sha256" \
-            --dir deploy_pkg
-          (cd deploy_pkg && sha256sum -c "${TARGET_OS}.sha256" --ignore-missing)
-          cp linguist.d.ts deploy_pkg/linguist.d.ts
-          cp config.example.toml deploy_pkg/config.example.toml
-          cp chatLanguageModels.example.json deploy_pkg/chatLanguageModels.example.json
-          cp projects.json deploy_pkg/projects.example.json
-          cp routes.json deploy_pkg/routes.example.json
 
-      - name: Atomic SSH Deploy with Health Probe & Automatic Rollback
+          # 同步最新参考模板与示范 compose（不覆盖服务器实际的 docker-compose.yml 与 config/）
+          cp compose.yaml deploy_pkg/examples/compose.example.yaml
+          cp linguist.d.ts deploy_pkg/examples/linguist.d.ts
+          cp config.docker.example.toml deploy_pkg/examples/config.docker.example.toml
+          cp config.example.toml deploy_pkg/examples/config.example.toml
+          cp chatLanguageModels.example.json deploy_pkg/examples/chatLanguageModels.example.json
+          cp projects.json deploy_pkg/examples/projects.example.json
+          cp routes.json deploy_pkg/examples/routes.example.json
+
+      - name: Atomic Docker Compose Deploy with Health Probe & Rollback
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER || 'root' }}
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/opt/linguist' }}
-          DEPLOY_SERVICE_NAME: ${{ vars.DEPLOY_SERVICE_NAME || 'linguist.service' }}
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR || '/docker/linguist' }}
           DEPLOY_HEALTH_URL: ${{ vars.DEPLOY_HEALTH_URL || 'http://127.0.0.1:9527/healthz' }}
-          TARGET_OS: ${{ vars.DEPLOY_TARGET_OS || 'linux-x64' }}
+          DEPLOY_TAG: ${{ env.DEPLOY_TAG }}
+          CR_PAT: ${{ secrets.GHCR_TOKEN || '' }}
+          CR_USER: ${{ github.actor }}
         run: |
           install -m 700 -d ~/.ssh
           printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/deploy_key
@@ -68,57 +67,83 @@ jobs:
           ssh-keyscan -p "$DEPLOY_PORT" -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
 
           SSH_OPTS="-i ~/.ssh/deploy_key -o ServerAliveInterval=15 -o ServerAliveCountMax=6"
-          ssh ${SSH_OPTS} -p "$DEPLOY_PORT" "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p '${DEPLOY_DIR}'"
 
-          scp -C ${SSH_OPTS} -P "$DEPLOY_PORT" \
-            "deploy_pkg/linguist-${TARGET_OS}" \
-            "deploy_pkg/linguist.d.ts" \
-            "deploy_pkg/config.example.toml" \
-            "deploy_pkg/chatLanguageModels.example.json" \
-            "deploy_pkg/projects.example.json" \
-            "deploy_pkg/routes.example.json" \
-            "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}/"
+          # 确保服务器 /docker/linguist/examples 目录存在并同步示例模板
+          ssh ${SSH_OPTS} -p "$DEPLOY_PORT" "${DEPLOY_USER}@${DEPLOY_HOST}" "mkdir -p '${DEPLOY_DIR}/examples'"
+          scp -r -C ${SSH_OPTS} -P "$DEPLOY_PORT" deploy_pkg/examples/* "${DEPLOY_USER}@${DEPLOY_HOST}:${DEPLOY_DIR}/examples/"
 
+          # 在 ${DEPLOY_DIR} (/docker/linguist) 下执行 Docker Compose 更新、探活与自动回滚
           ssh ${SSH_OPTS} -p "$DEPLOY_PORT" "${DEPLOY_USER}@${DEPLOY_HOST}" \
-            bash -s -- "${DEPLOY_DIR}" "${TARGET_OS}" "${DEPLOY_SERVICE_NAME}" "${DEPLOY_HEALTH_URL}" << 'EOS'
+            bash -s -- "${DEPLOY_DIR}" "${DEPLOY_TAG}" "${DEPLOY_HEALTH_URL}" "${CR_USER}" "${CR_PAT}" << 'EOS'
             set -euo pipefail
             DEPLOY_DIR="$1"
-            TARGET_OS="$2"
-            DEPLOY_SERVICE_NAME="$3"
-            DEPLOY_HEALTH_URL="$4"
-
-            if [ "$(id -u)" -eq 0 ]; then
-              SYSTEMCTL="systemctl"
-            else
-              SYSTEMCTL="sudo systemctl"
-            fi
+            TARGET_TAG="$2"
+            DEPLOY_HEALTH_URL="$3"
+            CR_USER="$4"
+            CR_PAT="$5"
 
             cd "${DEPLOY_DIR}"
-            mv "linguist-${TARGET_OS}" linguist.new
-            chmod +x linguist.new
 
-            ${SYSTEMCTL} stop "${DEPLOY_SERVICE_NAME}" || true
-            if [ -f linguist ]; then
-              cp -f linguist linguist.prev
+            if [ ! -f docker-compose.yml ] && [ ! -f compose.yaml ]; then
+              echo "Missing docker-compose.yml or compose.yaml in ${DEPLOY_DIR}" >&2
+              exit 1
             fi
-            mv -f linguist.new linguist
-            ln -sf "${DEPLOY_DIR}/linguist" /usr/local/bin/linguist
-            ${SYSTEMCTL} start "${DEPLOY_SERVICE_NAME}"
 
-            for i in $(seq 1 10); do
+            # 若配置了 GHCR PAT（私有仓库场景），提前登录
+            if [ -n "${CR_PAT}" ]; then
+              echo "${CR_PAT}" | docker login ghcr.io -u "${CR_USER}" --password-stdin >/dev/null 2>&1 || true
+            fi
+
+            # 1. 记录部署前版本并安全更新 .env 中的 LINGUIST_TAG（保留其余环境变量）
+            PREV_TAG="latest"
+            if [ -f .env ]; then
+              PREV_TAG=$(grep -E '^LINGUIST_TAG=' .env | tail -n 1 | cut -d= -f2- || echo "latest")
+              [ -z "${PREV_TAG}" ] && PREV_TAG="latest"
+            fi
+            echo "Current active tag: ${PREV_TAG}, target tag: ${TARGET_TAG}"
+
+            set_tag() {
+              local tag="$1"
+              touch .env
+              if grep -qE '^LINGUIST_TAG=' .env; then
+                sed -i "s#^LINGUIST_TAG=.*#LINGUIST_TAG=${tag}#" .env
+              else
+                echo "LINGUIST_TAG=${tag}" >> .env
+              fi
+            }
+
+            set_tag "${TARGET_TAG}"
+
+            # 2. 拉取目标镜像并平滑重建容器
+            echo "Pulling image for tag ${TARGET_TAG}..."
+            docker compose pull linguist
+            echo "Recreating container..."
+            docker compose up -d --remove-orphans linguist
+
+            # 3. 执行健康检查探针
+            echo "Probing health endpoint: ${DEPLOY_HEALTH_URL}..."
+            PROBE_SUCCESS=false
+            for i in $(seq 1 15); do
               if curl -fsS "${DEPLOY_HEALTH_URL}" >/dev/null 2>&1; then
-                echo "Health check succeeded on attempt ${i}"
-                exit 0
+                echo "Health probe succeeded on attempt ${i}"
+                PROBE_SUCCESS=true
+                break
               fi
               sleep 2
             done
 
-            echo "Health probe failed; rolling back to linguist.prev" >&2
-            ${SYSTEMCTL} stop "${DEPLOY_SERVICE_NAME}" || true
-            if [ -f linguist.prev ]; then
-              mv -f linguist.prev linguist
-              ${SYSTEMCTL} start "${DEPLOY_SERVICE_NAME}" || true
+            if [ "$PROBE_SUCCESS" = "true" ]; then
+              echo "Deployment succeeded! Pruning dangling images..."
+              docker image prune -f >/dev/null 2>&1 || true
+              exit 0
             fi
-            journalctl -u "${DEPLOY_SERVICE_NAME}" -n 50 --no-pager || true
+
+            # 4. 探针失败，自动回滚至上一版本
+            echo "Health probe failed! Rolling back to ${PREV_TAG}..." >&2
+            set_tag "${PREV_TAG}"
+            docker compose pull linguist || true
+            docker compose up -d linguist || true
+            echo "=== Container logs (last 60 lines) ===" >&2
+            docker compose logs --tail=60 linguist || true
             exit 1
           EOS

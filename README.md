@@ -27,7 +27,7 @@ ghcr.io/preca-hoshino/linguist
 
 - The container image contains only `/linguist` and the empty `/config` mount point (`WORKDIR /config`, running as non-root `65532:65532`).
 - [compose.yaml](compose.yaml) runs only the `linguist` service and does **not** create a PostgreSQL container or data volumes. You must provide an external PostgreSQL instance.
-- Production deployments should pin an explicit version tag (matching the GitHub Release, e.g. `v0.1.0-b12-abcdef`) or `@sha256:...` digest instead of `:latest`.
+- Production deployments should pin an explicit version tag (matching the GitHub Release, e.g. `v0.1.0-b12-abcdef`) or `@sha256:...` digest via `LINGUIST_TAG` in `.env` instead of `:latest`.
 
 ### 1. Prepare Host Config Directory
 
@@ -48,7 +48,7 @@ If your JSON configs reference external `@file:` scripts (e.g. `"@file:scripts/r
 ### 2. External PostgreSQL Requirements & TLS
 
 - **Network reachability**: `127.0.0.1` inside the container refers to the container itself, not the host.
-  - To connect to PostgreSQL running on the host: uncomment `extra_hosts: ["host.docker.internal:host-gateway"]` in [compose.yaml](compose.yaml), configure PostgreSQL `listen_addresses` and `pg_hba.conf` to accept container connections, and use `host.docker.internal` in `[database].url`.
+  - To connect to PostgreSQL running on the host: [compose.yaml](compose.yaml) enables `extra_hosts: ["host.docker.internal:host-gateway"]`, configure PostgreSQL `listen_addresses` and `pg_hba.conf` to accept container connections, and use `host.docker.internal` in `[database].url`.
   - To connect to PostgreSQL in another Docker network, attach the service to that shared network or use its reachable IP/DNS name.
   - Percent-encode special characters in database credentials (e.g. `@` -> `%40`, `:` -> `%3A`).
 - **Database & permissions**:
@@ -75,7 +75,7 @@ docker compose up -d
 docker compose logs -f linguist
 curl -fsS http://127.0.0.1:9527/healthz
 
-# Update / rollback by changing the pinned image tag or digest in compose.yaml
+# Update / rollback by changing LINGUIST_TAG in .env (or pinned image tag/digest)
 docker compose pull
 docker compose up -d
 ```
