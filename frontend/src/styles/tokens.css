@@ -310,7 +310,7 @@ body {
 
 .leaderboard-row {
   display: grid;
-  grid-template-columns: 34px minmax(220px, 1.4fr) minmax(140px, 1fr) minmax(160px, 1.3fr) 92px 86px 84px 72px;
+  grid-template-columns: 34px minmax(220px, 1.4fr) minmax(140px, 1fr) minmax(160px, 1.3fr) 120px 105px 84px 72px;
   align-items: center;
   gap: 12px;
   padding: 10px 12px;
@@ -536,7 +536,7 @@ body {
 
 @media (max-width: 960px) {
   .leaderboard-row {
-    grid-template-columns: 30px 1.3fr 1fr 80px 70px;
+    grid-template-columns: 30px 1.3fr 1fr 112px 64px;
   }
   .leaderboard-hide-sm {
     display: none;

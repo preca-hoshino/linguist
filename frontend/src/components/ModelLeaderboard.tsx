@@ -23,6 +23,19 @@ function metricScore(item: LeaderboardItem, sort: LeaderboardSort): number {
   }
 }
 
+function primaryMetric(item: LeaderboardItem, sort: LeaderboardSort): { label: string; value: string; unit: string } {
+  switch (sort) {
+    case "avg_decode_tps":
+      return { label: "Avg", value: item.avgDecodeTps.toFixed(1), unit: "tok/s" };
+    case "p50_decode_tps":
+      return { label: "P50", value: item.p50DecodeTps.toFixed(1), unit: "tok/s" };
+    case "p90_decode_tps":
+      return { label: "P90", value: item.p90DecodeTps.toFixed(1), unit: "tok/s" };
+    case "avg_ttft_ms":
+      return { label: "Avg TTFT", value: String(Math.round(item.avgTtftMs)), unit: "ms" };
+  }
+}
+
 export function ModelLeaderboard({
   items,
   days,
@@ -67,9 +80,9 @@ export function ModelLeaderboard({
           <div className="segmented-group" role="tablist" aria-label="Leaderboard sort">
             {(
               [
-                ["avg_decode_tps", "平均 tok/s"],
-                ["p50_decode_tps", "P50"],
-                ["p90_decode_tps", "P90"],
+                ["avg_decode_tps", "Avg tok/s"],
+                ["p50_decode_tps", "P50 tok/s"],
+                ["p90_decode_tps", "P90 tok/s"],
                 ["avg_ttft_ms", "最快 TTFT"],
               ] as const
             ).map(([key, label]) => (
@@ -94,6 +107,7 @@ export function ModelLeaderboard({
         <div className="leaderboard-list">
           {items.map((item, idx) => {
             const score = metricScore(item, sort);
+            const primary = primaryMetric(item, sort);
             const widthPct = maxScore > 0 ? Math.max(6, Math.min(100, (score / maxScore) * 100)) : 0;
             const barColor = modelColor(`${item.providerId}/${item.modelId}`);
 
@@ -126,13 +140,13 @@ export function ModelLeaderboard({
                 </div>
 
                 <div className="metric-col">
-                  <div className="metric-primary">{item.avgDecodeTps.toFixed(1)} tok/s</div>
-                  <div className="metric-secondary">E2E {item.avgE2eTps.toFixed(1)}</div>
+                  <div className="metric-primary">{primary.label} {primary.value} {primary.unit}</div>
+                  <div className="metric-secondary">E2E Avg {item.avgE2eTps.toFixed(1)} tok/s</div>
                 </div>
 
                 <div className="metric-col leaderboard-hide-sm">
-                  <div className="metric-primary">{item.p50DecodeTps.toFixed(1)}</div>
-                  <div className="metric-secondary">P90 {item.p90DecodeTps.toFixed(1)}</div>
+                  <div className="metric-primary">P50 {item.p50DecodeTps.toFixed(1)} tok/s</div>
+                  <div className="metric-secondary">P90 {item.p90DecodeTps.toFixed(1)} tok/s</div>
                 </div>
 
                 <div className="metric-col leaderboard-hide-sm">
