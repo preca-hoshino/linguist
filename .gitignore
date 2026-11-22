@@ -1,7 +1,10 @@
 /target
 frontend/node_modules
 frontend/dist
-icons/lobe
+/icons/lobe/*
+!/icons/lobe/
+!/icons/lobe/*.svg
+!/icons/lobe/LICENSE
 config.toml
 config.docker.toml
 docker/config/

@@ -15,7 +15,7 @@ cargo run -- seed-demo --days 180
 cargo run -- serve
 ```
 
-Built-in SVG icons for major providers/models are served read-only from memory (`/icons/{slug}.svg`), with automatic monogram fallback in the web dashboard; no local icon directory or sync step is needed.
+SVG icons from the MIT-licensed LobeHub icon pack are included in the executable and served read-only at `/icons/{slug}.svg`. The embedded pack works in local and Docker deployments without runtime downloads or a mounted icon directory; unknown icons use the dashboard monogram fallback. The upstream license is included at [icons/lobe/LICENSE](icons/lobe/LICENSE).
 
 ## Docker Deployment (External PostgreSQL)
 

@@ -338,6 +338,8 @@ echo "==> Idle memory: ${IDLE_MEM}"
 
 curl -fsS "http://127.0.0.1:${HOST_PORT}/" | grep -qi "<html"
 curl -fsS "http://127.0.0.1:${HOST_PORT}/icons/deepseek-color.svg" | grep -q "<svg"
+curl -fsS "http://127.0.0.1:${HOST_PORT}/icons/doubao-color.svg" | grep -q "Doubao"
+curl -fsS "http://127.0.0.1:${HOST_PORT}/icons/lobehub.svg" | grep -q "<svg"
 
 UNAUTH_CODE="$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${HOST_PORT}/model/coding/v1/models")"
 test "$UNAUTH_CODE" = "401"

@@ -25,13 +25,19 @@ use crate::state::AppState;
     clippy::pedantic,
     clippy::missing_docs_in_private_items
 )]
-mod embedded_assets {
+pub(crate) mod embedded_assets {
     use rust_embed::RustEmbed;
 
     /// Embedded `frontend/dist` bundle.
     #[derive(RustEmbed)]
     #[folder = "frontend/dist"]
     pub(super) struct FrontendDist;
+
+    /// Official LobeHub SVG icon assets bundled with the executable.
+    #[derive(RustEmbed)]
+    #[folder = "icons/lobe"]
+    #[include = "*.svg"]
+    pub(crate) struct LobeIcons;
 }
 
 /// Builds the full Linguist HTTP router combining proxy endpoints, read-only stats API,

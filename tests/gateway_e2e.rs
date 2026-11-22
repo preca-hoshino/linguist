@@ -525,6 +525,21 @@ async fn gateway_e2e_project_scoped_auth_fallback_snapshot_and_rewrite() {
     let icon_body = builtin_icon.text().await.unwrap();
     assert!(icon_body.contains("<svg"));
 
+    let doubao_icon = client
+        .get(format!("{gw_url}/icons/doubao-color.svg"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(doubao_icon.status(), StatusCode::OK);
+    assert!(doubao_icon.text().await.unwrap().contains("Doubao"));
+
+    let monochrome_icon = client
+        .get(format!("{gw_url}/icons/lobehub.svg"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(monochrome_icon.status(), StatusCode::OK);
+
     let missing_icon = client
         .get(format!("{gw_url}/icons/nonexistent-custom.svg"))
         .send()

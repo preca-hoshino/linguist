@@ -26,6 +26,7 @@ RUN ARCH="${TARGETARCH:-$(dpkg --print-architecture)}" \
 COPY Cargo.toml Cargo.lock ./
 COPY migrations ./migrations
 COPY src ./src
+COPY icons/lobe ./icons/lobe
 COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 RUN TARGET="$(cat /tmp/rust-target)" \
