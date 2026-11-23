@@ -1,11 +1,16 @@
+import { useState } from "react";
 import { formatInteger } from "../api/client";
 import type { RecentRequestItem } from "../types/telemetry";
+import { billingStatus, money } from "../billing/api";
+import type { BillingDashboard } from "../billing/api";
+import { RequestDetails } from "../billing/RequestDetails";
 import { LobeIcon } from "./LobeIcon";
 
 interface RecentRequestsTableProps {
   items: RecentRequestItem[];
   selectedModel: string;
   onModelChange: (modelId: string) => void;
+  billing: BillingDashboard | null;
 }
 
 function formatShortTime(iso: string): string {
@@ -29,7 +34,10 @@ export function RecentRequestsTable({
   items,
   selectedModel,
   onModelChange,
+  billing,
 }: RecentRequestsTableProps) {
+  const [selectedRequest, setSelectedRequest] = useState<string | null>(null);
+  const costs = new Map(billing?.items.map((item) => [item.requestUid, item]) ?? []);
   const uniqueModels = Array.from(
     new Map(items.map((item) => [item.modelId, item.modelName])).entries(),
   );
@@ -70,7 +78,7 @@ export function RecentRequestsTable({
       {items.length === 0 ? (
         <div className="empty-state">暂无请求日志</div>
       ) : (
-        <div className="table-scroll">
+        <><div className="table-scroll">
           <table className="requests-table">
             <thead>
               <tr>
@@ -79,6 +87,7 @@ export function RecentRequestsTable({
                 <th>模型调用名</th>
                 <th>提供商</th>
                 <th>Token 统计 (输入 / 输出 / 缓存)</th>
+                <th>费用</th>
                 <th style={{ textAlign: "right" }}>耗时 (TTFT)</th>
                 <th style={{ textAlign: "right" }}>速率 (tok/s)</th>
               </tr>
@@ -86,6 +95,7 @@ export function RecentRequestsTable({
             <tbody>
               {items.map((row) => {
                 const showCallSub = row.callModelId !== row.modelId;
+                const cost = costs.get(row.requestUid);
                 return (
                   <tr key={row.requestUid}>
                     <td className="mono" style={{ whiteSpace: "nowrap", fontSize: 12 }}>
@@ -151,6 +161,13 @@ export function RecentRequestsTable({
                       </div>
                     </td>
 
+                    <td className="mono">
+                      {cost ? <button className="catalog-link billing-link-button" type="button" onClick={() => { setSelectedRequest(row.requestUid); }} aria-label={`查看 ${row.modelName} 的计价明细`}>
+                        {cost.amount === null ? billingStatus(cost.billingStatus) : `${cost.billingStatus === "estimated" ? "估算 " : ""}${money(cost.amount, cost.currency)}`}
+                      </button> : "—"}
+                      {cost?.convertedAmount && billing?.displayCurrency && cost.currency !== billing.displayCurrency ? <div>≈ {money(cost.convertedAmount, billing.displayCurrency)}</div> : null}
+                    </td>
+
                     <td className="metric-col">
                       <div className={`metric-primary ${ttftClassName(row.ttftMs)}`}>
                         {Math.round(row.ttftMs)} ms
@@ -172,7 +189,7 @@ export function RecentRequestsTable({
               })}
             </tbody>
           </table>
-        </div>
+        </div>{selectedRequest && billing && costs.has(selectedRequest) ? <RequestDetails key={selectedRequest} requestUid={selectedRequest} onClose={() => { setSelectedRequest(null); }} /> : null}</>
       )}
     </section>
   );

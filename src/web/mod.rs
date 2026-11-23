@@ -1,6 +1,7 @@
 //! Embedded static React frontend (`rust-embed`), `LobeHub` SVG serving, SPA fallback,
 //! and combined Axum HTTP router construction.
 
+mod billing_api;
 mod catalog_api;
 pub mod stats_api;
 
@@ -46,10 +47,12 @@ pub(crate) mod embedded_assets {
 pub fn build_router(state: AppState) -> Router {
     let public = proxy::router()
         .merge(stats_api::router())
+        .merge(billing_api::stats_router())
         .route("/icons/{icon_name}", get(serve_icon_handler))
         .layer(CorsLayer::permissive());
     public
         .merge(catalog_api::router(&state))
+        .merge(billing_api::router(&state))
         .fallback(spa_fallback_handler)
         .layer(TraceLayer::new_for_http())
         .with_state(state)

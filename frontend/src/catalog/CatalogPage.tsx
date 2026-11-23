@@ -7,6 +7,7 @@ import { CatalogTable } from "./CatalogTable";
 import { catalogPath, catalogTitles } from "./navigation";
 import type { CatalogResource, ListItems, NamedItem } from "./types";
 import { useCatalogRequest } from "./useCatalogRequest";
+import { PriceDialog } from "../billing/PriceDialog";
 
 const filtersByResource: Record<CatalogResource, readonly [key: string, label: string][]> = {
   providers: [],
@@ -60,6 +61,7 @@ export function CatalogPage<K extends CatalogResource>({ resource, token, onToke
   const navigate = useNavigate();
   const location = useLocation();
   const [attempt, setAttempt] = useState(0);
+  const [priceTarget, setPriceTarget] = useState<{ providerId: string; modelId: string; name: string } | null>(null);
   const path = catalogPath(resource);
   const filterFields = filtersByResource[resource];
   const filterKeys = ["q", ...filterFields.map(([key]) => key)];
@@ -156,7 +158,8 @@ export function CatalogPage<K extends CatalogResource>({ resource, token, onToke
                 <>
                   {result.data.items.length ? (
                     <CatalogTable resource={resource} items={result.data.items}
-                      editPath={editPath} itemKey={(item) => JSON.stringify([ownerId(item), item.id])} activeRow={isFirstMatch} />
+                      editPath={editPath} itemKey={(item) => JSON.stringify([ownerId(item), item.id])} activeRow={isFirstMatch}
+                      onPrice={resource === "provider-models" ? (item) => { if ("providerId" in item) setPriceTarget({ providerId: item.providerId, modelId: item.id, name: item.name }); } : undefined} />
                   ) : (
                     <p className="empty-state" role="status">
                       {result.data.revision === 0 ? "尚未导入配置" : filterQuery || result.data.page > 1 ? "未找到匹配项" : `暂无${title}`}
@@ -181,6 +184,7 @@ export function CatalogPage<K extends CatalogResource>({ resource, token, onToke
           else void navigate(withSearch(path, listParameters), { replace: true });
         }} />
       ) : null}
+      {priceTarget ? <PriceDialog {...priceTarget} token={token} onClose={() => { setPriceTarget(null); }} onSaved={refresh} /> : null}
     </>
   );
 }

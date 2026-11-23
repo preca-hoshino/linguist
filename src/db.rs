@@ -42,13 +42,17 @@ impl LogWriterHandle {
         let (tx, mut rx) = mpsc::channel::<RequestLogRecord>(1024);
         tokio::spawn(async move {
             while let Some(record) = rx.recv().await {
-                if let Err(err) = persist_request_log(&pool, &config, tz_offset_secs, &record).await
-                {
-                    error!(
-                        request_uid = %record.request_uid,
-                        error = %err,
-                        "failed to persist request telemetry to PostgreSQL"
-                    );
+                for attempt in 1..=3 {
+                    match persist_request_log(&pool, &config, tz_offset_secs, &record).await {
+                        Ok(()) => break,
+                        Err(err) => {
+                            error!(request_uid = %record.request_uid, attempt, error = %err,
+                                "failed to persist request telemetry to PostgreSQL");
+                            if attempt < 3 {
+                                tokio::time::sleep(std::time::Duration::from_secs(attempt)).await;
+                            }
+                        }
+                    }
                 }
             }
         });
@@ -333,7 +337,11 @@ async fn persist_request_log(
     rec: &RequestLogRecord,
 ) -> Result<()> {
     let mut tx = pool.begin().await?;
-    let log_id = insert_request_log_row(&mut tx, rec).await?;
+    let billing = crate::billing::calculate_for_record(rec);
+    let Some(log_id) = insert_request_log_row(&mut tx, rec, &billing).await? else {
+        tx.commit().await?;
+        return Ok(());
+    };
 
     let should_log_payload =
         config.log_full_payload || (config.log_error_payload && rec.status_code >= 400);
@@ -357,7 +365,8 @@ async fn persist_request_log(
 async fn insert_request_log_row(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     rec: &RequestLogRecord,
-) -> Result<i64> {
+    billing: &crate::billing::BillingResult,
+) -> Result<Option<i64>> {
     let row = sqlx::query(
         r"
         INSERT INTO request_logs (
@@ -367,7 +376,8 @@ async fn insert_request_log_row(
             is_stream, status_code, input_tokens, output_tokens,
             cache_read_tokens, cache_creation_tokens, reasoning_tokens, total_tokens,
             ttft_ms, total_duration_ms, generation_duration_ms, decode_tps, e2e_tps,
-            finish_reason, reasoning_effort, token_source, script_state
+            finish_reason, reasoning_effort, token_source, script_state,
+            billing_amount, billing_currency, billing_status, billing_details
         )
         VALUES (
             $1, $2, $3, $4,
@@ -376,8 +386,9 @@ async fn insert_request_log_row(
             $14, $15, $16, $17,
             $18, $19, $20, $21,
             $22, $23, $24, $25, $26,
-            $27, $28, $29, $30
+            $27, $28, $29, $30, $31, $32, $33, $34
         )
+        ON CONFLICT (request_uid) DO NOTHING
         RETURNING id
         ",
     )
@@ -411,10 +422,16 @@ async fn insert_request_log_row(
     .bind(&rec.reasoning_effort)
     .bind(&rec.token_source)
     .bind(&rec.script_state)
-    .fetch_one(&mut **tx)
+    .bind(billing.amount)
+    .bind(&billing.currency)
+    .bind(billing.status)
+    .bind(&billing.details)
+    .fetch_optional(&mut **tx)
     .await?;
 
-    Ok(row.try_get("id")?)
+    row.map(|row| row.try_get("id"))
+        .transpose()
+        .map_err(Into::into)
 }
 
 /// Inserts error/debug payload details into `request_payloads`.
@@ -680,6 +697,11 @@ fn build_demo_record(
         parent_request_uid: Some(uid),
         attempt_index,
         created_at: ts,
+        billing_usage: None,
+        billing: crate::billing::AttemptBilling {
+            price: crate::billing::PriceSnapshot::Missing,
+            target_matches: true,
+        },
         project_id: project_id.to_string(),
         project_name: project_name.to_string(),
         call_model_id: call_model_id.to_string(),
@@ -748,7 +770,8 @@ pub async fn seed_demo(
             let pick = usize::try_from(next_demo_rand(&mut rng_state)).unwrap_or(0) % entries.len();
             let rec = build_demo_record(entries[pick], day_base, idx, &mut rng_state);
             let stat_date = local_stat_date(rec.created_at, tz_offset_secs);
-            insert_request_log_row(&mut tx, &rec).await?;
+            let billing = crate::billing::calculate_for_record(&rec);
+            insert_request_log_row(&mut tx, &rec, &billing).await?;
             upsert_daily_stats(&mut tx, stat_date, &rec).await?;
             inserted += 1;
         }
@@ -1237,5 +1260,85 @@ mod tests {
             .collect();
         assert_eq!(decoded.len(), 1);
         assert_eq!(decoded[0].as_ref(), sample_bytes.as_slice());
+    }
+
+    #[sqlx::test(migrations = "./migrations")]
+    #[ignore = "requires a disposable PostgreSQL server via DATABASE_URL"]
+    async fn billing_persists_captured_price_once_after_update(pool: PgPool) -> Result<()> {
+        use crate::billing::{
+            AttemptBilling, BillingUsage, CacheWriteMode, PriceSchedule, PriceSnapshot, PriceTier,
+        };
+        let now = Utc::now();
+        let schedule = PriceSchedule {
+            provider_id: "provider".into(),
+            model_id: "model".into(),
+            currency: "USD".into(),
+            source: String::new(),
+            max_input_tokens: None,
+            tiers: vec![PriceTier {
+                min_input_tokens: 0,
+                input_price: "2".into(),
+                output_price: "8".into(),
+                cache_read_price: Some("0.5".into()),
+                cache_write_mode: CacheWriteMode::Separate,
+                cache_write_price: Some("2.5".into()),
+            }],
+        };
+        sqlx::query("UPDATE catalog_state SET billing_prices=$1 WHERE singleton")
+            .bind(serde_json::to_value(vec![schedule.clone()])?)
+            .execute(&pool)
+            .await?;
+        let mut rng = 5;
+        let mut record = build_demo_record(
+            ("provider", "Provider", "model", "Model", 10.0, 20.0),
+            now,
+            0,
+            &mut rng,
+        );
+        let captured = crate::billing::load_price(&pool, "provider", "model").await?;
+        assert!(captured.is_some());
+        record.billing = AttemptBilling {
+            price: PriceSnapshot::Available(
+                captured.ok_or_else(|| anyhow::anyhow!("price missing"))?,
+            ),
+            target_matches: true,
+        };
+        record.billing_usage = Some(BillingUsage {
+            prompt: Some(40_000),
+            completion: Some(2_000),
+            cache_read: Some(30_000),
+            cache_write: Some(2_000),
+            ..BillingUsage::default()
+        });
+        let mut updated = schedule;
+        updated.tiers[0].input_price = "100".into();
+        sqlx::query("UPDATE catalog_state SET billing_prices=$1 WHERE singleton")
+            .bind(serde_json::to_value(vec![updated])?)
+            .execute(&pool)
+            .await?;
+        let config = DatabaseConfig::default();
+        persist_request_log(&pool, &config, 0, &record).await?;
+        persist_request_log(&pool, &config, 0, &record).await?;
+        let (amount, status): (String, String) = sqlx::query_as(
+            "SELECT billing_amount::text, billing_status FROM request_logs WHERE request_uid=$1",
+        )
+        .bind(record.request_uid)
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(amount.parse::<rust_decimal::Decimal>()?, "0.052".parse()?);
+        assert_eq!(status, "priced");
+        let details: Value =
+            sqlx::query_scalar("SELECT billing_details FROM request_logs WHERE request_uid=$1")
+                .bind(record.request_uid)
+                .fetch_one(&pool)
+                .await?;
+        assert_eq!(details["tier"]["inputPrice"], "2");
+        let count: i64 = sqlx::query_scalar(
+            "SELECT request_count FROM daily_model_stats WHERE provider_id='provider'",
+        )
+        .fetch_one(&pool)
+        .await?;
+        assert_eq!(count, 1);
+        Ok(())
     }
 }

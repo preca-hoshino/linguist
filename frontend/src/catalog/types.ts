@@ -19,6 +19,7 @@ export interface ParentItem extends IconItem {
 export interface ProviderModel extends IconItem {
   providerId: string;
   providerName: string;
+  hasPrice: boolean;
   toolCalling: boolean | null;
   vision: boolean | null;
   thinking: boolean | null;

@@ -20,6 +20,7 @@ use tokio::net::TcpListener;
 
 use linguist::catalog::RuntimeCatalog;
 use linguist::config::{AppConfig, MetricsConfig, ScriptEngineConfig};
+use linguist::db::LogWriterHandle;
 use linguist::metrics_cache::MetricsCache;
 use linguist::models::{
     CallModelConfig, ModelConfig, ProjectConfig, ProviderConfig, RouteCandidatesFilter,
@@ -542,6 +543,64 @@ async fn post_chat(
         req = req.bearer_auth(key);
     }
     req.send().await.unwrap()
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires a disposable PostgreSQL server via DATABASE_URL"]
+async fn gateway_prices_each_attempt_from_its_captured_price(pool: sqlx::PgPool) {
+    let (mock_url, _) = spawn_mock_upstream().await;
+    sqlx::query("UPDATE catalog_state SET billing_prices=$1 WHERE singleton")
+        .bind(json!([{ "providerId":"fallback-prov", "modelId":"m-fallback", "currency":"USD", "source":"fixture", "tiers":[{
+            "minInputTokens":0, "inputPrice":"2", "outputPrice":"8", "cacheReadPrice":null,
+            "cacheWriteMode":"input", "cacheWritePrice":null
+        }] }])).execute(&pool).await.unwrap();
+    let cfg = AppConfig::default();
+    let writer = LogWriterHandle::spawn(pool.clone(), cfg.database.clone(), 0);
+    let state = AppState::new(
+        cfg,
+        Arc::new(ArcSwap::from_pointee(build_e2e_catalog(&mock_url))),
+        MetricsCache::new(&MetricsConfig::default()),
+        ScriptEngine::new(ScriptEngineConfig::default()),
+        Some(pool.clone()),
+        Some(writer),
+    )
+    .unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, web::build_router(state)).await;
+    });
+    let response = post_chat(
+        &reqwest::Client::new(),
+        format!("http://{addr}/model/coding/v1/chat/completions"),
+        Some("lin-proj-coding-secret"),
+        "smart-coder",
+        false,
+    )
+    .await;
+    assert_eq!(response.status(), StatusCode::OK);
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let count: i64 = sqlx::query_scalar("SELECT count(*) FROM request_logs")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+            if count >= 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let rows: Vec<(String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT provider_id, billing_amount::text, billing_status FROM request_logs ORDER BY attempt_index")
+        .fetch_all(&pool).await.unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0].2.as_deref(), Some("missing_usage"));
+    assert_eq!(rows[1].0, "fallback-prov");
+    assert_eq!(rows[1].1.as_deref(), Some("0.000028"));
+    assert_eq!(rows[1].2.as_deref(), Some("priced"));
 }
 
 #[tokio::test]

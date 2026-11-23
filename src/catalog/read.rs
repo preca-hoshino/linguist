@@ -58,7 +58,6 @@ pub(crate) async fn fetch(
         }
         Resource::Routes => fetch_routes(&mut tx, filters).await?,
     };
-    tx.commit().await?;
     if matches!(resource, Resource::ProviderModels) && filters.id.is_some() {
         for item in &mut items {
             let public_url = item
@@ -67,6 +66,28 @@ pub(crate) async fn fetch(
                 .and_then(display_url);
             item["url"] = json!(public_url);
         }
+    }
+    if matches!(resource, Resource::ProviderModels) {
+        let prices: Option<Value> =
+            sqlx::query_scalar("SELECT billing_prices FROM catalog_state WHERE singleton")
+                .fetch_one(&mut *tx)
+                .await?;
+        let schedules: Vec<crate::billing::PriceSchedule> = prices
+            .map(serde_json::from_value)
+            .transpose()
+            .map_err(|error| sqlx::Error::Decode(Box::new(error)))?
+            .unwrap_or_default();
+        for item in &mut items {
+            let provider = item.get("providerId").and_then(Value::as_str);
+            let model = item.get("id").and_then(Value::as_str);
+            item["hasPrice"] = json!(
+                schedules
+                    .iter()
+                    .any(|version| Some(version.provider_id.as_str()) == provider
+                        && Some(version.model_id.as_str()) == model)
+            );
+        }
+        tx.commit().await?;
     }
     Ok((revision, items))
 }

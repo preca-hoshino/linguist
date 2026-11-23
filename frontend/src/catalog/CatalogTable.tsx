@@ -56,6 +56,7 @@ const catalogColumns: { [K in CatalogResource]: readonly Column<ListItems[K]>[] 
         {item.maxInputTokens === null ? "—" : formatTokens(item.maxInputTokens)} / {item.maxOutputTokens === null ? "—" : formatTokens(item.maxOutputTokens)}
       </span>
     ) },
+    { title: "价格", render: (item) => item.hasPrice ? "已配置" : "未配置" },
   ],
   projects: [
     { title: "项目", render: (item) => <Entity {...item} /> },
@@ -103,9 +104,10 @@ interface CatalogTableProps<K extends CatalogResource> {
   editPath: (item: ListItems[K]) => string;
   itemKey: (item: ListItems[K]) => string;
   activeRow?: (item: ListItems[K]) => boolean;
+  onPrice?: (item: ListItems[K]) => void;
 }
 
-export function CatalogTable<K extends CatalogResource>({ resource, items, editPath, itemKey, activeRow }: CatalogTableProps<K>) {
+export function CatalogTable<K extends CatalogResource>({ resource, items, editPath, itemKey, activeRow, onPrice }: CatalogTableProps<K>) {
   const columns = catalogColumns[resource];
   return (
     <div className="table-scroll catalog-table-scroll" tabIndex={0} role="region" aria-label="配置列表">
@@ -120,7 +122,7 @@ export function CatalogTable<K extends CatalogResource>({ resource, items, editP
           {items.map((item) => (
             <tr key={itemKey(item)} className={activeRow?.(item) ? "catalog-row-active" : undefined}>
               {columns.map((column) => <td key={column.title}>{column.render(item)}</td>)}
-              <td className="catalog-action"><Link className="catalog-link" aria-label={`编辑 ${item.name || item.id}`} state="catalog-row" to={editPath(item)}>编辑</Link></td>
+              <td className="catalog-action">{onPrice ? <button type="button" className="catalog-link billing-link-button" onClick={() => { onPrice(item); }}>价格</button> : null}<Link className="catalog-link" aria-label={`编辑 ${item.name || item.id}`} state="catalog-row" to={editPath(item)}>编辑</Link></td>
             </tr>
           ))}
         </tbody>

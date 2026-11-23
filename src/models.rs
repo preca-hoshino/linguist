@@ -654,6 +654,10 @@ pub struct RequestLogRecord {
     pub attempt_index: i16,
     /// Timestamp when the request finished.
     pub created_at: DateTime<Utc>,
+    /// Presence-preserving Chat Completions usage for billing.
+    pub billing_usage: Option<crate::billing::BillingUsage>,
+    /// Price and target captured at the start of this upstream attempt.
+    pub billing: crate::billing::AttemptBilling,
     /// Project ID snapshot.
     pub project_id: String,
     /// Project display name snapshot.

@@ -170,6 +170,62 @@
   text-decoration-color: currentColor;
 }
 
+.billing-link-button {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  margin-right: 14px;
+}
+
+.billing-price-dialog form {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.billing-tier-heading,
+.billing-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.billing-tier-heading {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.billing-tier {
+  margin: 12px 0;
+}
+
+.billing-breakdown > div {
+  display: grid;
+  gap: 6px;
+  min-width: 150px;
+}
+
+.billing-kpi-value {
+  flex-wrap: wrap;
+  overflow-wrap: anywhere;
+  font-size: 16px;
+}
+
+.billing-wall-controls {
+  margin-bottom: 12px;
+}
+
+.billing-details {
+  margin-top: 20px;
+  padding: 16px;
+  background: var(--bg-subtle);
+  border-radius: var(--radius-card);
+}
+
 .catalog-link-button {
   text-decoration: none;
 }

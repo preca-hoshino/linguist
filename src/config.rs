@@ -22,6 +22,16 @@ pub struct AppConfig {
     pub metrics: MetricsConfig,
     /// Read-only dashboard presentation settings.
     pub ui: UiConfig,
+    /// Optional expense display settings.
+    pub billing: BillingConfig,
+}
+
+/// Optional display currency for cost reports; accounting always uses the price currency.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct BillingConfig {
+    /// Three-letter currency code; absent means original currencies only.
+    pub display_currency: Option<String>,
 }
 
 /// HTTP server bind and upstream timeout settings.

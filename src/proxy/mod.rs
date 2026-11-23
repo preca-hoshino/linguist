@@ -20,6 +20,7 @@ use serde_json::{Map, Value, json};
 use tracing::{info, warn};
 use uuid::Uuid;
 
+use crate::billing::{AttemptBilling, PriceSnapshot};
 use crate::metrics_cache::MetricSample;
 use crate::models::{RequestLogRecord, ScriptContext};
 use crate::proxy::stream_inspector::{
@@ -281,6 +282,7 @@ async fn try_single_endpoint(
         &provider.name,
         &model.id,
         &model.name,
+        &crate::models::normalize_chat_completions_url(&model.url),
         attempt_uid,
         parent_uid,
         attempt_num,
@@ -292,7 +294,7 @@ async fn try_single_endpoint(
 }
 
 /// Sends one prepared HTTP request upstream and maps fallback statuses or streaming responses.
-#[allow(clippy::too_many_arguments)]
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 async fn send_upstream_attempt(
     state: &AppState,
     plan: &RoutingPlan,
@@ -301,6 +303,7 @@ async fn send_upstream_attempt(
     provider_name: &str,
     model_id: &str,
     model_name: &str,
+    expected_url: &str,
     attempt_uid: Uuid,
     parent_uid: Uuid,
     attempt_num: u16,
@@ -308,6 +311,34 @@ async fn send_upstream_attempt(
     outbound_body: Map<String, Value>,
     has_more: bool,
 ) -> AttemptOutcome {
+    let price = if state.log_writer.is_none() {
+        PriceSnapshot::Missing
+    } else if let Some(pool) = &state.db_pool {
+        match tokio::time::timeout(
+            Duration::from_secs(2),
+            crate::billing::load_price(pool, provider_id, model_id),
+        )
+        .await
+        {
+            Ok(Ok(Some(price))) => PriceSnapshot::Available(price),
+            Ok(Ok(None)) => PriceSnapshot::Missing,
+            Ok(Err(error)) => {
+                warn!(%error, "failed to load model price");
+                PriceSnapshot::Unavailable
+            }
+            Err(error) => {
+                warn!(%error, "timed out loading model price");
+                PriceSnapshot::Unavailable
+            }
+        }
+    } else {
+        PriceSnapshot::Missing
+    };
+    let billing = AttemptBilling {
+        price,
+        target_matches: outbound_body.get("model").and_then(Value::as_str) == Some(model_id)
+            && attempt_ctx.request.url == expected_url,
+    };
     let t_start = Instant::now();
     let mut req_builder = state.http_client.post(&attempt_ctx.request.url);
     for (k, v) in &outbound_headers {
@@ -336,6 +367,7 @@ async fn send_upstream_attempt(
                 elapsed_ms,
                 format!("upstream request error: {err}"),
                 None,
+                billing,
             );
             if has_more {
                 warn!(attempt = attempt_num, provider = %provider_id, model = %model_id, error = %err, "upstream connection failed; falling back");
@@ -379,6 +411,7 @@ async fn send_upstream_attempt(
             content_type,
             t_start,
             has_more,
+            billing,
         )
         .await;
     }
@@ -402,6 +435,7 @@ async fn send_upstream_attempt(
         i32::from(status_u16),
         is_sse,
         t_start,
+        billing,
     );
 
     if is_sse {
@@ -431,6 +465,7 @@ async fn handle_fallback_status(
     content_type: Option<String>,
     t_start: Instant,
     has_more: bool,
+    billing: AttemptBilling,
 ) -> AttemptOutcome {
     let status_u16 = status.as_u16();
     let err_bytes = upstream_res.bytes().await.unwrap_or_default();
@@ -450,6 +485,7 @@ async fn handle_fallback_status(
         elapsed_ms,
         format!("HTTP {status_u16}: {err_text}"),
         resp_json,
+        billing,
     );
     if has_more {
         warn!(
@@ -547,6 +583,12 @@ async fn buffer_json_response(
     let body_bytes = match upstream_res.bytes().await {
         Ok(b) => b,
         Err(err) => {
+            let mut tracker = StreamTelemetryTracker::new(meta);
+            if let Some((_, record)) =
+                tracker.finalize(Some(format!("upstream response read failed: {err}")), None)
+            {
+                state.emit_log(record);
+            }
             return openai_error(
                 StatusCode::BAD_GATEWAY,
                 &format!("Failed to read upstream body: {err}"),
@@ -671,6 +713,7 @@ fn build_inspection_metadata(
     status_code: i32,
     is_stream: bool,
     t_start: Instant,
+    billing: AttemptBilling,
 ) -> InspectionMetadata {
     let keep_req_payload = state.config.database.log_full_payload
         || (state.config.database.log_error_payload && status_code >= 400);
@@ -709,6 +752,7 @@ fn build_inspection_metadata(
         request_headers: keep_req_payload.then(|| redact_headers_json(headers)),
         request_body: keep_req_payload.then(|| Value::Object(body.clone())),
         t_start,
+        billing,
     }
 }
 
@@ -727,6 +771,7 @@ fn record_failed_attempt(
     elapsed_ms: f64,
     error_message: String,
     response_body: Option<Value>,
+    billing: AttemptBilling,
 ) {
     let provider_id = ctx
         .provider
@@ -756,6 +801,10 @@ fn record_failed_attempt(
         parent_request_uid: Some(parent_request_uid),
         attempt_index: i16::try_from(attempt_num).unwrap_or(i16::MAX),
         created_at: now,
+        billing_usage: response_body
+            .as_ref()
+            .and_then(crate::billing::BillingUsage::from_response),
+        billing,
         project_id: ctx.project.id.clone(),
         project_name: plan.project_name.clone(),
         call_model_id: ctx.call_model.id.clone(),

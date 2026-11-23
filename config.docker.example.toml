@@ -37,3 +37,7 @@ title = "Linguist Gateway & Telemetry"
 timezone = "Asia/Shanghai"
 default_days_range = 30
 leaderboard_min_requests = 1
+
+[billing]
+# 可选：按最新参考汇率显示折算值；省略时只显示原币
+# display_currency = "CNY"

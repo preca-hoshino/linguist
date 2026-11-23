@@ -99,6 +99,6 @@ export interface RecentRequestItem {
   e2eTps: number;
 }
 
-export type WallMetric = "totalTokens" | "outputTokens" | "requestCount";
+export type WallMetric = "totalTokens" | "outputTokens" | "requestCount" | "cost";
 export type LeaderboardSort = "avg_decode_tps" | "p50_decode_tps" | "p90_decode_tps" | "avg_ttft_ms";
 export type DailyMetric = "totalTokens" | "inputTokens" | "outputTokens" | "cacheReadTokens";

@@ -17,6 +17,8 @@ import type {
   OverviewResponse,
   RecentRequestItem,
 } from "../types/telemetry";
+import { billingError, getBillingDashboard } from "../billing/api";
+import type { BillingDashboard } from "../billing/api";
 
 export function TelemetryPage() {
   const [selectedProject, setSelectedProject] = useState("");
@@ -36,6 +38,12 @@ export function TelemetryPage() {
   const [leaderboard, setLeaderboard] = useState<LeaderboardItem[]>([]);
   const [dailyModels, setDailyModels] = useState<DailyModelDay[]>([]);
   const [recentRequests, setRecentRequests] = useState<RecentRequestItem[]>([]);
+  const [billingResult, setBillingResult] = useState<{ key: string; data: BillingDashboard | null; error: string } | null>(null);
+  const [billingRefresh, setBillingRefresh] = useState(0);
+  const requestUids = JSON.stringify(recentRequests.map((item) => item.requestUid));
+  const billingKey = JSON.stringify([selectedProject, selectedProvider, requestUids]);
+  const billing = billingResult?.key === billingKey ? billingResult.data : null;
+  const billingErrorMessage = billingResult?.key === billingKey ? billingResult.error : "";
 
   const pending = useRef<AbortController | null>(null);
   const loadAll = useCallback(
@@ -64,6 +72,7 @@ export function TelemetryPage() {
         setLeaderboard(lb);
         setDailyModels(dm);
         setRecentRequests(rr);
+        setBillingRefresh((current) => current + 1);
         setErrorMsg(null);
         setLastUpdated(new Date().toLocaleTimeString("zh-CN", { hour12: false }));
       } catch (err) {
@@ -104,6 +113,15 @@ export function TelemetryPage() {
     return () => { window.clearInterval(timer); };
   }, [autoRefresh, loadAll]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    const visibleUids: string[] = JSON.parse(requestUids) as string[];
+    void getBillingDashboard(selectedProject, selectedProvider, visibleUids, controller.signal)
+      .then((data) => { if (!controller.signal.aborted) setBillingResult({ key: billingKey, data, error: "" }); })
+      .catch((error: unknown) => { if (!controller.signal.aborted) setBillingResult({ key: billingKey, data: null, error: billingError(error) }); });
+    return () => { controller.abort(); };
+  }, [billingKey, billingRefresh, requestUids, selectedProject, selectedProvider]);
+
   return (
     <div className="app-shell">
       <HeaderBar
@@ -142,6 +160,9 @@ export function TelemetryPage() {
             }
           }
           days={overview?.days ?? []}
+          billing={billing}
+          billingError={billingErrorMessage}
+          billingLoading={!billing && !billingErrorMessage}
         />
 
         <ModelLeaderboard
@@ -162,6 +183,7 @@ export function TelemetryPage() {
           items={recentRequests}
           selectedModel={selectedModel}
           onModelChange={setSelectedModel}
+          billing={billing}
         />
       </main>
     </div>

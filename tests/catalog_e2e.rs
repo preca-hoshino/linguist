@@ -294,6 +294,330 @@ async fn catalog_projections_and_gateway_use_the_committed_snapshot(pool: PgPool
     assert_eq!(route["item"]["script"], "ctx.state.fixture = true;");
 }
 
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires a disposable PostgreSQL server via DATABASE_URL"]
+async fn billing_prices_are_public_and_survive_json_reload(pool: PgPool) {
+    let fixture = Fixture::new();
+    let (initial_store, engine) = store(&pool);
+    let active = sync::start(initial_store, Some((fixture.loader(&engine), false)))
+        .await
+        .unwrap();
+    let config = AppConfig::default();
+    let metrics = MetricsCache::new(&config.metrics);
+    let app = web::build_router(
+        AppState::new(
+            config,
+            active,
+            metrics,
+            engine.clone(),
+            Some(pool.clone()),
+            None,
+        )
+        .unwrap()
+        .with_catalog_token(Some("fixture-console-token")),
+    );
+    let body = json!({"providerId":"beta","modelId":"vendor/shared",
+        "currency":"USD","source":"fixture","tiers":[{"minInputTokens":0,"inputPrice":"2",
+        "outputPrice":"8","cacheReadPrice":"0.5","cacheWriteMode":"separate","cacheWritePrice":"2.5"}]});
+    let submit = |value: &Value| {
+        Request::builder()
+            .method(Method::POST)
+            .uri("/api/v1/billing/prices")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(value.to_string()))
+            .unwrap()
+    };
+    assert_eq!(
+        app.clone().oneshot(submit(&body)).await.unwrap().status(),
+        StatusCode::OK
+    );
+    let mut updated_body = body.clone();
+    updated_body["tiers"][0]["inputPrice"] = json!("4");
+    assert_eq!(
+        app.clone()
+            .oneshot(submit(&updated_body))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+    let (status, data, _) = request(
+        &app,
+        Method::GET,
+        "/api/v1/billing/prices?provider_id=beta&model_id=vendor%2Fshared",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(data["item"]["tiers"][0]["cacheWritePrice"], "2.5");
+    assert_eq!(data["item"]["tiers"][0]["inputPrice"], "4");
+    let model = catalog(
+        &app,
+        "provider-models/detail?provider_id=beta&id=vendor%2Fshared",
+    )
+    .await;
+    assert_eq!(model["item"]["hasPrice"], true);
+    let from = (chrono::Utc::now() - chrono::Duration::days(1)).date_naive();
+    let to = (chrono::Utc::now() + chrono::Duration::days(1)).date_naive();
+    sqlx::query("INSERT INTO request_logs(request_uid, project_id, project_name, call_model_id, call_model_name, provider_id, provider_name, model_id, model_name, route_rule_id, status_code, billing_amount, billing_currency, billing_status) VALUES($1, 'app', 'App', 'alias', 'Alias', 'beta', 'Beta', 'vendor/shared', 'Shared', 'first', 200, 0.052, 'USD', 'priced')")
+        .bind(Uuid::new_v4()).execute(&pool).await.unwrap();
+    let path = format!("/api/v1/billing/report?from={from}&to={to}");
+    let (status, report, _) =
+        request(&app, Method::GET, &path, Some("fixture-console-token")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(report["attempts"], 1);
+    assert_eq!(report["totals"][0]["currency"], "USD");
+    assert_eq!(report["totals"][0]["amount"], "0.052");
+    assert_eq!(report["daily"][0]["amount"], "0.052");
+    assert_eq!(report["convertedTotal"], Value::Null);
+    let (store, _) = store(&pool);
+    fixture.write("providers.json", &providers("Beta updated", true));
+    sync::start(store, Some((fixture.loader(&engine), false)))
+        .await
+        .unwrap();
+    let (status, data, _) = request(
+        &app,
+        Method::GET,
+        "/api/v1/billing/prices?provider_id=beta&model_id=vendor%2Fshared",
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(data["item"]["tiers"][0]["cacheWritePrice"], "2.5");
+    let prices: Value =
+        sqlx::query_scalar("SELECT billing_prices FROM catalog_state WHERE singleton")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(prices.as_array().unwrap().len(), 1);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires a disposable PostgreSQL server via DATABASE_URL"]
+async fn billing_report_uses_stat_timezone_and_shows_the_whole_retry_chain(pool: PgPool) {
+    let engine = ScriptEngine::new(ScriptEngineConfig::default());
+    let app = app(
+        &pool,
+        Arc::new(ArcSwap::from_pointee(RuntimeCatalog::default())),
+        engine,
+    );
+    let root = Uuid::new_v4();
+    let retry = Uuid::new_v4();
+    let insert = "INSERT INTO request_logs(request_uid,parent_request_uid,attempt_index,created_at,project_id,project_name,call_model_id,call_model_name,provider_id,provider_name,model_id,model_name,route_rule_id,status_code,billing_amount,billing_currency,billing_status,billing_details) VALUES($1,$2,$3,$4,'app','App','alias','Alias',$5,$5,'model','Model','route',200,$6::numeric,$7,$8,$9)";
+    for (uid, index, time, provider, amount, currency, status) in [
+        (
+            root,
+            1_i16,
+            "2026-01-01T15:59:59Z",
+            "first",
+            Some("1.25"),
+            Some("USD"),
+            Some("priced"),
+        ),
+        (
+            retry,
+            2_i16,
+            "2026-01-01T16:00:00Z",
+            "second",
+            None,
+            None,
+            Some("missing_usage"),
+        ),
+    ] {
+        sqlx::query(insert)
+            .bind(uid)
+            .bind(root)
+            .bind(index)
+            .bind(chrono::DateTime::parse_from_rfc3339(time).unwrap().to_utc())
+            .bind(provider)
+            .bind(amount)
+            .bind(currency)
+            .bind(status)
+            .bind(json!({"tier":{"minInputTokens":0,"inputPrice":"2"}}))
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let (status, report, _) = request(
+        &app,
+        Method::GET,
+        "/api/v1/billing/report?from=2026-01-02&to=2026-01-02",
+        Some("fixture-console-token"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(report["attempts"], 1);
+    assert_eq!(report["unpriced"], 1);
+    assert_eq!(report["items"][0]["requestUid"], retry.to_string());
+    let path = format!("/api/v1/billing/attempts?request_uid={retry}");
+    let (status, group, headers) =
+        request(&app, Method::GET, &path, Some("fixture-console-token")).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(headers[header::CACHE_CONTROL], "no-store");
+    assert_eq!(group["requestUid"], root.to_string());
+    assert_eq!(group["items"].as_array().unwrap().len(), 2);
+    assert_eq!(group["items"][0]["details"]["tier"]["inputPrice"], "2");
+    assert_eq!(group["totals"][0]["amount"], "1.25");
+    assert_eq!(group["unpriced"], 1);
+    let (status, _, _) = request(&app, Method::GET, &path, None).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _, _) = request(
+        &app,
+        Method::GET,
+        "/api/v1/billing/report?from=2026-01-03&to=2026-01-02",
+        Some("fixture-console-token"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires a disposable PostgreSQL server via DATABASE_URL"]
+async fn billing_dashboard_matches_visible_rows_and_preserves_currencies(pool: PgPool) {
+    let engine = ScriptEngine::new(ScriptEngineConfig::default());
+    let mut config = AppConfig::default();
+    config.billing.display_currency = Some("CNY".into());
+    let app = web::build_router(
+        AppState::new(
+            config.clone(),
+            Arc::new(ArcSwap::from_pointee(RuntimeCatalog::default())),
+            MetricsCache::new(&config.metrics),
+            engine,
+            Some(pool.clone()),
+            None,
+        )
+        .unwrap()
+        .with_catalog_token(Some("fixture-console-token")),
+    );
+    let usd = Uuid::new_v4();
+    let eur = Uuid::new_v4();
+    let missing = Uuid::new_v4();
+    let other = Uuid::new_v4();
+    let older = Uuid::new_v4();
+    let today = linguist::db::local_stat_date(
+        chrono::Utc::now(),
+        linguist::db::timezone_offset_secs(&config.ui.timezone),
+    );
+    let insert = "INSERT INTO request_logs(request_uid,created_at,project_id,project_name,call_model_id,call_model_name,provider_id,provider_name,model_id,model_name,route_rule_id,status_code,billing_amount,billing_currency,billing_status) VALUES($1,$2,$3,'App','alias','Alias','provider','Provider','model','Model','route',200,$4::numeric,$5,$6)";
+    for (uid, project, amount, currency, status) in [
+        (usd, "app", Some("1.25"), Some("USD"), Some("priced")),
+        (eur, "app", Some("2"), Some("EUR"), Some("priced")),
+        (missing, "app", None, None, Some("missing_usage")),
+        (other, "other", Some("999"), Some("USD"), Some("priced")),
+    ] {
+        sqlx::query(insert)
+            .bind(uid)
+            .bind(chrono::Utc::now())
+            .bind(project)
+            .bind(amount)
+            .bind(currency)
+            .bind(status)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    let cutoff = (today - chrono::Duration::days(364))
+        .and_hms_opt(0, 0, 0)
+        .unwrap()
+        .and_local_timezone(chrono::FixedOffset::east_opt(8 * 3600).unwrap())
+        .single()
+        .unwrap()
+        .to_utc();
+    sqlx::query(insert)
+        .bind(older)
+        .bind(cutoff - chrono::Duration::seconds(1))
+        .bind("app")
+        .bind(Some("500"))
+        .bind(Some("USD"))
+        .bind(Some("priced"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let payload =
+        json!({"projectId":"app","providerId":null,"requestUids":[usd,eur,missing,other,older]});
+    let send = |token: Option<&str>, body: &Value| {
+        let mut builder = Request::builder()
+            .method(Method::POST)
+            .uri("/api/v1/stats/billing")
+            .header(header::CONTENT_TYPE, "application/json");
+        if let Some(token) = token {
+            builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
+        }
+        builder.body(Body::from(body.to_string())).unwrap()
+    };
+    let response = app.clone().oneshot(send(None, &payload)).await.unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let data: Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(
+        data["totals"],
+        json!([{"currency":"EUR","amount":"2"},{"currency":"USD","amount":"1.25"}])
+    );
+    assert_eq!(data["unpriced"], 1);
+    assert_eq!(data["today"], today.to_string());
+    assert_eq!(data["days"][0]["date"], today.to_string());
+    assert_eq!(data["days"][0]["wallAmount"], Value::Null);
+    assert_eq!(data["convertedTotal"], Value::Null);
+    assert_eq!(data["items"].as_array().unwrap().len(), 4);
+    assert!(
+        data["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["requestUid"] == older.to_string() && row["amount"] == "500")
+    );
+    assert!(
+        data["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["requestUid"] == usd.to_string() && row["amount"] == "1.25")
+    );
+
+    let now = chrono::Utc::now();
+    let rates = json!({"target":"CNY","fetchedAt":now,"rates":[
+        {"base":"USD","quote":"CNY","date":today,"rate":"7","fetchedAt":now},
+        {"base":"EUR","quote":"CNY","date":today,"rate":"8","fetchedAt":now}
+    ]});
+    sqlx::query("UPDATE catalog_state SET billing_fx_rates=$1 WHERE singleton")
+        .bind(rates)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let response = app.clone().oneshot(send(None, &payload)).await.unwrap();
+    let data: Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(data["convertedTotal"], "24.75");
+    assert_eq!(data["wallCurrency"], "CNY");
+    assert_eq!(data["wallApproximate"], true);
+    assert_eq!(data["days"][0]["wallAmount"], "24.75");
+    assert!(
+        data["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["requestUid"] == usd.to_string() && row["convertedAmount"] == "8.75")
+    );
+    let too_many = json!({"projectId":null,"providerId":null,"requestUids":vec![usd;51]});
+    assert_eq!(
+        app.clone()
+            .oneshot(send(None, &too_many))
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::BAD_REQUEST
+    );
+    let (status, details, _) = request(
+        &app,
+        Method::GET,
+        &format!("/api/v1/stats/billing/attempts?request_uid={usd}"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(details["items"][0]["amount"], "1.25");
+}
+
 /// Waits for one of the file watcher or gateway refresh postconditions.
 async fn wait_for(mut check: impl AsyncFnMut() -> bool) {
     tokio::time::timeout(Duration::from_secs(20), async {

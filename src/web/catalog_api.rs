@@ -25,7 +25,11 @@ pub(super) fn router(state: &AppState) -> Router<AppState> {
 }
 
 /// Validates the configured console token before loading any catalog data.
-async fn authorize(State(state): State<AppState>, request: Request, next: Next) -> Response {
+pub(super) async fn authorize(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Response {
     let token = request
         .headers()
         .get(header::AUTHORIZATION)

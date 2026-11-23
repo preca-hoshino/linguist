@@ -194,6 +194,8 @@ async fn run_serve(cfg: AppConfig) -> Result<()> {
     )?
     .with_catalog_token(console_token.as_deref());
 
+    linguist::billing::fx::start(&state);
+
     let app = web::build_router(state);
     let addr_str = format!("{}:{}", cfg.server.host, cfg.server.port);
     let addr: SocketAddr = addr_str
