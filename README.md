@@ -137,6 +137,8 @@ Use `Authorization: Bearer <LINGUIST_CATALOG_TOKEN>` on the same origin. Catalog
 - `GET /api/v1/catalog/{resource}/detail?id=…` — add the parent ID for either model resource. Details expose script source and configuration fields to the console operator, never the dedicated API key values. Endpoint userinfo, query strings and fragments are omitted. Keep secrets out of script source and metadata.
 - `GET /api/v1/catalog/status` — committed revision, this instance's loaded revision, and the latest sync error, if any. Use this to verify a final sync before removing JSON.
 
+Run the catalog integration tests with `cargo test --locked --test catalog_e2e -- --ignored` and a `DATABASE_URL` pointing at a disposable PostgreSQL server where the test role may create databases.
+
 ### Per-endpoint retries
 
 Route targets and fallbacks may set `maxAttempts` to an integer from 1 to 5. It includes the

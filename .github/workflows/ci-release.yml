@@ -13,6 +13,18 @@ jobs:
   check:
     name: Quality Gate (Format, Lint, Types, Deps, Tests)
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: catalog_ci
+        ports:
+          - 5432/tcp
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - name: Checkout code
         uses: actions/checkout@v7
@@ -49,6 +61,11 @@ jobs:
           cargo clippy --all-targets --all-features -- -D warnings
           cargo machete
           cargo test --locked
+
+      - name: PostgreSQL catalog integration tests
+        env:
+          DATABASE_URL: postgres://postgres:catalog_ci@127.0.0.1:${{ job.services.postgres.ports[5432] }}/postgres
+        run: cargo test --locked --test catalog_e2e -- --ignored
 
   build:
     name: Build (${{ matrix.name }})
