@@ -23,6 +23,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
+LINGUIST_CATALOG_KEY="$(openssl rand -hex 32)"
+LINGUIST_CATALOG_TOKEN="$(openssl rand -hex 32)"
+export LINGUIST_CATALOG_KEY LINGUIST_CATALOG_TOKEN
+
 echo "==> 1. Verifying scratch image filesystem contents for ${IMAGE}"
 docker save "$IMAGE" | python3 -c '
 import io, json, sys, tarfile
@@ -177,6 +181,7 @@ EOF
 
 write_config_toml() {
   local db_url="$1"
+  local catalog_source="${2:-json_files}"
   cat > "$WORKDIR/cfg/config.toml" <<EOF
 [server]
 host = "0.0.0.0"
@@ -190,7 +195,7 @@ log_error_payload = true
 log_full_payload = false
 
 [configs]
-source = "json_files"
+source = "${catalog_source}"
 providers_path = "./chatLanguageModels.json"
 projects_path = "./projects.json"
 routes_path = "./routes.json"
@@ -328,6 +333,8 @@ docker run -d --name "$APP_NAME" --network "$NET_NAME" \
   --cap-drop ALL \
   --security-opt no-new-privileges:true \
   --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+  -e LINGUIST_CATALOG_KEY \
+  -e LINGUIST_CATALOG_TOKEN \
   -v "$WORKDIR/cfg:/config:ro" \
   -p "127.0.0.1:${HOST_PORT}:9527" \
   "$IMAGE" >/dev/null
@@ -380,6 +387,8 @@ docker run -d --name "$APP_NAME" --network "$NET_NAME" \
   --cap-drop ALL \
   --security-opt no-new-privileges:true \
   --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+  -e LINGUIST_CATALOG_KEY \
+  -e LINGUIST_CATALOG_TOKEN \
   -e SSL_CERT_FILE=/config/certs/ca.crt \
   -v "$WORKDIR/cfg:/config:ro" \
   -p "127.0.0.1:${HOST_PORT}:9527" \
@@ -407,18 +416,26 @@ echo "==> Light-load memory: ${LOAD_MEM}"
 sleep 1
 docker rm -f "$APP_NAME" >/dev/null
 
-echo "==> 8. Phase C: verifying external DB persistence across container replacement"
+echo "==> 8. Phase C: verifying the persisted catalog and telemetry in PostgreSQL-only mode"
+write_config_toml "postgres://linguist:linguistpass@linguist-pg:5432/linguist?sslmode=verify-full" postgres
+rm "$WORKDIR/cfg/chatLanguageModels.json" "$WORKDIR/cfg/projects.json" "$WORKDIR/cfg/routes.json"
+
 docker run -d --name "$APP_NAME" --network "$NET_NAME" \
   --read-only \
   --cap-drop ALL \
   --security-opt no-new-privileges:true \
   --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+  -e LINGUIST_CATALOG_KEY \
+  -e LINGUIST_CATALOG_TOKEN \
   -e SSL_CERT_FILE=/config/certs/ca.crt \
   -v "$WORKDIR/cfg:/config:ro" \
   -p "127.0.0.1:${HOST_PORT}:9527" \
   "$IMAGE" >/dev/null
 
 wait_healthz
+curl -fsS -H "Authorization: Bearer ${LINGUIST_CATALOG_TOKEN}" \
+  "http://127.0.0.1:${HOST_PORT}/api/v1/catalog/providers" |
+  python3 -c 'import json, sys; assert json.load(sys.stdin)["items"][0]["id"] == "mock-tls"'
 OVERVIEW_JSON="$(curl -fsS "http://127.0.0.1:${HOST_PORT}/api/v1/stats/overview")"
 python3 -c '
 import json, sys

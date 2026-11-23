@@ -1,22 +1,20 @@
-//! JSON file implementation of `CatalogProvider`, atomic persistence, and `notify` hot-reload.
+//! JSON file implementation of `CatalogProvider`, atomic persistence, and file change detection.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow};
-use arc_swap::ArcSwap;
+use anyhow::{Context, Result, anyhow, ensure};
 use async_trait::async_trait;
 use notify::{EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use serde::Serialize;
 use serde::de::DeserializeOwned;
-use tracing::{error, info, warn};
+use tokio::sync::mpsc;
+use tracing::warn;
 use uuid::Uuid;
 
-use crate::catalog::{CatalogProvider, RuntimeCatalog};
+use super::{CatalogProvider, RuntimeCatalog, validation};
 use crate::config::ConfigsSection;
 use crate::models::{
     CallModelConfig, ModelConfig, ProjectConfig, ProviderConfig, RawProjectConfig,
@@ -49,92 +47,60 @@ impl JsonFileCatalogProvider {
     /// # Errors
     /// Returns an error if any file cannot be read, parsed, or contains an invalid script.
     pub fn load_sync(&self) -> Result<RuntimeCatalog> {
-        let providers = load_providers(&self.configs.providers_path, &self.script_engine)?;
-        let projects = load_projects(&self.configs.projects_path, &self.script_engine)?;
-        let routes = load_routes(&self.configs.routes_path, &self.script_engine)?;
-        Ok(RuntimeCatalog::new(providers, projects, routes))
+        self.load_snapshot().map(|(catalog, _)| catalog)
     }
 
-    /// Spawns a background file watcher (`notify`) that reloads and atomically swaps
-    /// `ArcSwap<RuntimeCatalog>` whenever any of the 3 JSON files changes.
-    ///
-    /// # Errors
-    /// Returns an error if the OS file watcher cannot be created or registered.
-    pub fn spawn_watcher(
-        &self,
-        catalog_swap: Arc<ArcSwap<RuntimeCatalog>>,
-    ) -> Result<RecommendedWatcher> {
-        let (tx, mut rx) = tokio::sync::mpsc::channel::<()>(16);
-        let watched_names: Vec<String> = [
+    /// Reads all inputs and verifies that none changed while assembling the snapshot.
+    pub(super) fn load_snapshot(&self) -> Result<(RuntimeCatalog, FileReads)> {
+        let mut files = FileReads::default();
+        let providers = load_providers(
             &self.configs.providers_path,
-            &self.configs.projects_path,
-            &self.configs.routes_path,
-        ]
-        .iter()
-        .filter_map(|p| p.file_name().and_then(|n| n.to_str()).map(str::to_string))
-        .collect();
+            &self.script_engine,
+            &mut files,
+        )?;
+        let projects = load_projects(&self.configs.projects_path, &self.script_engine, &mut files)?;
+        let routes = load_routes(&self.configs.routes_path, &self.script_engine, &mut files)?;
+        let catalog = RuntimeCatalog::new(providers, projects, routes);
+        validation::validate(&catalog)?;
+        ensure!(
+            files.unchanged(),
+            "catalog files changed during the read; retrying on next check"
+        );
+        Ok((catalog, files))
+    }
 
+    /// Watches the main JSON directories for atomic replacements; external scripts are polled.
+    pub(super) fn watch_files(&self, tx: mpsc::Sender<()>) -> Result<RecommendedWatcher> {
+        let paths = [
+            self.configs.providers_path.clone(),
+            self.configs.projects_path.clone(),
+            self.configs.routes_path.clone(),
+        ];
+        let names: HashSet<_> = paths
+            .iter()
+            .filter_map(|p| p.file_name().map(ToOwned::to_owned))
+            .collect();
         let mut watcher = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            if let Ok(event) = res {
-                let is_relevant = matches!(event.kind, EventKind::Modify(_) | EventKind::Create(_))
-                    && event.paths.iter().any(|p| {
-                        p.file_name()
-                            .and_then(|n| n.to_str())
-                            .is_some_and(|name| watched_names.iter().any(|w| w == name))
-                    });
-                if is_relevant {
-                    let _ = tx.try_send(());
-                }
+            if let Ok(event) = res
+                && matches!(
+                    event.kind,
+                    EventKind::Modify(_) | EventKind::Create(_) | EventKind::Remove(_)
+                )
+                && event
+                    .paths
+                    .iter()
+                    .any(|p| p.file_name().is_some_and(|name| names.contains(name)))
+            {
+                let _ = tx.try_send(());
             }
         })
         .context("failed to initialize JSON file watcher")?;
-
-        let mut dirs: HashSet<PathBuf> = HashSet::new();
-        for path in [
-            &self.configs.providers_path,
-            &self.configs.projects_path,
-            &self.configs.routes_path,
-        ] {
-            let parent = path
-                .parent()
-                .filter(|p| !p.as_os_str().is_empty())
-                .unwrap_or_else(|| Path::new("."));
-            if dirs.insert(parent.to_path_buf()) {
-                watcher
-                    .watch(parent, RecursiveMode::NonRecursive)
-                    .with_context(|| format!("failed to watch directory {}", parent.display()))?;
-            }
+        let dirs: HashSet<_> = paths.iter().map(|p| parent_dir_of(p)).collect();
+        for parent in dirs {
+            watcher
+                .watch(parent, RecursiveMode::NonRecursive)
+                .with_context(|| format!("failed to watch directory {}", parent.display()))?;
         }
-
-        let loader = self.clone();
-        tokio::spawn(async move {
-            while rx.recv().await.is_some() {
-                // Coalesce burst editor write/rename events.
-                tokio::time::sleep(Duration::from_millis(120)).await;
-                while rx.try_recv().is_ok() {}
-
-                match loader.load_sync() {
-                    Ok(new_catalog) => {
-                        let providers = new_catalog.providers.len();
-                        let models = new_catalog.total_models();
-                        let projects = new_catalog.projects.len();
-                        let routes = new_catalog.routes.len();
-                        catalog_swap.store(Arc::new(new_catalog));
-                        info!(
-                            providers,
-                            models, projects, routes, "hot-reloaded Linguist JSON catalog"
-                        );
-                    }
-                    Err(err) => {
-                        error!(
-                            error = %err,
-                            "hot-reload rejected invalid catalog update; keeping previous snapshot"
-                        );
-                    }
-                }
-            }
-        });
-
         Ok(watcher)
     }
 }
@@ -149,44 +115,78 @@ impl CatalogProvider for JsonFileCatalogProvider {
     }
 }
 
+/// Exact bytes read from the documents and all resolved script dependencies.
+#[derive(Default)]
+pub(super) struct FileReads(BTreeMap<PathBuf, Vec<u8>>);
+
+impl FileReads {
+    /// Reads each path once within a candidate snapshot.
+    fn read(&mut self, path: &Path) -> Result<&[u8]> {
+        use std::collections::btree_map::Entry;
+        let bytes = match self.0.entry(path.to_owned()) {
+            Entry::Occupied(entry) => entry.into_mut(),
+            Entry::Vacant(entry) => entry.insert(
+                fs::read(path).with_context(|| format!("failed to read {}", path.display()))?,
+            ),
+        };
+        Ok(bytes)
+    }
+
+    /// Detects edits, deletion, and atomic replacement, even with unchanged metadata.
+    pub(super) fn unchanged(&self) -> bool {
+        self.0
+            .iter()
+            .all(|(path, bytes)| fs::read(path).is_ok_and(|fresh| &fresh == bytes))
+    }
+}
+
 /// Parses and validates supply-side `chatLanguageModels.json`, skipping non-`customendpoint`
 /// or non-`chat-completions` groups cleanly.
-fn load_providers(path: &Path, engine: &ScriptEngine) -> Result<Vec<ProviderConfig>> {
-    let (_schema_ver, raw_list) = load_versioned_json::<RawProviderConfig>(path)?;
+fn load_providers(
+    path: &Path,
+    engine: &ScriptEngine,
+    files: &mut FileReads,
+) -> Result<Vec<ProviderConfig>> {
+    let (_schema_ver, raw_list) = load_versioned_json::<RawProviderConfig>(path, files)?;
     let base_dir = parent_dir_of(path);
-    let mut providers = Vec::new();
+    let raw_list: Vec<_> = raw_list
+        .into_iter()
+        .filter(|raw| {
+            raw.vendor
+                .as_deref()
+                .is_none_or(|vendor| vendor == "customendpoint")
+                && raw
+                    .api_type
+                    .as_deref()
+                    .is_none_or(|api_type| api_type == "chat-completions")
+        })
+        .collect();
+    let mut ids = vec![String::new(); raw_list.len()];
     let mut seen_ids = HashSet::new();
-
-    for raw in raw_list {
-        if let Some(vendor) = raw.vendor.as_deref()
-            && vendor != "customendpoint"
-        {
-            continue;
-        }
-        if let Some(api_type) = raw.api_type.as_deref()
-            && api_type != "chat-completions"
-        {
-            continue;
-        }
-        if raw.models.is_empty() {
-            continue;
-        }
-
-        let mut pid = raw
+    let entries = raw_list.iter().enumerate();
+    // Allocate legacy IDs first; providers without models never reserved an ID before.
+    for (index, raw) in entries
+        .clone()
+        .filter(|(_, raw)| !raw.models.is_empty())
+        .chain(entries.filter(|(_, raw)| raw.models.is_empty()))
+    {
+        let base = raw
             .id
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
             .map_or_else(|| derive_provider_slug(&raw.name), str::to_string);
-
-        if !seen_ids.insert(pid.clone()) {
-            let mut suffix = 2usize;
-            while !seen_ids.insert(format!("{pid}-{suffix}")) {
-                suffix += 1;
-            }
-            pid = format!("{pid}-{suffix}");
+        let mut id = base.clone();
+        let mut suffix = 2;
+        while !seen_ids.insert(id.clone()) {
+            id = format!("{base}-{suffix}");
+            suffix += 1;
         }
+        ids[index] = id;
+    }
 
+    let mut providers = Vec::with_capacity(raw_list.len());
+    for (raw, pid) in raw_list.into_iter().zip(ids) {
         let p_icon = raw
             .icon
             .clone()
@@ -197,6 +197,7 @@ fn load_providers(path: &Path, engine: &ScriptEngine) -> Result<Vec<ProviderConf
             raw.script.as_ref(),
             base_dir,
             engine,
+            files,
             &format!("provider '{pid}'"),
         )?;
 
@@ -212,6 +213,7 @@ fn load_providers(path: &Path, engine: &ScriptEngine) -> Result<Vec<ProviderConf
                 rm.script.as_ref(),
                 base_dir,
                 engine,
+                files,
                 &format!("model '{pid}/{}'", rm.id),
             )?;
 
@@ -232,6 +234,8 @@ fn load_providers(path: &Path, engine: &ScriptEngine) -> Result<Vec<ProviderConf
         }
 
         providers.push(ProviderConfig {
+            vendor: raw.vendor,
+            api_type: raw.api_type,
             id: pid,
             name: raw.name,
             icon: p_icon,
@@ -245,8 +249,12 @@ fn load_providers(path: &Path, engine: &ScriptEngine) -> Result<Vec<ProviderConf
 }
 
 /// Parses and validates consume-side `projects.json`.
-fn load_projects(path: &Path, engine: &ScriptEngine) -> Result<Vec<ProjectConfig>> {
-    let (_schema_ver, raw_list) = load_versioned_json::<RawProjectConfig>(path)?;
+fn load_projects(
+    path: &Path,
+    engine: &ScriptEngine,
+    files: &mut FileReads,
+) -> Result<Vec<ProjectConfig>> {
+    let (_schema_ver, raw_list) = load_versioned_json::<RawProjectConfig>(path, files)?;
     let base_dir = parent_dir_of(path);
     let mut projects = Vec::with_capacity(raw_list.len());
 
@@ -281,6 +289,7 @@ fn load_projects(path: &Path, engine: &ScriptEngine) -> Result<Vec<ProjectConfig
             raw.script.as_ref(),
             base_dir,
             engine,
+            files,
             &format!("project '{}'", raw.id),
         )?;
 
@@ -304,6 +313,7 @@ fn load_projects(path: &Path, engine: &ScriptEngine) -> Result<Vec<ProjectConfig
                 rcm.script.as_ref(),
                 base_dir,
                 engine,
+                files,
                 &format!("callModel '{}/{}'", raw.id, rcm.id),
             )?;
 
@@ -331,8 +341,12 @@ fn load_projects(path: &Path, engine: &ScriptEngine) -> Result<Vec<ProjectConfig
 }
 
 /// Parses and validates `routes.json`.
-fn load_routes(path: &Path, engine: &ScriptEngine) -> Result<Vec<RouteRuleConfig>> {
-    let (_schema_ver, raw_list) = load_versioned_json::<RawRouteRuleConfig>(path)?;
+fn load_routes(
+    path: &Path,
+    engine: &ScriptEngine,
+    files: &mut FileReads,
+) -> Result<Vec<RouteRuleConfig>> {
+    let (_schema_ver, raw_list) = load_versioned_json::<RawRouteRuleConfig>(path, files)?;
     let base_dir = parent_dir_of(path);
     let mut routes = Vec::with_capacity(raw_list.len());
 
@@ -341,6 +355,7 @@ fn load_routes(path: &Path, engine: &ScriptEngine) -> Result<Vec<RouteRuleConfig
             raw.script.as_ref(),
             base_dir,
             engine,
+            files,
             &format!("route '{}'", raw.id),
         )?;
 
@@ -369,10 +384,11 @@ fn load_routes(path: &Path, engine: &ScriptEngine) -> Result<Vec<RouteRuleConfig
 }
 
 /// Reads a JSON list supporting both legacy bare arrays (`v1`) and `{ "schemaVersion", "items" }`.
-fn load_versioned_json<T: DeserializeOwned>(path: &Path) -> Result<(u32, Vec<T>)> {
-    let bytes = fs::read(path)
-        .with_context(|| format!("failed to read catalog JSON {}", path.display()))?;
-    let parsed: VersionedList<T> = serde_json::from_slice(&bytes)
+fn load_versioned_json<T: DeserializeOwned>(
+    path: &Path,
+    files: &mut FileReads,
+) -> Result<(u32, Vec<T>)> {
+    let parsed: VersionedList<T> = serde_json::from_slice(files.read(path)?)
         .with_context(|| format!("invalid JSON schema in {}", path.display()))?;
     Ok(parsed.into_items())
 }
@@ -383,14 +399,25 @@ fn resolve_and_validate_script(
     source: Option<&ScriptSource>,
     base_dir: &Path,
     engine: &ScriptEngine,
+    files: &mut FileReads,
     label: &str,
 ) -> Result<Option<String>> {
     let Some(src) = source else {
         return Ok(None);
     };
-    let resolved = src
-        .resolve(base_dir)
-        .with_context(|| format!("failed to resolve script for {label}"))?;
+    let resolved = match src {
+        ScriptSource::Single(text) => {
+            if let Some(path) = text.trim().strip_prefix("@file:") {
+                let path = base_dir.join(path.trim());
+                std::str::from_utf8(files.read(&path)?)
+                    .with_context(|| format!("non-UTF-8 script for {label}"))?
+                    .to_owned()
+            } else {
+                text.clone()
+            }
+        }
+        ScriptSource::Lines(lines) => lines.join("\n"),
+    };
     if resolved.trim().is_empty() {
         return Ok(None);
     }
@@ -560,6 +587,27 @@ mod tests {
     }
 
     #[test]
+    fn preserves_legacy_provider_ids_when_importing_empty_providers() {
+        let path = std::env::temp_dir().join(format!("linguist-providers-{}.json", Uuid::new_v4()));
+        let fixture = r#"[
+            {"name":"Repeat","models":[]},
+            {"name":"Repeat","models":[{"id":"a","name":"A","url":"https://example.test"}]},
+            {"name":"Other","id":"repeat","models":[{"id":"b","name":"B","url":"https://example.test"}]}
+        ]"#;
+        assert!(fs::write(&path, fixture).is_ok());
+        let engine = ScriptEngine::new(ScriptEngineConfig::default());
+        let providers = load_providers(&path, &engine, &mut FileReads::default());
+        let _ = fs::remove_file(path);
+
+        let ids = providers
+            .unwrap_or_default()
+            .into_iter()
+            .map(|provider| provider.id)
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["repeat-3", "repeat", "repeat-2"]);
+    }
+
+    #[test]
     fn rejects_projects_without_api_key_or_with_unsafe_id() {
         let dir = std::env::temp_dir().join(format!("linguist-projects-{}", std::process::id()));
         assert!(fs::create_dir_all(&dir).is_ok());
@@ -567,7 +615,7 @@ mod tests {
         let load = |name: &str, json: &str| {
             let path = dir.join(name);
             assert!(fs::write(&path, json).is_ok());
-            load_projects(&path, &engine)
+            load_projects(&path, &engine, &mut FileReads::default())
         };
 
         let no_key = load("no_key.json", r#"[{"id":"a","name":"A","callModels":[]}]"#);

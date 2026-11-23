@@ -45,9 +45,10 @@ services:
     # ─── 宿主机 PostgreSQL 连通性（若使用外部共享网络可替换为 networks）───
     extra_hosts:
       - "host.docker.internal:host-gateway"
-    # ─── 如上游模型 API 或 PostgreSQL 使用私有 CA，将证书放到 ./docker/config/certs/ca.pem 并启用 ───
-    # environment:
-    #   - SSL_CERT_FILE=/config/certs/ca.pem
+    environment:
+      LINGUIST_CATALOG_KEY: ${LINGUIST_CATALOG_KEY:-}
+      LINGUIST_CATALOG_TOKEN: ${LINGUIST_CATALOG_TOKEN:-}
+      # SSL_CERT_FILE: /config/certs/ca.pem
     # ─── 资源限制与日志轮转 ───
     deploy:
       resources:

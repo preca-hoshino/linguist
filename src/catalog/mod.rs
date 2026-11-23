@@ -1,11 +1,17 @@
 //! Configuration catalog snapshot (`RuntimeCatalog`) and `CatalogProvider` abstraction.
 
 pub mod json_loader;
+pub mod postgres;
+pub(crate) mod read;
+pub mod secrets;
+pub mod sync;
+mod validation;
 
 use std::collections::HashMap;
 
 use anyhow::Result;
 use async_trait::async_trait;
+use secrets::{CatalogSecrets, tokens_equal};
 use serde_json::{Value, json};
 
 use crate::models::{
@@ -13,8 +19,7 @@ use crate::models::{
     RouteCandidatesFilter, RouteRuleConfig,
 };
 
-/// Abstract catalog source trait decoupling runtime routing from storage backends
-/// (`JsonFileCatalogProvider` now; `PgCatalogProvider` in future).
+/// Loads a complete runtime snapshot, independent of the storage backend.
 #[async_trait]
 pub trait CatalogProvider: Send + Sync {
     /// Loads and validates a complete `RuntimeCatalog` snapshot.
@@ -35,6 +40,19 @@ pub struct RuntimeCatalog {
     project_by_id: HashMap<String, usize>,
     /// Routing rules sorted descending by `priority`.
     pub routes: Vec<RouteRuleConfig>,
+    /// Committed PostgreSQL revision; zero for a file or test snapshot.
+    revision: i64,
+    /// Project credentials for a database-backed catalog.
+    project_auth: Option<ProjectAuth>,
+}
+
+/// Keyed project digests travel with the rest of the runtime snapshot.
+#[derive(Debug, Clone)]
+struct ProjectAuth {
+    /// Shared catalog secrets.
+    secrets: CatalogSecrets,
+    /// Digest keyed by the project ID.
+    digests: HashMap<String, Vec<u8>>,
 }
 
 impl RuntimeCatalog {
@@ -63,7 +81,41 @@ impl RuntimeCatalog {
             projects,
             project_by_id,
             routes,
+            revision: 0,
+            project_auth: None,
         }
+    }
+
+    /// Returns the loaded PostgreSQL revision (zero for an uncommitted snapshot).
+    #[must_use]
+    pub const fn revision(&self) -> i64 {
+        self.revision
+    }
+
+    /// Binds project authentication to the same revision used for model routing.
+    fn with_project_auth(
+        mut self,
+        revision: i64,
+        secrets: CatalogSecrets,
+        digests: HashMap<String, Vec<u8>>,
+    ) -> Self {
+        self.revision = revision;
+        self.project_auth = Some(ProjectAuth { secrets, digests });
+        self
+    }
+
+    /// Verifies a project bearer credential against this snapshot.
+    #[must_use]
+    pub fn verify_project_key(&self, project_id: &str, token: &str) -> bool {
+        if let Some(auth) = &self.project_auth {
+            return auth
+                .digests
+                .get(project_id)
+                .is_some_and(|digest| auth.secrets.verify_project(project_id, token, digest));
+        }
+        self.find_project(project_id)
+            .and_then(|project| project.api_key.as_deref())
+            .is_some_and(|key| tokens_equal(key.as_bytes(), token.as_bytes()))
     }
 
     /// Looks up a provider by ID.

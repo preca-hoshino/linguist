@@ -166,6 +166,8 @@ async fn spawn_mock_upstream() -> (String, MockUpstreamState) {
 fn e2e_providers(mock_base_url: &str) -> Vec<ProviderConfig> {
     vec![
         ProviderConfig {
+            vendor: None,
+            api_type: None,
             id: "primary-prov".to_string(),
             name: "Primary".to_string(),
             icon: "openai".to_string(),
@@ -187,6 +189,8 @@ fn e2e_providers(mock_base_url: &str) -> Vec<ProviderConfig> {
             }],
         },
         ProviderConfig {
+            vendor: None,
+            api_type: None,
             id: "fallback-prov".to_string(),
             name: "Fallback".to_string(),
             icon: "qwen-color".to_string(),

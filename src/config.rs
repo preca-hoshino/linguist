@@ -46,7 +46,7 @@ impl Default for ServerConfig {
     }
 }
 
-/// PostgreSQL pure-log storage configuration.
+/// PostgreSQL connection and telemetry settings.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct DatabaseConfig {
@@ -71,11 +71,11 @@ impl Default for DatabaseConfig {
     }
 }
 
-/// Catalog source configuration (`json_files` now, or future `postgres`).
+/// Catalog ingestion configuration. The runtime always reads PostgreSQL.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ConfigsSection {
-    /// Configuration source identifier (`"json_files"` or `"postgres"`).
+    /// `json_sync` imports files into PostgreSQL; `postgres` only consumes it.
     pub source: String,
     /// Path to supply-side `chatLanguageModels.json`.
     pub providers_path: PathBuf,
@@ -87,10 +87,24 @@ pub struct ConfigsSection {
     pub watch_reload: bool,
 }
 
+impl ConfigsSection {
+    /// Resolves the ingest mode; `json_files` remains an alias for older deployments.
+    ///
+    /// # Errors
+    /// Returns an error for an unknown configuration source.
+    pub fn imports_json(&self) -> Result<bool> {
+        match self.source.as_str() {
+            "json_sync" | "json_files" => Ok(true),
+            "postgres" => Ok(false),
+            _ => anyhow::bail!("[configs].source must be json_sync or postgres"),
+        }
+    }
+}
+
 impl Default for ConfigsSection {
     fn default() -> Self {
         Self {
-            source: "json_files".to_string(),
+            source: "json_sync".to_string(),
             providers_path: PathBuf::from("./chatLanguageModels.json"),
             projects_path: PathBuf::from("./projects.json"),
             routes_path: PathBuf::from("./routes.json"),

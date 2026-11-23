@@ -586,11 +586,8 @@ fn verify_project_auth(
     project_id: &str,
     headers: &HeaderMap,
 ) -> Option<Response> {
-    let authorized = catalog
-        .find_project(project_id)
-        .and_then(|project| project.api_key.as_deref())
-        .zip(extract_bearer_token(headers))
-        .is_some_and(|(expected, provided)| constant_time_eq(expected, provided));
+    let authorized = extract_bearer_token(headers)
+        .is_some_and(|token| catalog.verify_project_key(project_id, token));
 
     if authorized {
         None
@@ -601,16 +598,6 @@ fn verify_project_auth(
             "authentication_error",
         ))
     }
-}
-
-/// Compares two secrets without short-circuiting on the first differing byte.
-fn constant_time_eq(a: &str, b: &str) -> bool {
-    let (a, b) = (a.as_bytes(), b.as_bytes());
-    let mut diff = a.len() ^ b.len();
-    for i in 0..a.len().max(b.len()) {
-        diff |= usize::from(a.get(i).copied().unwrap_or(0) ^ b.get(i).copied().unwrap_or(0));
-    }
-    diff == 0
 }
 
 /// Extracts Bearer token from `Authorization` header.

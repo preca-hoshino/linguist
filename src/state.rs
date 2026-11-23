@@ -31,6 +31,8 @@ pub struct AppState {
     pub db_pool: Option<PgPool>,
     /// Optional async log writer handle.
     pub log_writer: Option<LogWriterHandle>,
+    /// Hash of the console token; project keys do not grant console access.
+    catalog_token: Option<ring::digest::Digest>,
 }
 
 impl AppState {
@@ -62,6 +64,24 @@ impl AppState {
             http_client,
             db_pool,
             log_writer,
+            catalog_token: None,
+        })
+    }
+
+    /// Enables the configuration console with a separate operator bearer token.
+    #[must_use]
+    pub fn with_catalog_token(mut self, token: Option<&str>) -> Self {
+        self.catalog_token = token
+            .filter(|token| !token.is_empty())
+            .map(|token| ring::digest::digest(&ring::digest::SHA256, token.as_bytes()));
+        self
+    }
+
+    /// Checks a console token, or returns `None` if console access is not configured.
+    pub(crate) fn verify_catalog_token(&self, token: &str) -> Option<bool> {
+        self.catalog_token.as_ref().map(|expected| {
+            let provided = ring::digest::digest(&ring::digest::SHA256, token.as_bytes());
+            crate::catalog::secrets::tokens_equal(expected.as_ref(), provided.as_ref())
         })
     }
 

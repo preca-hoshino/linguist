@@ -1,19 +1,19 @@
-//! Linguist CLI entrypoint (`serve`, `check-config`, `seed-demo`).
+//! Linguist CLI entrypoint (`serve`, `check-config`, `disable-json-sync`, `seed-demo`).
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use arc_swap::ArcSwap;
 use clap::{Parser, Subcommand};
 use serde_json::json;
 use tokio::net::TcpListener;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
-use linguist::catalog::CatalogProvider;
 use linguist::catalog::json_loader::JsonFileCatalogProvider;
+use linguist::catalog::postgres::PgCatalogProvider;
+use linguist::catalog::secrets::CatalogSecrets;
+use linguist::catalog::{CatalogProvider, RuntimeCatalog, sync};
 use linguist::config::AppConfig;
 use linguist::db::{self, LogWriterHandle};
 use linguist::metrics_cache::MetricsCache;
@@ -43,8 +43,10 @@ struct Cli {
 enum Commands {
     /// Start the HTTP proxy gateway and embedded telemetry web dashboard.
     Serve,
-    /// Validate `config.toml`, JSON catalogs, and compile all 5-stage TS/JS scripts offline.
+    /// Validate the configured catalog and compile all five script stages.
     CheckConfig,
+    /// Permanently stop JSON imports into this PostgreSQL database.
+    DisableJsonSync,
     /// Initialize PostgreSQL schema and populate realistic multi-day demo telemetry.
     SeedDemo {
         /// Number of historical days to generate.
@@ -64,9 +66,7 @@ async fn main() -> Result<()> {
 
     match cli.command.unwrap_or(Commands::Serve) {
         Commands::CheckConfig => {
-            let engine = ScriptEngine::new(cfg.script_engine.clone());
-            let loader = JsonFileCatalogProvider::new(cfg.configs.clone(), engine);
-            let catalog = loader.load_sync()?;
+            let catalog = load_for_cli(&cfg, None).await?;
 
             let mut script_count = 0usize;
             for p in &catalog.providers {
@@ -105,11 +105,18 @@ async fn main() -> Result<()> {
                 script_count
             );
         }
-        Commands::SeedDemo { days } => {
-            let engine = ScriptEngine::new(cfg.script_engine.clone());
-            let loader = JsonFileCatalogProvider::new(cfg.configs.clone(), engine);
-            let catalog = loader.load_sync()?;
+        Commands::DisableJsonSync => {
+            let secrets = CatalogSecrets::from_env()?;
             let pool = db::init_db_pool(&cfg.database).await?;
+            let engine = ScriptEngine::new(cfg.script_engine);
+            PgCatalogProvider::new(pool, secrets, engine)
+                .disable_json_sync()
+                .await?;
+            println!("PostgreSQL catalog no longer accepts JSON imports");
+        }
+        Commands::SeedDemo { days } => {
+            let pool = db::init_db_pool(&cfg.database).await?;
+            let catalog = load_for_cli(&cfg, Some(pool.clone())).await?;
             let tz_offset = db::timezone_offset_secs(&cfg.ui.timezone);
             let inserted = db::seed_demo(&pool, &catalog, tz_offset, days).await?;
             println!("Seeded {inserted} demo requests across {days} days into PostgreSQL");
@@ -122,38 +129,43 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-/// Boots the PostgreSQL pool, catalog loader, hot-reload watcher, metrics cache,
-/// and Axum HTTP server.
-async fn run_serve(cfg: AppConfig) -> Result<()> {
+/// Uses the files for offline validation, or loads the committed PostgreSQL catalog in PG mode.
+async fn load_for_cli(cfg: &AppConfig, pool: Option<sqlx::PgPool>) -> Result<RuntimeCatalog> {
     let engine = ScriptEngine::new(cfg.script_engine.clone());
-    let loader = JsonFileCatalogProvider::new(cfg.configs.clone(), engine.clone());
-    let initial_catalog = loader.load_catalog().await?;
-
-    info!(
-        providers = initial_catalog.providers.len(),
-        models = initial_catalog.total_models(),
-        projects = initial_catalog.projects.len(),
-        routes = initial_catalog.routes.len(),
-        "loaded Linguist JSON catalog"
-    );
-
-    let catalog_swap = Arc::new(ArcSwap::from_pointee(initial_catalog));
-    let _watcher = if cfg.configs.watch_reload {
-        match loader.spawn_watcher(Arc::clone(&catalog_swap)) {
-            Ok(w) => {
-                info!("JSON catalog file hot-reload watcher enabled");
-                Some(w)
-            }
-            Err(err) => {
-                warn!(error = %err, "failed to start hot-reload watcher; continuing without watch");
-                None
-            }
-        }
+    if cfg.configs.imports_json()? {
+        JsonFileCatalogProvider::new(cfg.configs.clone(), engine)
+            .load_catalog()
+            .await
     } else {
-        None
-    };
+        let secrets = CatalogSecrets::from_env()?;
+        let pool = match pool {
+            Some(pool) => pool,
+            None => db::init_db_pool(&cfg.database).await?,
+        };
+        PgCatalogProvider::new(pool, secrets, engine)
+            .load_catalog()
+            .await
+    }
+}
 
+/// Starts PostgreSQL-backed configuration, telemetry, and the HTTP gateway.
+async fn run_serve(cfg: AppConfig) -> Result<()> {
+    let imports_json = cfg.configs.imports_json()?;
+    let secrets = CatalogSecrets::from_env()?;
+    let console_token = std::env::var("LINGUIST_CATALOG_TOKEN").ok();
     let pool = db::init_db_pool(&cfg.database).await?;
+    let engine = ScriptEngine::new(cfg.script_engine.clone());
+    let importer = imports_json.then(|| {
+        (
+            JsonFileCatalogProvider::new(cfg.configs.clone(), engine.clone()),
+            cfg.configs.watch_reload,
+        )
+    });
+    let catalog_swap = sync::start(
+        PgCatalogProvider::new(pool.clone(), secrets, engine.clone()),
+        importer,
+    )
+    .await?;
     let metrics = MetricsCache::new(&cfg.metrics);
     match db::warmup_metrics_cache(&pool, &metrics, cfg.metrics.warmup_days_from_db).await {
         Ok(samples) => info!(samples, "warmed up MetricsCache from PostgreSQL"),
@@ -179,7 +191,8 @@ async fn run_serve(cfg: AppConfig) -> Result<()> {
         engine,
         Some(pool),
         Some(log_writer),
-    )?;
+    )?
+    .with_catalog_token(console_token.as_deref());
 
     let app = web::build_router(state);
     let addr_str = format!("{}:{}", cfg.server.host, cfg.server.port);

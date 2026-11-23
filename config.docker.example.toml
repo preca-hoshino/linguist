@@ -14,8 +14,9 @@ log_error_payload = true
 log_full_payload = false
 
 [configs]
-# 相对于容器内 /config/config.toml 解析
-source = "json_files"
+# json_sync 将 JSON 同步到 PostgreSQL；postgres 只读取已导入的目录
+# 配置路径相对于容器内 /config/config.toml 解析
+source = "json_sync"
 providers_path = "./chatLanguageModels.json"
 projects_path = "./projects.json"
 routes_path = "./routes.json"

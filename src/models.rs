@@ -158,6 +158,10 @@ pub struct RawModelConfig {
 /// Normalized supply-side provider configuration loaded into `RuntimeCatalog`.
 #[derive(Debug, Clone)]
 pub struct ProviderConfig {
+    /// Optional VS Code provider kind.
+    pub vendor: Option<String>,
+    /// Optional VS Code API kind.
+    pub api_type: Option<String>,
     /// Stable provider identifier.
     pub id: String,
     /// Human-readable display name.
@@ -1214,6 +1218,8 @@ mod tests {
         assert!(!meta_json.contains("ctx.state.a"));
 
         let provider = ProviderConfig {
+            vendor: None,
+            api_type: None,
             id: "deepseek".to_string(),
             name: "DeepSeek".to_string(),
             icon: "deepseek-color".to_string(),

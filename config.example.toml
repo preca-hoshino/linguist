@@ -4,15 +4,15 @@ port = 9527
 upstream_timeout_secs = 600
 
 [database]
-# PostgreSQL 仅用作日志与统计存储，启动时自动建库建表
+# PostgreSQL 存储配置目录、日志与统计；启动时自动迁移
 url = "postgres://linguist:password@127.0.0.1:5432/linguist"
 max_connections = 10
 log_error_payload = true
 log_full_payload = false
 
 [configs]
-# 当前配置源为 "json_files"，未来切换 PG 配置中心时仅需改为 "postgres" 并抛弃以下 JSON 路径
-source = "json_files"
+# json_sync 将 JSON 同步到 PostgreSQL；postgres 只读取已导入的目录
+source = "json_sync"
 providers_path = "./chatLanguageModels.json"
 projects_path = "./projects.json"
 routes_path = "./routes.json"

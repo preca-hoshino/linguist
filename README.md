@@ -5,15 +5,28 @@ Programmable script-routed `OpenAI` Chat API gateway and read-only token telemet
 ## Quick Commands
 
 ```powershell
-# Check config and pre-compile all 5-stage TS/JS scripts
+# Build the embedded UI before the first Cargo build in a fresh checkout
+npm --prefix frontend ci
+npm --prefix frontend run build
+
+# Check the JSON configuration and pre-compile all 5-stage TS/JS scripts
 cargo run -- check-config
 
 # Seed 180 days of demo telemetry into PostgreSQL
 cargo run -- seed-demo --days 180
 
-# Start gateway & embedded telemetry dashboard on http://127.0.0.1:9527
+# Generate once; persist the master key and reuse it on restart and across instances.
+$env:LINGUIST_CATALOG_KEY = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+$env:LINGUIST_CATALOG_TOKEN = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
 cargo run -- serve
 ```
+
+### Configuration in PostgreSQL
+
+- `[configs].source = "json_sync"` (or the legacy `"json_files"`) imports all three JSON catalogs and resolved `@file:` scripts at startup. With `watch_reload = true`, file events and a 10-second recheck trigger validated, all-or-nothing replacements. Invalid changes preserve the last committed version. To change several files together, stop the importer or disable its watcher before editing, then restart it after all files are ready.
+- The gateway and catalog API read PostgreSQL, not the import files. The gateway swaps complete in-memory snapshots after a commit, without interrupting active requests. Run one JSON importer per database and set other instances to `source = "postgres"` after the first import.
+- `LINGUIST_CATALOG_KEY` is a shared 32-byte random hex key. Back it up separately from the database; it protects upstream credentials and verifies existing project credentials. `LINGUIST_CATALOG_TOKEN` unlocks only the configuration console. Keep it separate from project API keys. If unset, model traffic and telemetry still work, but catalog access is disabled.
+- When ready to remove the files, verify the last sync, run `cargo run -- disable-json-sync`, and set `[configs].source = "postgres"` on every instance. The database rejects subsequent JSON imports. No files are deleted by the command.
 
 SVG icons from the MIT-licensed LobeHub icon pack are included in the executable and served read-only at `/icons/{slug}.svg`. The embedded pack works in local and Docker deployments without runtime downloads or a mounted icon directory; unknown icons use the dashboard monogram fallback. The upstream license is included at [icons/lobe/LICENSE](icons/lobe/LICENSE).
 
@@ -45,6 +58,14 @@ chmod 644 docker/config/config.toml docker/config/*.json
 
 If your JSON configs reference external `@file:` scripts (e.g. `"@file:scripts/route.js"`), place them inside `docker/config/scripts/` with `0644` (world-readable for UID `65532`) or `chown 65532:65532` + `0640`.
 
+Set `LINGUIST_CATALOG_KEY` in the deployment environment or the ignored root `.env`. Set a separate `LINGUIST_CATALOG_TOKEN` if you want to enable the configuration console. Generate each independently, for example with `openssl rand -hex 32`. Do not regenerate the master key on redeploy. If upgrading an existing installation with its own Compose file, pass the variables through to the `linguist` service:
+
+```yaml
+environment:
+  LINGUIST_CATALOG_KEY: ${LINGUIST_CATALOG_KEY:-}
+  LINGUIST_CATALOG_TOKEN: ${LINGUIST_CATALOG_TOKEN:-}
+```
+
 ### 2. External PostgreSQL Requirements & TLS
 
 - **Network reachability**: `127.0.0.1` inside the container refers to the container itself, not the host.
@@ -52,12 +73,12 @@ If your JSON configs reference external `@file:` scripts (e.g. `"@file:scripts/r
   - To connect to PostgreSQL in another Docker network, attach the service to that shared network or use its reachable IP/DNS name.
   - Percent-encode special characters in database credentials (e.g. `@` -> `%40`, `:` -> `%3A`).
 - **Database & permissions**:
-  - Superuser is **not** required. Linguist runs embedded SQL migrations automatically on startup (`request_logs`, `request_payloads`, `daily_model_stats`, `system_events`).
+  - Superuser is **not** required. Linguist runs embedded SQL migrations for the catalog and telemetry automatically on startup.
   - If the target database does not exist yet, Linguist attempts to connect to the `postgres` maintenance database and run `CREATE DATABASE`. On managed/restricted PostgreSQL instances without `CREATEDB` or `postgres` maintenance DB access, pre-create the database and grant schema ownership or `CREATE` + DML privileges on `public` (required on PostgreSQL 15+).
 - **TLS & system / private CA**:
   - Both upstream HTTPS (`reqwest`) and PostgreSQL (`sqlx`) bundle Mozilla WebPKI roots and also read OS/environment CA stores (`SSL_CERT_FILE`, `SSL_CERT_DIR`).
   - For remote PostgreSQL over TLS, append `?sslmode=verify-full` to `[database].url`.
-  - For a private CA (for upstream model APIs and/or PostgreSQL): place your CA PEM at `docker/config/certs/ca.pem` (`0644`), uncomment `SSL_CERT_FILE=/config/certs/ca.pem` in [compose.yaml](compose.yaml), or pass `?sslmode=verify-full&sslrootcert=/config/certs/pg-ca.pem` for PostgreSQL alone.
+  - For a private CA (for upstream model APIs and/or PostgreSQL): place your CA PEM at `docker/config/certs/ca.pem` (`0644`), uncomment `SSL_CERT_FILE: /config/certs/ca.pem` in [compose.yaml](compose.yaml), or pass `?sslmode=verify-full&sslrootcert=/config/certs/pg-ca.pem` for PostgreSQL alone.
   - Note: if PostgreSQL TLS/protocol negotiation fails with a protocol error, Linguist may also attempt the fallback check against the `postgres` maintenance database; verify both TLS parameters and `pg_hba.conf` when diagnosing startup failures.
 
 ### 3. Unified CLI, Lifecycle & Operations
@@ -107,6 +128,14 @@ curl https://linguist.example.com/model/default/v1/chat/completions \
   call models are not supported (a `"*"` callModel id is rejected when the config loads).
 - The legacy `/v1/*`, `/g/{project}/v1/*` and `/p/{provider}/v1/*` endpoints were removed and
   return `404`.
+
+### Configuration console API
+
+Use `Authorization: Bearer <LINGUIST_CATALOG_TOKEN>` on the same origin. Catalog lists include configurations that have never received traffic.
+
+- `GET /api/v1/catalog/{resource}` — `providers`, `provider-models`, `projects`, `project-models`, or `routes`. Lists support `q`, `page`, and `page_size`. Models accept `provider_id` or `project_id` for their parent; routing accepts `project_id` and `call_model_id` to identify the first matching enabled rule without executing scripts.
+- `GET /api/v1/catalog/{resource}/detail?id=…` — add the parent ID for either model resource. Details expose script source and configuration fields to the console operator, never the dedicated API key values. Endpoint userinfo, query strings and fragments are omitted. Keep secrets out of script source and metadata.
+- `GET /api/v1/catalog/status` — committed revision, this instance's loaded revision, and the latest sync error, if any. Use this to verify a final sync before removing JSON.
 
 ### Per-endpoint retries
 

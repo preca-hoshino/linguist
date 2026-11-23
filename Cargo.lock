@@ -1509,6 +1509,7 @@ dependencies = [
  "mime_guess",
  "notify",
  "reqwest",
+ "ring",
  "rust-embed",
  "rustls",
  "rustls-native-certs",

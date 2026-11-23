@@ -11,6 +11,7 @@ icons/lobe/*
 docker
 config.toml
 config.docker.toml
+.env
 *.bak
 *.tmp
 .DS_Store

@@ -252,6 +252,8 @@ mod tests {
         RuntimeCatalog::new(
             vec![
                 ProviderConfig {
+                    vendor: None,
+                    api_type: None,
                     id: "p1".to_string(),
                     name: "Provider 1".to_string(),
                     icon: "openai".to_string(),
@@ -260,6 +262,8 @@ mod tests {
                     models: vec![primary_model],
                 },
                 ProviderConfig {
+                    vendor: None,
+                    api_type: None,
                     id: "p2".to_string(),
                     name: "Provider 2".to_string(),
                     icon: "qwen-color".to_string(),
