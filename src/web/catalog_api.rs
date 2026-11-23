@@ -32,8 +32,7 @@ async fn authorize(State(state): State<AppState>, request: Request, next: Next) 
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.split_once(' '))
         .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("bearer"))
-        .map(|(_, token)| token.trim())
-        .unwrap_or_default();
+        .map_or("", |(_, token)| token.trim());
     let mut response = match state.verify_catalog_token(token) {
         None => error(StatusCode::SERVICE_UNAVAILABLE, "catalog_disabled"),
         Some(false) => {
