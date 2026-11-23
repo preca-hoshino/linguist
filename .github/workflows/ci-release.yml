@@ -208,16 +208,12 @@ jobs:
           CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER: aarch64-linux-gnu-gcc
         run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Stage artifact & SHA256
+      - name: Stage binary artifact
         shell: bash
         run: |
           mkdir -p staging
           TARGET_DIR="target/${{ matrix.target }}/release"
           cp "${TARGET_DIR}/${{ matrix.bin_name }}" "staging/${{ matrix.artifact_name }}"
-          if [ "${{ matrix.name }}" = "windows-x64" ]; then
-            cp "${TARGET_DIR}/linguist.exe" "staging/linguist.exe"
-          fi
-          (cd staging && sha256sum * > "${{ matrix.name }}.sha256")
 
       - name: Generate build provenance attestation
         uses: actions/attest-build-provenance@v4
@@ -344,21 +340,14 @@ jobs:
           echo "release_tag=${RELEASE_TAG}" >> $GITHUB_OUTPUT
           echo "RELEASE_TAG=${RELEASE_TAG}" >> $GITHUB_ENV
 
-      - name: Publish Release & Upload Templates
+      - name: Publish Release Assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           COMMIT_MSG: ${{ github.event.head_commit.message }}
         run: |
-          cp linguist.d.ts dist/linguist.d.ts
-          cp config.example.toml dist/config.example.toml
-          cp config.docker.example.toml dist/config.docker.example.toml
-          cp chatLanguageModels.example.json dist/chatLanguageModels.example.json
-          cp projects.json dist/projects.example.json
-          cp routes.json dist/routes.example.json
-
           cat << EOF > release_notes.md
           ### 下载说明
-          - **Windows x64**：\`linguist-windows-x64.exe\`（或 \`linguist.exe\`）
+          - **Windows x64**：\`linguist-windows-x64.exe\`
           - **Windows ARM64**：\`linguist-windows-arm64.exe\`
           - **Linux x64（静态 musl）**：\`linguist-linux-x64\`
           - **Linux ARM64**：\`linguist-linux-arm64\`
