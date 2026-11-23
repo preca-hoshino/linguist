@@ -1,6 +1,7 @@
 [server]
 host = "127.0.0.1"
 port = 9527
+# 上游连接和读取空闲超时；非流式请求同时受总时限约束
 upstream_timeout_secs = 600
 
 [database]

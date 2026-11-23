@@ -23,6 +23,8 @@ cargo run -- serve
 
 Open `http://127.0.0.1:9527/`. The sidebar keeps telemetry separate from the five configuration tables. Each row's **编辑** action opens a read-only form with a locally bundled Monaco editor; there is no write API. The embedded UI serves dependency licenses at `/third-party-notices.txt`.
 
+`[server].upstream_timeout_secs` (minimum 5 seconds) limits connection establishment and upstream read inactivity. Streaming responses can continue beyond this duration while data arrives; non-streaming requests also retain a total deadline. Reverse proxies in front of Linguist must allow sufficient idle time for SSE responses.
+
 ### Configuration in PostgreSQL
 
 - `[configs].source = "json_sync"` (or the legacy `"json_files"`) imports all three JSON catalogs and resolved `@file:` scripts at startup. With `watch_reload = true`, file events and a 10-second recheck trigger validated, all-or-nothing replacements. Invalid changes preserve the last committed version. To change several files together, stop the importer or disable its watcher before editing, then restart it after all files are ready.

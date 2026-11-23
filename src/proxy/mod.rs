@@ -5,7 +5,7 @@ pub mod stream_inspector;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use axum::Json;
 use axum::Router;
@@ -313,6 +313,11 @@ async fn send_upstream_attempt(
     for (k, v) in &outbound_headers {
         req_builder = req_builder.header(k, v);
     }
+    if outbound_body.get("stream").and_then(Value::as_bool) != Some(true) {
+        req_builder = req_builder.timeout(Duration::from_secs(
+            state.config.server.upstream_timeout_secs.max(5),
+        ));
+    }
 
     let upstream_res = match req_builder.json(&outbound_body).send().await {
         Ok(resp) => resp,
@@ -484,16 +489,27 @@ fn stream_sse_response(
 ) -> Response {
     let state_clone = state.clone();
     let on_complete: CompletionCallback = Arc::new(move |record| {
-        info!(
-            request_uid = %record.request_uid,
-            provider = %record.provider_id,
-            model = %record.model_id,
-            attempt = record.attempt_index,
-            ttft_ms = record.ttft_ms,
-            decode_tps = record.decode_tps,
-            tokens = record.total_tokens,
-            "completed SSE request"
-        );
+        if let Some(error) = &record.error_message {
+            warn!(
+                request_uid = %record.request_uid,
+                provider = %record.provider_id,
+                model = %record.model_id,
+                attempt = record.attempt_index,
+                error = %error,
+                "SSE request interrupted"
+            );
+        } else {
+            info!(
+                request_uid = %record.request_uid,
+                provider = %record.provider_id,
+                model = %record.model_id,
+                attempt = record.attempt_index,
+                ttft_ms = record.ttft_ms,
+                decode_tps = record.decode_tps,
+                tokens = record.total_tokens,
+                "completed SSE request"
+            );
+        }
         state_clone.emit_log(record);
     });
 
@@ -512,6 +528,10 @@ fn stream_sse_response(
     resp_headers.insert(
         HeaderName::from_static("cache-control"),
         HeaderValue::from_static("no-cache"),
+    );
+    resp_headers.insert(
+        HeaderName::from_static("x-accel-buffering"),
+        HeaderValue::from_static("no"),
     );
     (status, resp_headers, Body::from_stream(inspected_stream)).into_response()
 }

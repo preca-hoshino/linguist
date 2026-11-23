@@ -48,10 +48,10 @@ impl AppState {
         db_pool: Option<PgPool>,
         log_writer: Option<LogWriterHandle>,
     ) -> Result<Self> {
+        let timeout = Duration::from_secs(config.server.upstream_timeout_secs.max(5));
         let http_client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(
-                config.server.upstream_timeout_secs.max(5),
-            ))
+            .connect_timeout(timeout)
+            .read_timeout(timeout)
             .pool_max_idle_per_host(64)
             .build()
             .context("failed to build upstream reqwest HTTP client")?;

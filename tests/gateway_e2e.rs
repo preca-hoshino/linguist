@@ -4,6 +4,7 @@
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use arc_swap::ArcSwap;
 use axum::Json;
@@ -317,8 +318,12 @@ async fn spawn_gateway(mock_base_url: &str) -> String {
 
 /// Spawns a gateway using a caller-supplied catalog.
 async fn spawn_gateway_with_catalog(catalog: RuntimeCatalog) -> String {
+    spawn_gateway_with_config(catalog, AppConfig::default()).await
+}
+
+/// Spawns a gateway with a caller-supplied catalog and configuration.
+async fn spawn_gateway_with_config(catalog: RuntimeCatalog, cfg: AppConfig) -> String {
     let catalog = Arc::new(ArcSwap::from_pointee(catalog));
-    let cfg = AppConfig::default();
     let metrics = MetricsCache::new(&MetricsConfig::default());
     let engine = ScriptEngine::new(ScriptEngineConfig::default());
     let state = AppState::new(cfg, catalog, metrics, engine, None, None).unwrap();
@@ -330,6 +335,120 @@ async fn spawn_gateway_with_catalog(catalog: RuntimeCatalog) -> String {
         let _ = axum::serve(listener, app).await;
     });
     format!("http://{addr}")
+}
+
+/// Sends either an active or a stalled SSE response, or a slowly delivered JSON response.
+async fn mock_slow_response(Json(body): Json<Value>) -> Response {
+    let scenario = body["test_scenario"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
+    if scenario == "headers" {
+        tokio::time::sleep(Duration::from_secs(6)).await;
+    }
+    let content_type = if scenario == "json" {
+        "application/json"
+    } else {
+        "text/event-stream"
+    };
+    let stream = futures::stream::unfold((0_u8, scenario), |(index, scenario)| async move {
+        if index > 6 {
+            return None;
+        }
+        if index > 0 {
+            let delay = if scenario == "stalled" { 6 } else { 1 };
+            tokio::time::sleep(Duration::from_secs(delay)).await;
+        }
+        let chunk = if scenario == "json" {
+            if index == 0 {
+                "{\"content\":\""
+            } else if index == 6 {
+                "\"}"
+            } else {
+                "x"
+            }
+        } else if index == 6 || (scenario == "stalled" && index == 1) {
+            "data: [DONE]\n\n"
+        } else {
+            "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\n"
+        };
+        Some((
+            Ok::<_, std::io::Error>(bytes::Bytes::from_static(chunk.as_bytes())),
+            (index + 1, scenario),
+        ))
+    });
+    (
+        StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, content_type)],
+        Body::from_stream(stream),
+    )
+        .into_response()
+}
+
+#[tokio::test]
+async fn streaming_timeout_tracks_inactivity_not_total_duration() {
+    let app = Router::new().route("/primary/v1/chat/completions", post(mock_slow_response));
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let mock_url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    let mut config = AppConfig::default();
+    config.server.upstream_timeout_secs = 5;
+    let mut routes = e2e_routes();
+    routes[0].fallbacks.clear();
+    let catalog = RuntimeCatalog::new(e2e_providers(&mock_url), e2e_projects(), routes);
+    let gateway = spawn_gateway_with_config(catalog, config).await;
+    let url = format!("{gateway}/model/coding/v1/chat/completions");
+    let client = reqwest::Client::new();
+
+    let run = |scenario: &'static str, stream: bool| {
+        let client = &client;
+        let url = &url;
+        async move {
+            let response = client
+                .post(url)
+                .bearer_auth("lin-proj-coding-secret")
+                .json(&json!({
+                    "model": "smart-coder",
+                    "stream": stream,
+                    "messages": [{"role": "user", "content": "hi"}],
+                    "test_scenario": scenario
+                }))
+                .send()
+                .await
+                .unwrap();
+            let status = response.status();
+            (status, response.bytes().await)
+        }
+    };
+
+    let (active, stalled, json, headers) = tokio::join!(
+        run("active", true),
+        run("stalled", true),
+        run("json", false),
+        run("headers", true),
+    );
+    assert_eq!(active.0, StatusCode::OK);
+    let active = active
+        .1
+        .expect("active SSE must remain open beyond the total timeout");
+    let active = String::from_utf8_lossy(&active);
+    assert_eq!(active.matches("\"content\":\"x\"").count(), 6);
+    assert!(active.contains("data: [DONE]"));
+    assert_eq!(stalled.0, StatusCode::OK);
+    assert!(stalled.1.is_err(), "stalled SSE must time out");
+    // The gateway returns a 502 JSON response when a non-streaming body exceeds the deadline.
+    assert_eq!(json.0, StatusCode::BAD_GATEWAY);
+    let json = json
+        .1
+        .expect("gateway should return a non-streaming timeout error response");
+    assert!(String::from_utf8_lossy(&json).contains("upstream_read_error"));
+    assert_eq!(headers.0, StatusCode::BAD_GATEWAY);
+    let headers = headers
+        .1
+        .expect("gateway should return a header timeout error response");
+    assert!(String::from_utf8_lossy(&headers).contains("upstream_connection_error"));
 }
 
 #[tokio::test]
@@ -475,6 +594,7 @@ async fn gateway_e2e_project_scoped_auth_fallback_snapshot_and_rewrite() {
     )
     .await;
     assert_eq!(sse_resp.status(), StatusCode::OK);
+    assert_eq!(sse_resp.headers()["x-accel-buffering"], "no");
 
     let mut stream = sse_resp.bytes_stream();
     let mut full_sse = String::new();

@@ -32,7 +32,7 @@ pub struct ServerConfig {
     pub host: String,
     /// Bind TCP port.
     pub port: u16,
-    /// Upstream request timeout in seconds.
+    /// Upstream connection/read inactivity timeout; also the total deadline for non-streaming requests.
     pub upstream_timeout_secs: u64,
 }
 

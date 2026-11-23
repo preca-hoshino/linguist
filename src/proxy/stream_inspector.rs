@@ -153,32 +153,33 @@ impl StreamTelemetryTracker {
 
         let mut output = Vec::with_capacity(chunk.len() + 64);
 
-        while let Some(newline_pos) = self.line_buffer.iter().position(|&b| b == b'\n') {
+        while let Some(newline_pos) = self
+            .line_buffer
+            .iter()
+            .position(|&b| b == b'\n' || b == b'\r')
+        {
             let mut line_bytes: Vec<u8> = self.line_buffer.drain(..=newline_pos).collect();
-            let had_cr = line_bytes.ends_with(b"\r\n");
-            let trimmed_len = if had_cr {
-                line_bytes.len().saturating_sub(2)
-            } else {
-                line_bytes.len().saturating_sub(1)
-            };
-            line_bytes.truncate(trimmed_len);
+            let delimiter = line_bytes[newline_pos];
+            line_bytes.truncate(newline_pos);
 
             if let Ok(line_str) = std::str::from_utf8(&line_bytes)
                 && let Some(rewritten) = self.inspect_sse_line(line_str, now)
             {
                 output.extend_from_slice(rewritten.as_bytes());
-            } else {
+            } else if self.meta.rewrite_response_model {
                 output.extend_from_slice(&line_bytes);
             }
 
-            if had_cr {
-                output.extend_from_slice(b"\r\n");
-            } else {
-                output.push(b'\n');
+            if self.meta.rewrite_response_model {
+                output.push(delimiter);
             }
         }
 
-        Bytes::from(output)
+        if self.meta.rewrite_response_model {
+            Bytes::from(output)
+        } else {
+            Bytes::copy_from_slice(chunk)
+        }
     }
 
     /// Flushes any trailing incomplete SSE line when the upstream stream closes.
@@ -193,7 +194,11 @@ impl StreamTelemetryTracker {
         {
             return Bytes::from(rewritten.into_bytes());
         }
-        Bytes::from(remaining)
+        if self.meta.rewrite_response_model {
+            Bytes::from(remaining)
+        } else {
+            Bytes::new()
+        }
     }
 
     /// Inspects a complete non-streaming JSON response body, updates metrics, and
@@ -568,7 +573,7 @@ impl<S> InspectedByteStream<S> {
 impl<S, E> Stream for InspectedByteStream<S>
 where
     S: Stream<Item = Result<Bytes, E>>,
-    E: std::fmt::Display,
+    E: std::error::Error + Send + Sync + 'static,
 {
     type Item = Result<Bytes, std::io::Error>;
 
@@ -588,7 +593,7 @@ where
                 Poll::Ready(Some(Ok(out)))
             }
             Poll::Ready(Some(Err(err))) => {
-                let msg = format!("upstream stream interrupted: {err}");
+                let msg = format!("upstream stream interrupted: {:#}", anyhow::Error::new(err));
                 self.emit_final(Some(msg.clone()));
                 self.tail_flushed = true;
                 Poll::Ready(Some(Err(std::io::Error::other(msg))))
@@ -623,9 +628,11 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
+    use futures::StreamExt;
     use serde_json::json;
 
     use super::*;
+    use crate::config::MetricsConfig;
 
     fn test_meta(is_stream: bool, rewrite_model: bool) -> InspectionMetadata {
         InspectionMetadata {
@@ -684,6 +691,69 @@ mod tests {
             assert!(metrics.decode_tps > metrics.e2e_tps);
             assert_eq!(rec.model_id, "qwen3.8-max");
         }
+    }
+
+    #[test]
+    fn sse_inspector_forwards_cr_terminated_lines_without_waiting_for_lf() {
+        let mut tracker = StreamTelemetryTracker::new(test_meta(true, true));
+        let first = tracker.process_sse_chunk(
+            b"data: {\"model\":\"upstream\",\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\r",
+        );
+        assert!(String::from_utf8_lossy(&first).contains("\"model\":\"smart-coder\""));
+        assert!(first.ends_with(b"\r"));
+
+        let second = tracker.process_sse_chunk(b"\n\rdata: [DONE]\r\r");
+        assert_eq!(second.as_ref(), b"\n\rdata: [DONE]\r\r");
+        assert!(tracker.finish_sse_tail().is_empty());
+    }
+
+    #[test]
+    fn sse_inspector_passes_partial_lines_through_when_not_rewriting() {
+        let mut tracker = StreamTelemetryTracker::new(test_meta(true, false));
+        let first = b"data: {\"choices\":[{\"delta\":{\"content\":\"hello";
+        let second = b" world\"}}]}\r\n\r\ndata: [DONE]";
+        assert_eq!(tracker.process_sse_chunk(first).as_ref(), first);
+        assert_eq!(tracker.process_sse_chunk(second).as_ref(), second);
+        assert!(tracker.finish_sse_tail().is_empty());
+        let finalized = tracker.finalize(None, None);
+        assert!(finalized.is_some());
+        if let Some((metrics, _)) = finalized {
+            assert_eq!(metrics.output_tokens, 2);
+        }
+    }
+
+    #[tokio::test]
+    #[allow(clippy::unwrap_used)]
+    async fn interrupted_sse_records_the_underlying_error_once() {
+        let recorded = Arc::new(Mutex::new(Vec::new()));
+        let output = Arc::clone(&recorded);
+        let callback: CompletionCallback = Arc::new(move |record| {
+            output.lock().unwrap().push(record);
+        });
+        let error = std::io::Error::other(std::io::Error::new(
+            std::io::ErrorKind::TimedOut,
+            "upstream read timed out",
+        ));
+        let input = futures::stream::iter([Err::<Bytes, _>(error)]);
+        let mut stream = InspectedByteStream::new(
+            input,
+            test_meta(true, false),
+            MetricsCache::new(&MetricsConfig::default()),
+            callback,
+        );
+        assert!(stream.next().await.unwrap().is_err());
+        assert!(stream.next().await.is_none());
+        drop(stream);
+
+        let records = recorded.lock().unwrap();
+        assert_eq!(records.len(), 1);
+        assert!(
+            records[0]
+                .error_message
+                .as_deref()
+                .unwrap()
+                .contains("upstream read timed out")
+        );
     }
 
     #[test]
