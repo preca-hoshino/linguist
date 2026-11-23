@@ -1154,7 +1154,8 @@ mod tests {
             ctx.route.target,
             Some(RouteEndpoint {
                 provider_id: "opencode".to_string(),
-                model_id: "qwen3.8-max".to_string()
+                model_id: "qwen3.8-max".to_string(),
+                max_attempts: 1,
             })
         );
 

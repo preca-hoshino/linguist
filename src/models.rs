@@ -537,6 +537,32 @@ pub struct RouteEndpoint {
     pub provider_id: String,
     /// Target model ID.
     pub model_id: String,
+    /// Maximum attempts for this endpoint, including the initial request (1 through 5).
+    #[serde(
+        default = "default_max_attempts",
+        deserialize_with = "deserialize_max_attempts"
+    )]
+    pub max_attempts: u8,
+}
+
+/// Default to a single attempt for existing route endpoints.
+const fn default_max_attempts() -> u8 {
+    1
+}
+
+/// Reject invalid retry counts in both static routes and script-generated endpoints.
+fn deserialize_max_attempts<'de, D>(deserializer: D) -> Result<u8, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let attempts = u8::deserialize(deserializer)?;
+    if (1..=5).contains(&attempts) {
+        Ok(attempts)
+    } else {
+        Err(serde::de::Error::custom(
+            "maxAttempts must be between 1 and 5",
+        ))
+    }
 }
 
 /// Candidate entry inside `ctx.route.candidates`.

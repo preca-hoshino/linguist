@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
 use arc_swap::ArcSwap;
@@ -44,6 +44,8 @@ struct MockUpstreamState {
     primary_calls: Arc<Mutex<Vec<RecordedUpstreamCall>>>,
     /// Captured calls hitting `/fallback/...`.
     fallback_calls: Arc<Mutex<Vec<RecordedUpstreamCall>>>,
+    /// Configured primary responses, defaulting to HTTP 429 when exhausted.
+    primary_statuses: Arc<Mutex<VecDeque<StatusCode>>>,
 }
 
 /// Captures request headers and JSON body into a `RecordedUpstreamCall`.
@@ -57,8 +59,8 @@ fn capture_call(headers: &HeaderMap, body: Value) -> RecordedUpstreamCall {
     RecordedUpstreamCall { headers: map, body }
 }
 
-/// Mock primary upstream endpoint returning HTTP 429 rate-limit.
-async fn mock_primary_429(
+/// Mock primary upstream endpoint returning configured statuses or HTTP 429.
+async fn mock_primary(
     State(state): State<MockUpstreamState>,
     headers: HeaderMap,
     Json(body): Json<Value>,
@@ -67,12 +69,22 @@ async fn mock_primary_429(
         .primary_calls
         .lock()
         .unwrap()
-        .push(capture_call(&headers, body));
-    (
-        StatusCode::TOO_MANY_REQUESTS,
-        Json(json!({ "error": { "message": "rate limited", "type": "rate_limit_error" } })),
-    )
-        .into_response()
+        .push(capture_call(&headers, body.clone()));
+    let status = state
+        .primary_statuses
+        .lock()
+        .unwrap()
+        .pop_front()
+        .unwrap_or(StatusCode::TOO_MANY_REQUESTS);
+    if status.is_success() {
+        mock_chat_response(&body)
+    } else {
+        (
+            status,
+            Json(json!({ "error": { "message": "mock failure" } })),
+        )
+            .into_response()
+    }
 }
 
 /// Mock fallback upstream endpoint supporting both streaming SSE and JSON chat responses.
@@ -81,18 +93,22 @@ async fn mock_fallback_ok(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
+    state
+        .fallback_calls
+        .lock()
+        .unwrap()
+        .push(capture_call(&headers, body.clone()));
+    mock_chat_response(&body)
+}
+
+/// Builds a mock streaming or JSON completion.
+fn mock_chat_response(body: &Value) -> Response {
     let is_stream = body.get("stream").and_then(Value::as_bool).unwrap_or(false);
     let model = body
         .get("model")
         .and_then(Value::as_str)
         .unwrap_or("unknown")
         .to_string();
-
-    state
-        .fallback_calls
-        .lock()
-        .unwrap()
-        .push(capture_call(&headers, body));
 
     if is_stream {
         let chunks = vec![
@@ -134,7 +150,7 @@ async fn mock_fallback_ok(
 async fn spawn_mock_upstream() -> (String, MockUpstreamState) {
     let state = MockUpstreamState::default();
     let app = Router::new()
-        .route("/primary/v1/chat/completions", post(mock_primary_429))
+        .route("/primary/v1/chat/completions", post(mock_primary))
         .route("/fallback/v1/chat/completions", post(mock_fallback_ok))
         .with_state(state.clone());
 
@@ -252,10 +268,12 @@ fn e2e_routes() -> Vec<RouteRuleConfig> {
             target: Some(RouteEndpoint {
                 provider_id: "primary-prov".to_string(),
                 model_id: "m-primary".to_string(),
+                max_attempts: 1,
             }),
             fallbacks: vec![RouteEndpoint {
                 provider_id: "fallback-prov".to_string(),
                 model_id: "m-fallback".to_string(),
+                max_attempts: 1,
             }],
             rewrite_response_model: true,
             script: None,
@@ -290,7 +308,12 @@ fn build_e2e_catalog(mock_base_url: &str) -> RuntimeCatalog {
 
 /// Spawns an in-process Linguist gateway wired to the mock upstream and returns `base_url`.
 async fn spawn_gateway(mock_base_url: &str) -> String {
-    let catalog = Arc::new(ArcSwap::from_pointee(build_e2e_catalog(mock_base_url)));
+    spawn_gateway_with_catalog(build_e2e_catalog(mock_base_url)).await
+}
+
+/// Spawns a gateway using a caller-supplied catalog.
+async fn spawn_gateway_with_catalog(catalog: RuntimeCatalog) -> String {
+    let catalog = Arc::new(ArcSwap::from_pointee(catalog));
     let cfg = AppConfig::default();
     let metrics = MetricsCache::new(&MetricsConfig::default());
     let engine = ScriptEngine::new(ScriptEngineConfig::default());
@@ -303,6 +326,80 @@ async fn spawn_gateway(mock_base_url: &str) -> String {
         let _ = axum::serve(listener, app).await;
     });
     format!("http://{addr}")
+}
+
+#[tokio::test]
+async fn endpoint_retries_are_bounded_and_start_over_for_each_request() {
+    let (mock_url, mock_state) = spawn_mock_upstream().await;
+    mock_state.primary_statuses.lock().unwrap().extend([
+        StatusCode::TOO_MANY_REQUESTS,
+        StatusCode::TOO_MANY_REQUESTS,
+        StatusCode::TOO_MANY_REQUESTS,
+        StatusCode::OK,
+        StatusCode::BAD_REQUEST,
+    ]);
+    let mut routes = e2e_routes();
+    routes[0].script = Some(
+        "ctx.route.target = { providerId: 'primary-prov', modelId: 'm-primary', maxAttempts: 2 }; \
+         ctx.route.fallbacks = [ \
+           { providerId: 'primary-prov', modelId: 'm-primary', maxAttempts: 5 }, \
+           { providerId: 'fallback-prov', modelId: 'm-fallback' } \
+         ];"
+        .to_string(),
+    );
+    let mut providers = e2e_providers(&mock_url);
+    for provider in &mut providers {
+        provider.script =
+            Some("ctx.request.headers['x-attempt'] = String(ctx.request.attempt);".to_string());
+    }
+    let catalog = RuntimeCatalog::new(providers, e2e_projects(), routes);
+    let gw_url = spawn_gateway_with_catalog(catalog).await;
+    let client = reqwest::Client::new();
+    let coding = format!("{gw_url}/model/coding/v1/chat/completions");
+
+    let first = post_chat(
+        &client,
+        coding.clone(),
+        Some("lin-proj-coding-secret"),
+        "smart-coder",
+        false,
+    )
+    .await;
+    assert_eq!(first.status(), StatusCode::OK);
+    {
+        let primaries = mock_state.primary_calls.lock().unwrap();
+        let fallbacks = mock_state.fallback_calls.lock().unwrap();
+        assert_eq!(primaries.len(), 2);
+        assert_eq!(primaries[0].headers["x-attempt"], "1");
+        assert_eq!(primaries[1].headers["x-attempt"], "2");
+        assert_eq!(fallbacks.len(), 1);
+        assert_eq!(fallbacks[0].headers["x-attempt"], "3");
+        assert_eq!(fallbacks[0].body["reasoning_effort"], json!("high"));
+    }
+
+    let second = post_chat(
+        &client,
+        coding.clone(),
+        Some("lin-proj-coding-secret"),
+        "smart-coder",
+        false,
+    )
+    .await;
+    assert_eq!(second.status(), StatusCode::OK);
+    assert_eq!(mock_state.primary_calls.lock().unwrap().len(), 4);
+    assert_eq!(mock_state.fallback_calls.lock().unwrap().len(), 1);
+
+    let third = post_chat(
+        &client,
+        coding,
+        Some("lin-proj-coding-secret"),
+        "smart-coder",
+        false,
+    )
+    .await;
+    assert_eq!(third.status(), StatusCode::BAD_REQUEST);
+    assert_eq!(mock_state.primary_calls.lock().unwrap().len(), 5);
+    assert_eq!(mock_state.fallback_calls.lock().unwrap().len(), 1);
 }
 
 /// Sends a chat request to `path` with an optional Bearer key and returns the HTTP response.

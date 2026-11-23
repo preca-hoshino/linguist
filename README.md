@@ -107,3 +107,19 @@ curl https://linguist.example.com/model/default/v1/chat/completions \
   call models are not supported (a `"*"` callModel id is rejected when the config loads).
 - The legacy `/v1/*`, `/g/{project}/v1/*` and `/p/{provider}/v1/*` endpoints were removed and
   return `404`.
+
+### Per-endpoint retries
+
+Route targets and fallbacks may set `maxAttempts` to an integer from 1 to 5. It includes the
+initial request and defaults to 1 when omitted. Route scripts may set it per endpoint:
+
+```typescript
+ctx.route.target = { providerId: "primary", modelId: "model-id", maxAttempts: 2 };
+ctx.route.fallbacks = [{ providerId: "backup", modelId: "model-id" }];
+```
+
+Each request starts with the primary target. Transport failures and HTTP statuses listed in
+`script_engine.fallback_status_codes` trigger the next attempt; after the response starts, it is
+not retried. Model/provider script failures can also move to the next attempt. Attempts rerun the
+model and provider stages from the route snapshot. Repeated entries for the same provider/model
+are deduplicated; use `maxAttempts` instead to retry an endpoint.

@@ -135,10 +135,14 @@ pub async fn run_routing_stages(
     };
 
     let mut endpoints = Vec::with_capacity(1 + ctx.route.fallbacks.len());
-    endpoints.push(primary);
-    for fb in &ctx.route.fallbacks {
-        if !endpoints.contains(fb) {
-            endpoints.push(fb.clone());
+    for endpoint in std::iter::once(&primary).chain(&ctx.route.fallbacks) {
+        if !endpoints.iter().any(|existing: &RouteEndpoint| {
+            existing.provider_id == endpoint.provider_id && existing.model_id == endpoint.model_id
+        }) {
+            endpoints.extend(std::iter::repeat_n(
+                endpoint.clone(),
+                usize::from(endpoint.max_attempts),
+            ));
         }
     }
 
@@ -292,15 +296,55 @@ mod tests {
                 target: Some(RouteEndpoint {
                     provider_id: "p1".to_string(),
                     model_id: "primary-m".to_string(),
+                    max_attempts: 1,
                 }),
                 fallbacks: vec![RouteEndpoint {
                     provider_id: "p2".to_string(),
                     model_id: "fallback-m".to_string(),
+                    max_attempts: 1,
                 }],
                 rewrite_response_model: true,
                 script: None,
             }],
         )
+    }
+
+    #[tokio::test]
+    async fn invalid_script_retry_counts_are_rejected() {
+        let mut catalog = build_fallback_test_catalog();
+        let metrics = MetricsCache::new(&MetricsConfig::default());
+        let engine = ScriptEngine::new(ScriptEngineConfig::default());
+        for value in ["0", "6", "1.5", "null"] {
+            catalog.routes[0].script = Some(format!("ctx.route.target.maxAttempts = {value};"));
+            let result = run_routing_stages(
+                &catalog,
+                &metrics,
+                &engine,
+                Uuid::new_v4(),
+                "coding",
+                "smart",
+                Map::new(),
+            )
+            .await;
+            assert!(result.is_err(), "maxAttempts={value} must be rejected");
+        }
+    }
+
+    #[test]
+    fn static_endpoint_retry_counts_are_validated() {
+        for value in [json!(0), json!(6), json!(1.5), json!(null)] {
+            let endpoint = json!({
+                "providerId": "p1",
+                "modelId": "primary-m",
+                "maxAttempts": value,
+            });
+            assert!(serde_json::from_value::<RouteEndpoint>(endpoint).is_err());
+        }
+        let endpoint = serde_json::from_value::<RouteEndpoint>(json!({
+            "providerId": "p1",
+            "modelId": "primary-m",
+        }));
+        assert_eq!(endpoint.ok().map(|value| value.max_attempts), Some(1));
     }
 
     #[tokio::test]

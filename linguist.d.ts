@@ -85,6 +85,8 @@ export interface ModelMeta {
 export interface RouteEndpoint {
   providerId: string;
   modelId: string;
+  /** Total attempts for this endpoint, including the first (1-5; default: 1). */
+  maxAttempts?: number;
 }
 
 export interface CandidateItem {
