@@ -1,6 +1,6 @@
 # Linguist
 
-Programmable script-routed `OpenAI` Chat API gateway and read-only token telemetry dashboard built with Rust, PostgreSQL, and React.
+Programmable script-routed `OpenAI` Chat API gateway with a token telemetry dashboard and a read-only configuration console, built with Rust, PostgreSQL, and React.
 
 ## Quick Commands
 
@@ -21,10 +21,12 @@ $env:LINGUIST_CATALOG_TOKEN = [Convert]::ToHexString([Security.Cryptography.Rand
 cargo run -- serve
 ```
 
+Open `http://127.0.0.1:9527/`. The sidebar keeps telemetry separate from the five configuration tables. Each row's **编辑** action opens a read-only form with a locally bundled Monaco editor; there is no write API. The embedded UI serves dependency licenses at `/third-party-notices.txt`.
+
 ### Configuration in PostgreSQL
 
 - `[configs].source = "json_sync"` (or the legacy `"json_files"`) imports all three JSON catalogs and resolved `@file:` scripts at startup. With `watch_reload = true`, file events and a 10-second recheck trigger validated, all-or-nothing replacements. Invalid changes preserve the last committed version. To change several files together, stop the importer or disable its watcher before editing, then restart it after all files are ready.
-- The gateway and catalog API read PostgreSQL, not the import files. The gateway swaps complete in-memory snapshots after a commit, without interrupting active requests. Run one JSON importer per database and set other instances to `source = "postgres"` after the first import.
+- The gateway and configuration pages read PostgreSQL, not the import files. The gateway swaps complete in-memory snapshots after a commit, without interrupting active requests. Run one JSON importer per database and set other instances to `source = "postgres"` after the first import.
 - `LINGUIST_CATALOG_KEY` is a shared 32-byte random hex key. Back it up separately from the database; it protects upstream credentials and verifies existing project credentials. `LINGUIST_CATALOG_TOKEN` unlocks only the configuration console. Keep it separate from project API keys. If unset, model traffic and telemetry still work, but catalog access is disabled.
 - When ready to remove the files, verify the last sync, run `cargo run -- disable-json-sync`, and set `[configs].source = "postgres"` on every instance. The database rejects subsequent JSON imports. No files are deleted by the command.
 

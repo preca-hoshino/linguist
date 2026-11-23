@@ -12,8 +12,10 @@
     "format:check": "node -e \"console.log('formatting verified')\""
   },
   "dependencies": {
+    "monaco-editor": "^0.57.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-router": "^8.5.2"
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",

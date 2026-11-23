@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchDailyModels,
   fetchLeaderboard,
@@ -37,8 +37,14 @@ export function TelemetryPage() {
   const [dailyModels, setDailyModels] = useState<DailyModelDay[]>([]);
   const [recentRequests, setRecentRequests] = useState<RecentRequestItem[]>([]);
 
+  const pending = useRef<AbortController | null>(null);
   const loadAll = useCallback(
-    async (signal?: AbortSignal) => {
+    async (skipIfPending = false) => {
+      if (skipIfPending && pending.current) return;
+      pending.current?.abort();
+      const controller = new AbortController();
+      pending.current = controller;
+      const { signal } = controller;
       setIsRefreshing(true);
       try {
         const [ov, lb, dm, rr] = await Promise.all([
@@ -53,6 +59,7 @@ export function TelemetryPage() {
           fetchDailyModels(selectedProject, selectedProvider, dailyDays, signal),
           fetchRecentRequests(selectedProject, selectedProvider, selectedModel, 50, signal),
         ]);
+        if (signal.aborted) return;
         setOverview(ov);
         setLeaderboard(lb);
         setDailyModels(dm);
@@ -60,12 +67,15 @@ export function TelemetryPage() {
         setErrorMsg(null);
         setLastUpdated(new Date().toLocaleTimeString("zh-CN", { hour12: false }));
       } catch (err) {
-        if (err instanceof DOMException && err.name === "AbortError") {
-          return;
+        if (!signal.aborted) {
+          setErrorMsg(err instanceof Error ? err.message : "Failed to load telemetry");
         }
-        setErrorMsg(err instanceof Error ? err.message : "Failed to load telemetry");
       } finally {
-        setIsRefreshing(false);
+        if (pending.current === controller) {
+          pending.current = null;
+          if (!signal.aborted) setIsRefreshing(false);
+          controller.abort();
+        }
       }
     },
     [
@@ -79,21 +89,19 @@ export function TelemetryPage() {
   );
 
   useEffect(() => {
-    const controller = new AbortController();
-    void loadAll(controller.signal);
+    void loadAll();
     return () => {
-      controller.abort();
+      pending.current?.abort();
+      pending.current = null;
     };
   }, [loadAll]);
 
   useEffect(() => {
     if (!autoRefresh) return undefined;
     const timer = window.setInterval(() => {
-      void loadAll();
+      void loadAll(true);
     }, 5000);
-    return () => {
-      window.clearInterval(timer);
-    };
+    return () => { window.clearInterval(timer); };
   }, [autoRefresh, loadAll]);
 
   return (
@@ -117,7 +125,7 @@ export function TelemetryPage() {
         }}
       />
 
-      <main className="page-container">
+      <main className="page-container" id="main-content" tabIndex={-1}>
         {errorMsg ? <div className="error-banner">数据加载失败：{errorMsg}</div> : null}
 
         <ContributionWall
