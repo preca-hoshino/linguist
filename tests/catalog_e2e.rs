@@ -685,17 +685,18 @@ async fn billing_dashboard_matches_visible_rows_and_preserves_currencies(pool: P
     let too_many = json!({"projectId":null,"providerId":null,"requestUids":vec![usd;51]});
     assert_eq!(
         app.clone()
-            .oneshot(send(None, &too_many))
+            .oneshot(send(Some(&cookie), &too_many))
             .await
             .unwrap()
             .status(),
         StatusCode::BAD_REQUEST
     );
-    let (status, details, _) = request(
+    let (status, details, _) = request_with_cookie(
         &app,
         Method::GET,
         &format!("/api/v1/stats/billing/attempts?request_uid={usd}"),
         None,
+        Some(&cookie),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
