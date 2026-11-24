@@ -473,6 +473,7 @@ async fn billing_report_uses_stat_timezone_and_shows_the_whole_retry_chain(pool:
         Arc::new(ArcSwap::from_pointee(RuntimeCatalog::default())),
         engine,
     );
+    let (cookie, _) = create_test_admin_session(&pool, "admin-sub-1").await;
     let root = Uuid::new_v4();
     let retry = Uuid::new_v4();
     let insert = "INSERT INTO request_logs(request_uid,parent_request_uid,attempt_index,created_at,project_id,project_name,call_model_id,call_model_name,provider_id,provider_name,model_id,model_name,route_rule_id,status_code,billing_amount,billing_currency,billing_status,billing_details) VALUES($1,$2,$3,$4,'app','App','alias','Alias',$5,$5,'model','Model','route',200,$6::numeric,$7,$8,$9)";
@@ -510,11 +511,12 @@ async fn billing_report_uses_stat_timezone_and_shows_the_whole_retry_chain(pool:
             .await
             .unwrap();
     }
-    let (status, report, _) = request(
+    let (status, report, _) = request_with_cookie(
         &app,
         Method::GET,
         "/api/v1/billing/report?from=2026-01-02&to=2026-01-02",
-        Some("fixture-console-token"),
+        None,
+        Some(&cookie),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -523,7 +525,7 @@ async fn billing_report_uses_stat_timezone_and_shows_the_whole_retry_chain(pool:
     assert_eq!(report["items"][0]["requestUid"], retry.to_string());
     let path = format!("/api/v1/billing/attempts?request_uid={retry}");
     let (status, group, headers) =
-        request(&app, Method::GET, &path, Some("fixture-console-token")).await;
+        request_with_cookie(&app, Method::GET, &path, None, Some(&cookie)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(headers[header::CACHE_CONTROL], "no-store");
     assert_eq!(group["requestUid"], root.to_string());
@@ -533,11 +535,12 @@ async fn billing_report_uses_stat_timezone_and_shows_the_whole_retry_chain(pool:
     assert_eq!(group["unpriced"], 1);
     let (status, _, _) = request(&app, Method::GET, &path, None).await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    let (status, _, _) = request(
+    let (status, _, _) = request_with_cookie(
         &app,
         Method::GET,
         "/api/v1/billing/report?from=2026-01-03&to=2026-01-02",
-        Some("fixture-console-token"),
+        None,
+        Some(&cookie),
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);

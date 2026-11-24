@@ -97,10 +97,10 @@ impl OidcConfig {
         if redirect_uri.is_empty() {
             anyhow::bail!("[oidc].redirect_uri must be configured");
         }
-        let redirect_url = reqwest::Url::parse(&redirect_uri)
+        let parsed_redirect = reqwest::Url::parse(&redirect_uri)
             .with_context(|| format!("invalid [oidc].redirect_uri URL '{redirect_uri}'"))?;
-        validate_oidc_url(&redirect_url, "[oidc].redirect_uri")?;
-        let secure_cookies = redirect_url.scheme() == "https";
+        validate_oidc_url(&parsed_redirect, "[oidc].redirect_uri")?;
+        let secure_cookies = parsed_redirect.scheme() == "https";
 
         if self.client_secret_file.as_os_str().is_empty() {
             anyhow::bail!("[oidc].client_secret_file must be configured");
