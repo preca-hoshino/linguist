@@ -47,7 +47,7 @@ export function formatInteger(value: number): string {
 }
 
 async function fetchJson<T>(url: string, signal?: AbortSignal): Promise<T> {
-  const res = await fetch(url, { signal });
+  const res = await fetch(url, { credentials: "same-origin", signal });
   if (!res.ok) {
     throw new Error(`HTTP ${res.status} loading ${url}`);
   }

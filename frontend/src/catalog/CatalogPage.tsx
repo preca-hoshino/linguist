@@ -1,6 +1,7 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { SubmitEvent } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
+import { useAuth } from "../auth/AuthContext";
 import { CatalogError, catalogErrorMessage, getCatalogStatus, listCatalog } from "./api";
 import { CatalogDialog } from "./CatalogDialog";
 import { CatalogTable } from "./CatalogTable";
@@ -32,31 +33,12 @@ function isFirstMatch(item: ListItems[CatalogResource]) {
   return "firstMatch" in item && item.firstMatch;
 }
 
-function CatalogLogin({ onToken, rejected }: { onToken: (token: string) => void; rejected: boolean }) {
-  return (
-    <form className="catalog-controls" onSubmit={(event) => {
-      event.preventDefault();
-      const value = new FormData(event.currentTarget).get("token");
-      if (typeof value === "string" && value.trim()) onToken(value.trim());
-      event.currentTarget.reset();
-    }}>
-      <label className="catalog-field">
-        目录访问令牌
-        <input className="select-control" type="password" name="token" autoComplete="off" required />
-      </label>
-      <button className="btn-control" type="submit">登录</button>
-      {rejected ? <span role="alert">令牌无效</span> : null}
-    </form>
-  );
-}
-
 interface CatalogPageProps<K extends CatalogResource> {
   resource: K;
-  token: string;
-  onToken: (token: string) => void;
 }
 
-export function CatalogPage<K extends CatalogResource>({ resource, token, onToken }: CatalogPageProps<K>) {
+export function CatalogPage<K extends CatalogResource>({ resource }: CatalogPageProps<K>) {
+  const { handleUnauthorized } = useAuth();
   const [parameters, setParameters] = useSearchParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -72,13 +54,20 @@ export function CatalogPage<K extends CatalogResource>({ resource, token, onToke
   const editId = parameters.get("edit");
   const owner = parameters.get("owner");
 
-  const request = useCallback((signal: AbortSignal) => listCatalog(resource, listQuery, token, signal), [listQuery, resource, token]);
-  const requestStatus = useCallback((signal: AbortSignal) => (
-    token ? getCatalogStatus(token, signal) : Promise.resolve(null)
-  ), [token]);
+  const request = useCallback((signal: AbortSignal) => listCatalog(resource, listQuery, signal), [listQuery, resource]);
+  const requestStatus = useCallback((signal: AbortSignal) => getCatalogStatus(signal), []);
   const result = useCatalogRequest(request, attempt);
-  const status = useCatalogRequest(requestStatus, attempt)?.data;
-  const invalidToken = result?.error instanceof CatalogError && result.error.status === 401;
+  const statusResult = useCatalogRequest(requestStatus, attempt);
+  const status = statusResult?.data;
+
+  useEffect(() => {
+    if (
+      (result?.error instanceof CatalogError && result.error.status === 401) ||
+      (statusResult?.error instanceof CatalogError && statusResult.error.status === 401)
+    ) {
+      handleUnauthorized();
+    }
+  }, [result?.error, statusResult?.error, handleUnauthorized]);
 
   function refresh() {
     setAttempt((value) => value + 1);
@@ -129,7 +118,7 @@ export function CatalogPage<K extends CatalogResource>({ resource, token, onToke
             <div className="brand-mark" aria-hidden="true">LG</div>
             <h1 className="brand-title">{title}</h1>
           </div>
-          {!invalidToken ? <button type="button" className="btn-control" onClick={refresh}>立即刷新</button> : null}
+          <button type="button" className="btn-control" onClick={refresh}>立即刷新</button>
         </div>
       </header>
       <main className="page-container" id="main-content" tabIndex={-1}>
@@ -139,52 +128,47 @@ export function CatalogPage<K extends CatalogResource>({ resource, token, onToke
           </div>
         ) : null}
         <section className="section-card catalog-card" aria-label={title}>
-          {invalidToken ? <CatalogLogin rejected={Boolean(token)} onToken={(value) => { onToken(value); refresh(); }} /> : null}
-          {!invalidToken ? (
+          <form key={filterQuery} className="catalog-controls" role="search" onSubmit={applyFilters}>
+            <input className="select-control catalog-search" type="search" name="q" aria-label="搜索名称或 ID"
+              placeholder="搜索名称或 ID…" autoComplete="off" maxLength={200} defaultValue={filterParameters.get("q") ?? ""} />
+            {filterFields.map(([key, label]) => (
+              <input key={key} className="select-control catalog-filter" name={key} aria-label={label}
+                placeholder={`${label}…`} autoComplete="off" spellCheck={false} defaultValue={filterParameters.get(key) ?? ""} />
+            ))}
+            <button className="btn-control" type="submit">搜索</button>
+            {filterQuery ? <Link className="btn-control catalog-link-button" to={path}>清除</Link> : null}
+          </form>
+          {!result ? <p className="empty-state" role="status">加载中…</p> : null}
+          {result && !result.data ? <div className="error-banner catalog-error" role="alert">{catalogErrorMessage(result.error)}</div> : null}
+          {result?.data ? (
             <>
-              <form key={filterQuery} className="catalog-controls" role="search" onSubmit={applyFilters}>
-                <input className="select-control catalog-search" type="search" name="q" aria-label="搜索名称或 ID"
-                  placeholder="搜索名称或 ID…" autoComplete="off" maxLength={200} defaultValue={filterParameters.get("q") ?? ""} />
-                {filterFields.map(([key, label]) => (
-                  <input key={key} className="select-control catalog-filter" name={key} aria-label={label}
-                    placeholder={`${label}…`} autoComplete="off" spellCheck={false} defaultValue={filterParameters.get(key) ?? ""} />
-                ))}
-                <button className="btn-control" type="submit">搜索</button>
-                {filterQuery ? <Link className="btn-control catalog-link-button" to={path}>清除</Link> : null}
-              </form>
-              {!result ? <p className="empty-state" role="status">加载中…</p> : null}
-              {result && !result.data ? <div className="error-banner catalog-error" role="alert">{catalogErrorMessage(result.error)}</div> : null}
-              {result?.data ? (
-                <>
-                  {result.data.items.length ? (
-                    <CatalogTable resource={resource} items={result.data.items}
-                      editPath={editPath} itemKey={(item) => JSON.stringify([ownerId(item), item.id])} activeRow={isFirstMatch}
-                      onPrice={resource === "provider-models" ? (item) => { if ("providerId" in item) setPriceTarget({ providerId: item.providerId, modelId: item.id, name: item.name }); } : undefined} />
-                  ) : (
-                    <p className="empty-state" role="status">
-                      {result.data.revision === 0 ? "尚未导入配置" : filterQuery || result.data.page > 1 ? "未找到匹配项" : `暂无${title}`}
-                    </p>
-                  )}
-                  {result.data.page > 1 || result.data.hasNext ? (
-                    <nav className="catalog-pagination" aria-label="分页">
-                      {result.data.page > 1 ? <Link className="btn-control catalog-link-button" to={pagePath(result.data.page - 1)}>上一页</Link> : <button className="btn-control" disabled>上一页</button>}
-                      <span>第 {result.data.page} 页</span>
-                      {result.data.hasNext ? <Link className="btn-control catalog-link-button" to={pagePath(result.data.page + 1)}>下一页</Link> : <button className="btn-control" disabled>下一页</button>}
-                    </nav>
-                  ) : null}
-                </>
+              {result.data.items.length ? (
+                <CatalogTable resource={resource} items={result.data.items}
+                  editPath={editPath} itemKey={(item) => JSON.stringify([ownerId(item), item.id])} activeRow={isFirstMatch}
+                  onPrice={resource === "provider-models" ? (item) => { if ("providerId" in item) setPriceTarget({ providerId: item.providerId, modelId: item.id, name: item.name }); } : undefined} />
+              ) : (
+                <p className="empty-state" role="status">
+                  {result.data.revision === 0 ? "尚未导入配置" : filterQuery || result.data.page > 1 ? "未找到匹配项" : `暂无${title}`}
+                </p>
+              )}
+              {result.data.page > 1 || result.data.hasNext ? (
+                <nav className="catalog-pagination" aria-label="分页">
+                  {result.data.page > 1 ? <Link className="btn-control catalog-link-button" to={pagePath(result.data.page - 1)}>上一页</Link> : <button className="btn-control" disabled>上一页</button>}
+                  <span>第 {result.data.page} 页</span>
+                  {result.data.hasNext ? <Link className="btn-control catalog-link-button" to={pagePath(result.data.page + 1)}>下一页</Link> : <button className="btn-control" disabled>下一页</button>}
+                </nav>
               ) : null}
             </>
           ) : null}
         </section>
       </main>
       {editId && result?.data ? (
-        <CatalogDialog key={detailQuery} resource={resource} query={detailQuery} token={token} onClose={() => {
+        <CatalogDialog key={detailQuery} resource={resource} query={detailQuery} onClose={() => {
           if (location.state === "catalog-row") void navigate(-1);
           else void navigate(withSearch(path, listParameters), { replace: true });
         }} />
       ) : null}
-      {priceTarget ? <PriceDialog {...priceTarget} token={token} onClose={() => { setPriceTarget(null); }} onSaved={refresh} /> : null}
+      {priceTarget ? <PriceDialog {...priceTarget} onClose={() => { setPriceTarget(null); }} onSaved={refresh} /> : null}
     </>
   );
 }

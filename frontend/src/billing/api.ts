@@ -58,37 +58,44 @@ export interface BillingDashboard {
   wallApproximate: boolean;
 }
 
-async function request<T>(path: string, token: string, signal: AbortSignal, init?: RequestInit): Promise<T> {
-  const headers = new Headers(init?.headers);
-  headers.set("Authorization", `Bearer ${token}`);
+export class BillingError extends Error {
+  constructor(readonly status: number, readonly code: string) {
+    super(code);
+  }
+}
+
+async function request<T>(path: string, signal: AbortSignal, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/v1/billing/${path}`, {
     ...init,
-    headers,
+    credentials: "same-origin",
     signal,
   });
   if (!response.ok) {
     const body: unknown = await response.json().catch(() => null);
     const code = typeof body === "object" && body !== null && "error" in body && typeof body.error === "string" ? body.error : "billing_unavailable";
-    throw new Error(code);
+    throw new BillingError(response.status, code);
   }
   return await response.json() as T;
 }
 
-export function getPrices(providerId: string, modelId: string, token: string, signal: AbortSignal) {
+export function getPrices(providerId: string, modelId: string, signal: AbortSignal) {
   const query = new URLSearchParams({ provider_id: providerId, model_id: modelId });
-  return request<{ item: PriceSchedule | null }>(`prices?${query}`, token, signal);
+  return request<{ item: PriceSchedule | null }>(`prices?${query}`, signal);
 }
 
-export function savePrice(price: PriceSchedule, token: string, signal: AbortSignal) {
-  return request<{ item: PriceSchedule }>("prices", token, signal, {
+export function savePrice(price: PriceSchedule, csrfToken: string, signal: AbortSignal) {
+  return request<{ item: PriceSchedule }>("prices", signal, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "X-CSRF-Token": csrfToken,
+    },
     body: JSON.stringify(price),
   });
 }
 
-export function getReferenceRate(currency: string, token: string, signal: AbortSignal) {
-  return request<{ target: string | null; rate: string | null; date: string | null }>(`fx?${new URLSearchParams({ currency })}`, token, signal);
+export function getReferenceRate(currency: string, signal: AbortSignal) {
+  return request<{ target: string | null; rate: string | null; date: string | null }>(`fx?${new URLSearchParams({ currency })}`, signal);
 }
 
 export function getBillingAttempts(requestUid: string, page: number, signal: AbortSignal) {
@@ -105,7 +112,11 @@ export function getBillingDashboard(projectId: string, providerId: string, reque
 }
 
 async function statsRequest<T>(path: string, signal: AbortSignal, init?: RequestInit): Promise<T> {
-  const response = await fetch(`/api/v1/stats/billing${path ? `/${path}` : ""}`, { ...init, signal });
+  const response = await fetch(`/api/v1/stats/billing${path ? `/${path}` : ""}`, {
+    ...init,
+    credentials: "same-origin",
+    signal,
+  });
   if (!response.ok) throw new Error("billing_unavailable");
   return await response.json() as T;
 }
@@ -128,8 +139,8 @@ export function money(amount: string | null, currency: string | null): string {
 export function billingError(error: unknown): string {
   const code = error instanceof Error ? error.message : "billing_unavailable";
   const messages: Record<string, string> = {
-    unauthorized: "目录访问令牌无效",
-    catalog_disabled: "未配置目录访问令牌",
+    unauthorized: "登录已失效，请重新登录",
+    catalog_disabled: "目录服务不可用",
     invalid_price: "价格无效",
     model_not_found: "模型不存在",
     invalid_query: "筛选条件无效",

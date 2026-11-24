@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { SubmitEvent } from "react";
-import { billingError, getPrices, getReferenceRate, savePrice } from "./api";
+import { useAuth } from "../auth/AuthContext";
+import { BillingError, billingError, getPrices, getReferenceRate, savePrice } from "./api";
 import type { PriceTier } from "./api";
 
 const blankTier = (minInputTokens: number): PriceTier => ({
@@ -34,12 +35,12 @@ interface Props {
   providerId: string;
   modelId: string;
   name: string;
-  token: string;
   onClose: () => void;
   onSaved: () => void;
 }
 
-export function PriceDialog({ providerId, modelId, name, token, onClose, onSaved }: Props) {
+export function PriceDialog({ providerId, modelId, name, onClose, onSaved }: Props) {
+  const { csrfToken, handleUnauthorized } = useAuth();
   const dialog = useRef<HTMLDialogElement>(null);
   const [tiers, setTiers] = useState<PriceTier[]>([blankTier(0)]);
   const [currency, setCurrency] = useState("USD");
@@ -48,14 +49,14 @@ export function PriceDialog({ providerId, modelId, name, token, onClose, onSaved
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [loadedPrice, setLoadedPrice] = useState<{ providerId: string; modelId: string; token: string } | null>(null);
+  const [loadedPrice, setLoadedPrice] = useState<{ providerId: string; modelId: string } | null>(null);
   const [reference, setReference] = useState<{ currency: string; target: string; rate: string; date: string | null } | null>(null);
-  const priceLoaded = loadedPrice?.providerId === providerId && loadedPrice.modelId === modelId && loadedPrice.token === token;
+  const priceLoaded = loadedPrice?.providerId === providerId && loadedPrice.modelId === modelId;
 
   useEffect(() => {
     if (dialog.current && !dialog.current.open) dialog.current.showModal();
     const controller = new AbortController();
-    void getPrices(providerId, modelId, token, controller.signal).then((result) => {
+    void getPrices(providerId, modelId, controller.signal).then((result) => {
       if (controller.signal.aborted) return;
       if (result.item) {
         setTiers(result.item.tiers);
@@ -63,21 +64,35 @@ export function PriceDialog({ providerId, modelId, name, token, onClose, onSaved
         setSource(result.item.source);
         setMaxInputTokens(result.item.maxInputTokens ?? null);
       }
-      setLoadedPrice({ providerId, modelId, token });
+      setLoadedPrice({ providerId, modelId });
     })
-      .catch((reason: unknown) => { if (!controller.signal.aborted) setError(billingError(reason)); })
+      .catch((reason: unknown) => {
+        if (controller.signal.aborted) return;
+        if (reason instanceof BillingError && reason.status === 401) {
+          handleUnauthorized();
+          return;
+        }
+        setError(billingError(reason));
+      })
       .finally(() => { if (!controller.signal.aborted) setLoading(false); });
     return () => { controller.abort(); };
-  }, [providerId, modelId, token]);
+  }, [providerId, modelId, handleUnauthorized]);
 
   useEffect(() => {
     if (!/^[A-Z]{3}$/.test(currency)) return undefined;
     const controller = new AbortController();
-    void getReferenceRate(currency, token, controller.signal).then((result) => {
+    void getReferenceRate(currency, controller.signal).then((result) => {
       setReference(result.target && result.rate ? { currency, target: result.target, rate: result.rate, date: result.date } : null);
-    }).catch((reason: unknown) => { if (!controller.signal.aborted) setError(billingError(reason)); });
+    }).catch((reason: unknown) => {
+      if (controller.signal.aborted) return;
+      if (reason instanceof BillingError && reason.status === 401) {
+        handleUnauthorized();
+        return;
+      }
+      setError(billingError(reason));
+    });
     return () => { controller.abort(); };
-  }, [currency, token]);
+  }, [currency, handleUnauthorized]);
 
   function changeTier(index: number, patch: Partial<PriceTier>) {
     setTiers((current) => current.map((tier, position) => position === index ? { ...tier, ...patch } : tier));
@@ -93,10 +108,14 @@ export function PriceDialog({ providerId, modelId, name, token, onClose, onSaved
     setSaving(true);
     setError("");
     try {
-      await savePrice({ providerId, modelId, currency, source, maxInputTokens, tiers }, token, new AbortController().signal);
+      await savePrice({ providerId, modelId, currency, source, maxInputTokens, tiers }, csrfToken, new AbortController().signal);
       onSaved();
       dialog.current?.close();
     } catch (reason) {
+      if (reason instanceof BillingError && reason.status === 401) {
+        handleUnauthorized();
+        return;
+      }
       setError(billingError(reason));
     } finally {
       setSaving(false);

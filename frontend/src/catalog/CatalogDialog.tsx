@@ -1,6 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useId, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { catalogErrorMessage, getCatalogDetails } from "./api";
+import { useAuth } from "../auth/AuthContext";
+import { CatalogError, catalogErrorMessage, getCatalogDetails } from "./api";
 import { catalogTitles } from "./navigation";
 import type { CatalogResource, DetailItems, NamedItem } from "./types";
 import { useCatalogRequest } from "./useCatalogRequest";
@@ -175,16 +176,22 @@ const fields: { [K in CatalogResource]: (item: Detail<K>) => ReactNode } = {
 interface CatalogDialogProps<K extends CatalogResource> {
   resource: K;
   query: string;
-  token: string;
   onClose: () => void;
 }
 
-export function CatalogDialog<K extends CatalogResource>({ resource, query, token, onClose }: CatalogDialogProps<K>) {
+export function CatalogDialog<K extends CatalogResource>({ resource, query, onClose }: CatalogDialogProps<K>) {
+  const { handleUnauthorized } = useAuth();
   const dialog = useRef<HTMLDialogElement>(null);
   const titleId = useId();
   const [attempt, setAttempt] = useState(0);
-  const request = useCallback((signal: AbortSignal) => getCatalogDetails(resource, query, token, signal), [query, resource, token]);
+  const request = useCallback((signal: AbortSignal) => getCatalogDetails(resource, query, signal), [query, resource]);
   const result = useCatalogRequest(request, attempt);
+
+  useEffect(() => {
+    if (result?.error instanceof CatalogError && result.error.status === 401) {
+      handleUnauthorized();
+    }
+  }, [result?.error, handleUnauthorized]);
 
   useEffect(() => {
     const instance = dialog.current;

@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef } from "react";
 import { NavLink } from "react-router";
+import { useAuth } from "../auth/AuthContext";
 import { catalogPath, catalogTitles } from "../catalog/navigation";
 import type { CatalogResource } from "../catalog/types";
 
@@ -38,6 +39,19 @@ function ConsoleNavigation({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
+function ConsoleUserFooter() {
+  const { user, logout } = useAuth();
+  const label = user?.displayName || user?.email || user?.subject || "";
+  return (
+    <div className="console-user-footer">
+      {label ? <span className="console-user-name" title={label}>{label}</span> : null}
+      <button type="button" className="btn-control" onClick={() => { void logout(); }}>
+        退出登录
+      </button>
+    </div>
+  );
+}
+
 export function ConsoleSidebar() {
   const drawer = useRef<HTMLDialogElement>(null);
   const drawerId = useId();
@@ -50,7 +64,10 @@ export function ConsoleSidebar() {
 
   return (
     <>
-      <aside className="console-sidebar"><ConsoleNavigation /></aside>
+      <aside className="console-sidebar">
+        <ConsoleNavigation />
+        <ConsoleUserFooter />
+      </aside>
       <div className="console-mobile-nav">
         <button
           type="button"
@@ -82,6 +99,7 @@ export function ConsoleSidebar() {
           <button type="button" className="btn-control" onClick={() => { drawer.current?.close(); }}>关闭</button>
         </div>
         <ConsoleNavigation onNavigate={() => { drawer.current?.close(); }} />
+        <ConsoleUserFooter />
       </dialog>
     </>
   );

@@ -12,6 +12,43 @@
   padding: 16px 12px;
   border-right: 1px solid var(--border-subtle);
   background: var(--bg-card);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.console-user-footer {
+  margin-top: auto;
+  padding: 12px 4px 0;
+  border-top: 1px solid var(--border-subtle);
+  display: grid;
+  gap: 8px;
+}
+
+.console-user-name {
+  font-size: 13px;
+  color: var(--ink-body);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.login-shell {
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: min(420px, 100%);
+  display: grid;
+  gap: 16px;
+}
+
+.login-submit {
+  justify-content: center;
+  width: 100%;
 }
 
 .console-nav,
@@ -456,6 +493,15 @@ pre.catalog-code-editor {
   }
 
   .console-nav-drawer .console-nav {
+    padding: 12px;
+  }
+
+  .console-nav-drawer[open] {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .console-nav-drawer .console-user-footer {
     padding: 12px;
   }
 
