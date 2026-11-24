@@ -16,11 +16,12 @@ use sqlx::PgPool;
 use tower::ServiceExt;
 use uuid::Uuid;
 
+use linguist::auth::oidc::OidcClient;
 use linguist::catalog::json_loader::{JsonFileCatalogProvider, write_atomic};
 use linguist::catalog::postgres::PgCatalogProvider;
 use linguist::catalog::secrets::CatalogSecrets;
 use linguist::catalog::{CatalogProvider, RuntimeCatalog, sync};
-use linguist::config::{AppConfig, ConfigsSection, ScriptEngineConfig};
+use linguist::config::{AppConfig, ConfigsSection, ScriptEngineConfig, ValidatedOidcConfig};
 use linguist::metrics_cache::MetricsCache;
 use linguist::models::CandidateMetrics;
 use linguist::script_engine::ScriptEngine;
@@ -132,6 +133,45 @@ fn store(pool: &PgPool) -> (PgCatalogProvider, ScriptEngine) {
     )
 }
 
+/// Builds a test OIDC client for integration tests.
+fn test_oidc_client(admin_sub: &str) -> OidcClient {
+    OidcClient::new(ValidatedOidcConfig {
+        issuer: "https://idp.example.test/oidc".to_string(),
+        client_id: "linguist-test".to_string(),
+        redirect_uri: "https://linguist.example.test/auth/callback".to_string(),
+        secure_cookies: true,
+        client_secret: "test-secret".to_string(),
+        admin_sub: admin_sub.to_string(),
+    })
+    .unwrap()
+}
+
+/// Inserts a valid admin session directly into PostgreSQL and returns `(cookie_header, csrf_token)`.
+async fn create_test_admin_session(pool: &PgPool, subject: &str) -> (String, String) {
+    let claims = linguist::auth::jwt::IdTokenClaims {
+        iss: "https://idp.example.test/oidc".to_string(),
+        sub: subject.to_string(),
+        aud: linguist::auth::jwt::Audience::Single("linguist-test".to_string()),
+        azp: None,
+        exp: chrono::Utc::now().timestamp() + 3600,
+        nonce: Some("n".to_string()),
+        email: Some("admin@example.test".to_string()),
+        name: Some("Test Admin".to_string()),
+        preferred_username: None,
+    };
+    let created = linguist::auth::session::upsert_identity_and_create_session(
+        pool,
+        &claims,
+        "https://idp.example.test/oidc",
+    )
+    .await
+    .unwrap();
+    (
+        format!("linguist_session={}", created.raw_token),
+        created.csrf_token,
+    )
+}
+
 /// Routes in-process requests through the same application as `serve`.
 fn app(pool: &PgPool, active: Arc<ArcSwap<RuntimeCatalog>>, engine: ScriptEngine) -> Router {
     let config = AppConfig::default();
@@ -139,23 +179,37 @@ fn app(pool: &PgPool, active: Arc<ArcSwap<RuntimeCatalog>>, engine: ScriptEngine
     web::build_router(
         AppState::new(config, active, metrics, engine, Some(pool.clone()), None)
             .unwrap()
-            .with_catalog_token(Some("fixture-console-token")),
+            .with_oidc(test_oidc_client("admin-sub-1")),
     )
 }
 
-/// Issues a test HTTP request, consuming the body as JSON when available.
+/// Issues a test HTTP request with an optional Bearer token or Cookie header.
 async fn request(
     app: &Router,
     method: Method,
     path: &str,
-    token: Option<&str>,
+    bearer_token: Option<&str>,
+) -> (StatusCode, Value, axum::http::HeaderMap) {
+    request_with_cookie(app, method, path, bearer_token, None).await
+}
+
+/// Issues a test HTTP request with optional Bearer token and Cookie header.
+async fn request_with_cookie(
+    app: &Router,
+    method: Method,
+    path: &str,
+    bearer_token: Option<&str>,
+    cookie: Option<&str>,
 ) -> (StatusCode, Value, axum::http::HeaderMap) {
     let mut request = Request::builder()
         .method(method)
         .uri(path)
         .header(header::ORIGIN, "https://example.test");
-    if let Some(token) = token {
+    if let Some(token) = bearer_token {
         request = request.header(header::AUTHORIZATION, format!("Bearer {token}"));
+    }
+    if let Some(cookie) = cookie {
+        request = request.header(header::COOKIE, cookie);
     }
     let response = app
         .clone()
@@ -171,13 +225,14 @@ async fn request(
     )
 }
 
-/// Makes an authenticated read of a console endpoint.
-async fn catalog(app: &Router, path: &str) -> Value {
-    let (status, data, headers) = request(
+/// Makes an authenticated read of a console endpoint using a session cookie.
+async fn catalog(app: &Router, cookie: &str, path: &str) -> Value {
+    let (status, data, headers) = request_with_cookie(
         app,
         Method::GET,
         &format!("/api/v1/catalog/{path}"),
-        Some("fixture-console-token"),
+        None,
+        Some(cookie),
     )
     .await;
     assert_eq!(status, StatusCode::OK, "{path}: {data}");
@@ -195,6 +250,7 @@ async fn catalog_projections_and_gateway_use_the_committed_snapshot(pool: PgPool
         .await
         .unwrap();
     let app = app(&pool, Arc::clone(&active), engine);
+    let (cookie, _) = create_test_admin_session(&pool, "admin-sub-1").await;
     let snapshot = active.load_full();
     assert_eq!(snapshot.revision(), 1);
     let rule = snapshot.match_route_rule("app", "client/alias").unwrap();
@@ -234,57 +290,67 @@ async fn catalog_projections_and_gateway_use_the_committed_snapshot(pool: PgPool
     )
     .await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
-    let (status, _, _) = request(
+    let (status, _, _) = request_with_cookie(
         &app,
         Method::POST,
         "/api/v1/catalog/providers",
-        Some("fixture-console-token"),
+        None,
+        Some(&cookie),
     )
     .await;
     assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
 
-    let status = catalog(&app, "status").await;
+    let status = catalog(&app, &cookie, "status").await;
     assert_eq!(status["revision"], 1);
     assert_eq!(status["loadedRevision"], 1);
     assert_eq!(status["writeMode"], "json_sync");
 
-    let page = catalog(&app, "providers?page_size=1").await;
+    let page = catalog(&app, &cookie, "providers?page_size=1").await;
     assert_eq!(page["items"][0]["modelCount"], 3);
     assert_eq!(page["hasNext"], true);
     assert_eq!(
-        catalog(&app, "providers?page=2&page_size=1").await["items"][0]["id"],
+        catalog(&app, &cookie, "providers?page=2&page_size=1").await["items"][0]["id"],
         "alpha"
     );
-    let provider = catalog(&app, "providers/detail?id=beta").await;
+    let provider = catalog(&app, &cookie, "providers/detail?id=beta").await;
     assert_eq!(provider["item"]["hasApiKey"], true);
     assert_eq!(provider["item"]["models"][2]["id"], "unused");
     assert!(!provider.to_string().contains("fixture-upstream-key"));
     let model = catalog(
         &app,
+        &cookie,
         "provider-models/detail?provider_id=beta&id=vendor%2Fshared",
     )
     .await;
     assert_eq!(model["item"]["name"], "Shared Beta");
     assert_eq!(model["item"]["url"], "https://beta.example/v1");
     assert!(
-        catalog(&app, "provider-models?provider_id=alpha").await["items"][0]
+        catalog(&app, &cookie, "provider-models?provider_id=alpha").await["items"][0]
             .get("url")
             .is_none()
     );
-    assert_eq!(catalog(&app, "projects").await["items"][0]["modelCount"], 2);
-    let project = catalog(&app, "projects/detail?id=app").await;
+    assert_eq!(
+        catalog(&app, &cookie, "projects").await["items"][0]["modelCount"],
+        2
+    );
+    let project = catalog(&app, &cookie, "projects/detail?id=app").await;
     assert!(!project.to_string().contains("fixture-project-key"));
     assert_eq!(project["item"]["meta"]["region"], "test");
     assert_eq!(
-        catalog(&app, "project-models?project_id=app").await["items"][0]["id"],
+        catalog(&app, &cookie, "project-models?project_id=app").await["items"][0]["id"],
         "client/alias"
     );
-    let routes = catalog(&app, "routes?project_id=app&call_model_id=client%2Falias").await;
+    let routes = catalog(
+        &app,
+        &cookie,
+        "routes?project_id=app&call_model_id=client%2Falias",
+    )
+    .await;
     assert_eq!(routes["items"][0]["id"], "disabled");
     assert_eq!(routes["items"][1]["firstMatch"], true);
     assert_eq!(routes["items"][2]["firstMatch"], false);
     assert!(routes["items"][1].get("script").is_none());
-    let route = catalog(&app, "routes/detail?id=first").await;
+    let route = catalog(&app, &cookie, "routes/detail?id=first").await;
     assert_eq!(route["item"]["target"]["maxAttempts"], 3);
     assert_eq!(route["item"]["fallbacks"][0]["maxAttempts"], 2);
     assert_eq!(
@@ -314,8 +380,9 @@ async fn billing_prices_are_public_and_survive_json_reload(pool: PgPool) {
             None,
         )
         .unwrap()
-        .with_catalog_token(Some("fixture-console-token")),
+        .with_oidc(test_oidc_client("admin-sub-1")),
     );
+    let (cookie, csrf) = create_test_admin_session(&pool, "admin-sub-1").await;
     let body = json!({"providerId":"beta","modelId":"vendor/shared",
         "currency":"USD","source":"fixture","tiers":[{"minInputTokens":0,"inputPrice":"2",
         "outputPrice":"8","cacheReadPrice":"0.5","cacheWriteMode":"separate","cacheWritePrice":"2.5"}]});
@@ -324,6 +391,8 @@ async fn billing_prices_are_public_and_survive_json_reload(pool: PgPool) {
             .method(Method::POST)
             .uri("/api/v1/billing/prices")
             .header(header::CONTENT_TYPE, "application/json")
+            .header(header::COOKIE, cookie.as_str())
+            .header("x-csrf-token", csrf.as_str())
             .body(Body::from(value.to_string()))
             .unwrap()
     };
@@ -341,11 +410,12 @@ async fn billing_prices_are_public_and_survive_json_reload(pool: PgPool) {
             .status(),
         StatusCode::OK
     );
-    let (status, data, _) = request(
+    let (status, data, _) = request_with_cookie(
         &app,
         Method::GET,
         "/api/v1/billing/prices?provider_id=beta&model_id=vendor%2Fshared",
         None,
+        Some(&cookie),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -353,6 +423,7 @@ async fn billing_prices_are_public_and_survive_json_reload(pool: PgPool) {
     assert_eq!(data["item"]["tiers"][0]["inputPrice"], "4");
     let model = catalog(
         &app,
+        &cookie,
         "provider-models/detail?provider_id=beta&id=vendor%2Fshared",
     )
     .await;
@@ -363,7 +434,7 @@ async fn billing_prices_are_public_and_survive_json_reload(pool: PgPool) {
         .bind(Uuid::new_v4()).execute(&pool).await.unwrap();
     let path = format!("/api/v1/billing/report?from={from}&to={to}");
     let (status, report, _) =
-        request(&app, Method::GET, &path, Some("fixture-console-token")).await;
+        request_with_cookie(&app, Method::GET, &path, None, Some(&cookie)).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(report["attempts"], 1);
     assert_eq!(report["totals"][0]["currency"], "USD");
@@ -375,11 +446,12 @@ async fn billing_prices_are_public_and_survive_json_reload(pool: PgPool) {
     sync::start(store, Some((fixture.loader(&engine), false)))
         .await
         .unwrap();
-    let (status, data, _) = request(
+    let (status, data, _) = request_with_cookie(
         &app,
         Method::GET,
         "/api/v1/billing/prices?provider_id=beta&model_id=vendor%2Fshared",
         None,
+        Some(&cookie),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -487,8 +559,9 @@ async fn billing_dashboard_matches_visible_rows_and_preserves_currencies(pool: P
             None,
         )
         .unwrap()
-        .with_catalog_token(Some("fixture-console-token")),
+        .with_oidc(test_oidc_client("admin-sub-1")),
     );
+    let (cookie, _) = create_test_admin_session(&pool, "admin-sub-1").await;
     let usd = Uuid::new_v4();
     let eur = Uuid::new_v4();
     let missing = Uuid::new_v4();
@@ -535,17 +608,21 @@ async fn billing_dashboard_matches_visible_rows_and_preserves_currencies(pool: P
         .unwrap();
     let payload =
         json!({"projectId":"app","providerId":null,"requestUids":[usd,eur,missing,other,older]});
-    let send = |token: Option<&str>, body: &Value| {
+    let send = |cookie_hdr: Option<&str>, body: &Value| {
         let mut builder = Request::builder()
             .method(Method::POST)
             .uri("/api/v1/stats/billing")
             .header(header::CONTENT_TYPE, "application/json");
-        if let Some(token) = token {
-            builder = builder.header(header::AUTHORIZATION, format!("Bearer {token}"));
+        if let Some(c) = cookie_hdr {
+            builder = builder.header(header::COOKIE, c);
         }
         builder.body(Body::from(body.to_string())).unwrap()
     };
-    let response = app.clone().oneshot(send(None, &payload)).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(send(Some(&cookie), &payload))
+        .await
+        .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let data: Value =
         serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
@@ -584,7 +661,11 @@ async fn billing_dashboard_matches_visible_rows_and_preserves_currencies(pool: P
         .execute(&pool)
         .await
         .unwrap();
-    let response = app.clone().oneshot(send(None, &payload)).await.unwrap();
+    let response = app
+        .clone()
+        .oneshot(send(Some(&cookie), &payload))
+        .await
+        .unwrap();
     let data: Value =
         serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
     assert_eq!(data["convertedTotal"], "24.75");
@@ -724,4 +805,131 @@ async fn hot_sync_rolls_back_a_failed_replacement_and_can_be_disabled(pool: PgPo
     std::fs::remove_file(fixture.path("providers.json")).unwrap();
     let postgres_only = sync::start(store, None).await.unwrap();
     assert_eq!(postgres_only.load().revision(), 3);
+}
+
+#[sqlx::test(migrations = "./migrations")]
+#[ignore = "requires a disposable PostgreSQL server via DATABASE_URL"]
+async fn oidc_admin_session_lifecycle_and_cors_separation(pool: PgPool) {
+    let config = AppConfig::default();
+    let engine = ScriptEngine::new(ScriptEngineConfig::default());
+    let active = Arc::new(ArcSwap::from_pointee(RuntimeCatalog::default()));
+    let app_admin1 = web::build_router(
+        AppState::new(
+            config.clone(),
+            Arc::clone(&active),
+            MetricsCache::new(&config.metrics),
+            engine.clone(),
+            Some(pool.clone()),
+            None,
+        )
+        .unwrap()
+        .with_oidc(test_oidc_client("admin-sub-1")),
+    );
+
+    // /healthz stays open and carries permissive CORS
+    let (status, _, headers) = request(&app_admin1, Method::GET, "/healthz", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(headers.contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN));
+
+    // Management endpoints reject unauthenticated requests and do not emit permissive CORS
+    for path in [
+        "/api/auth/me",
+        "/api/v1/stats/overview",
+        "/api/v1/catalog/status",
+    ] {
+        let (status, _, headers) = request(&app_admin1, Method::GET, path, None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED, "{path}");
+        assert!(!headers.contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN));
+    }
+
+    let (cookie, csrf) = create_test_admin_session(&pool, "admin-sub-1").await;
+    let (status, me, headers) = request_with_cookie(
+        &app_admin1,
+        Method::GET,
+        "/api/auth/me",
+        None,
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(me["authenticated"], true);
+    assert_eq!(me["subject"], "admin-sub-1");
+    assert!(!headers.contains_key(header::ACCESS_CONTROL_ALLOW_ORIGIN));
+
+    let (status, _, _) = request_with_cookie(
+        &app_admin1,
+        Method::GET,
+        "/api/v1/stats/overview",
+        None,
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Rotating admin_sub on restart immediately invalidates old admin sessions
+    let app_admin2 = web::build_router(
+        AppState::new(
+            config.clone(),
+            active,
+            MetricsCache::new(&config.metrics),
+            engine,
+            Some(pool.clone()),
+            None,
+        )
+        .unwrap()
+        .with_oidc(test_oidc_client("admin-sub-2")),
+    );
+    let (status, _, _) = request_with_cookie(
+        &app_admin2,
+        Method::GET,
+        "/api/auth/me",
+        None,
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // Logout requires valid X-CSRF-Token, then revokes the session
+    let bad_logout = Request::builder()
+        .method(Method::POST)
+        .uri("/auth/logout")
+        .header(header::COOKIE, cookie.as_str())
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        app_admin1
+            .clone()
+            .oneshot(bad_logout)
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::FORBIDDEN
+    );
+
+    let ok_logout = Request::builder()
+        .method(Method::POST)
+        .uri("/auth/logout")
+        .header(header::COOKIE, cookie.as_str())
+        .header("x-csrf-token", csrf.as_str())
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        app_admin1
+            .clone()
+            .oneshot(ok_logout)
+            .await
+            .unwrap()
+            .status(),
+        StatusCode::OK
+    );
+
+    let (status, _, _) = request_with_cookie(
+        &app_admin1,
+        Method::GET,
+        "/api/auth/me",
+        None,
+        Some(&cookie),
+    )
+    .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
 }

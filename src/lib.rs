@@ -1,5 +1,6 @@
 //! Linguist programmable script-routed `OpenAI` Chat API gateway and token telemetry library.
 
+pub mod auth;
 pub mod billing;
 pub mod catalog;
 pub mod config;

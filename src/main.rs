@@ -10,6 +10,7 @@ use tokio::net::TcpListener;
 use tracing::{info, warn};
 use tracing_subscriber::EnvFilter;
 
+use linguist::auth::oidc::OidcClient;
 use linguist::catalog::json_loader::JsonFileCatalogProvider;
 use linguist::catalog::postgres::PgCatalogProvider;
 use linguist::catalog::secrets::CatalogSecrets;
@@ -152,7 +153,9 @@ async fn load_for_cli(cfg: &AppConfig, pool: Option<sqlx::PgPool>) -> Result<Run
 async fn run_serve(cfg: AppConfig) -> Result<()> {
     let imports_json = cfg.configs.imports_json()?;
     let secrets = CatalogSecrets::from_env()?;
-    let console_token = std::env::var("LINGUIST_CATALOG_TOKEN").ok();
+    let admin_sub = std::env::var("LINGUIST_OIDC_ADMIN_SUB").ok();
+    let oidc_config = cfg.oidc.validate_for_serve(admin_sub.as_deref())?;
+    let oidc_client = OidcClient::new(oidc_config)?;
     let pool = db::init_db_pool(&cfg.database).await?;
     let engine = ScriptEngine::new(cfg.script_engine.clone());
     let importer = imports_json.then(|| {
@@ -192,7 +195,7 @@ async fn run_serve(cfg: AppConfig) -> Result<()> {
         Some(pool),
         Some(log_writer),
     )?
-    .with_catalog_token(console_token.as_deref());
+    .with_oidc(oidc_client);
 
     linguist::billing::fx::start(&state);
 

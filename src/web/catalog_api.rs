@@ -1,9 +1,8 @@
 //! Authenticated, read-only catalog endpoints.
 
 use axum::extract::rejection::QueryRejection;
-use axum::extract::{Path, Query, Request, State};
-use axum::http::{HeaderValue, StatusCode, header};
-use axum::middleware::{Next, from_fn_with_state};
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
@@ -15,43 +14,12 @@ use crate::catalog::postgres::catalog_status;
 use crate::catalog::read::{self, Filters, Resource};
 use crate::state::AppState;
 
-/// Adds only GET/HEAD endpoints, independent of the model API's authentication and CORS.
-pub(super) fn router(state: &AppState) -> Router<AppState> {
+/// Adds only GET/HEAD endpoints, protected by the admin session middleware in `web::build_router`.
+pub(super) fn router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/catalog/status", get(status))
         .route("/api/v1/catalog/{resource}", get(list))
         .route("/api/v1/catalog/{resource}/detail", get(detail))
-        .route_layer(from_fn_with_state(state.clone(), authorize))
-}
-
-/// Validates the configured console token before loading any catalog data.
-pub(super) async fn authorize(
-    State(state): State<AppState>,
-    request: Request,
-    next: Next,
-) -> Response {
-    let token = request
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.split_once(' '))
-        .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("bearer"))
-        .map_or("", |(_, token)| token.trim());
-    let mut response = match state.verify_catalog_token(token) {
-        None => error(StatusCode::SERVICE_UNAVAILABLE, "catalog_disabled"),
-        Some(false) => {
-            let mut response = error(StatusCode::UNAUTHORIZED, "unauthorized");
-            response
-                .headers_mut()
-                .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
-            response
-        }
-        Some(true) => next.run(request).await,
-    };
-    response
-        .headers_mut()
-        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
-    response
 }
 
 /// Query parameters for lists and details, using query parameters for opaque IDs containing slashes.

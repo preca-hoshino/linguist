@@ -1,6 +1,7 @@
 //! Embedded static React frontend (`rust-embed`), `LobeHub` SVG serving, SPA fallback,
 //! and combined Axum HTTP router construction.
 
+mod auth_api;
 mod billing_api;
 mod catalog_api;
 pub mod stats_api;
@@ -9,6 +10,7 @@ use axum::Json;
 use axum::Router;
 use axum::extract::Path;
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, Uri};
+use axum::middleware::from_fn_with_state;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde_json::json;
@@ -42,17 +44,26 @@ pub(crate) mod embedded_assets {
     pub(crate) struct LobeIcons;
 }
 
-/// Builds the full Linguist HTTP router combining proxy endpoints, read-only stats API,
-/// `/icons/*` SVG assets, and embedded SPA static files.
+/// Builds the full Linguist HTTP router combining proxy endpoints, admin-protected
+/// stats/catalog/billing APIs, OIDC auth routes, `/icons/*` SVG assets, and embedded SPA static files.
 pub fn build_router(state: AppState) -> Router {
     let public = proxy::router()
-        .merge(stats_api::router())
-        .merge(billing_api::stats_router())
         .route("/icons/{icon_name}", get(serve_icon_handler))
         .layer(CorsLayer::permissive());
+
+    let admin_protected = stats_api::router()
+        .merge(billing_api::stats_router())
+        .merge(catalog_api::router())
+        .merge(billing_api::router())
+        .merge(auth_api::protected_router())
+        .route_layer(from_fn_with_state(
+            state.clone(),
+            auth_api::require_admin_session,
+        ));
+
     public
-        .merge(catalog_api::router(&state))
-        .merge(billing_api::router(&state))
+        .merge(auth_api::public_router())
+        .merge(admin_protected)
         .fallback(spa_fallback_handler)
         .layer(TraceLayer::new_for_http())
         .with_state(state)
@@ -98,6 +109,7 @@ async fn spa_fallback_handler(uri: Uri) -> Response {
     }
 
     if raw_path.starts_with("api/")
+        || raw_path.starts_with("auth/")
         || raw_path.starts_with("model/")
         || raw_path.starts_with("icons/")
     {

@@ -7,6 +7,7 @@ use anyhow::{Context, Result};
 use arc_swap::ArcSwap;
 use sqlx::PgPool;
 
+use crate::auth::oidc::OidcClient;
 use crate::catalog::RuntimeCatalog;
 use crate::config::AppConfig;
 use crate::db::LogWriterHandle;
@@ -31,8 +32,8 @@ pub struct AppState {
     pub db_pool: Option<PgPool>,
     /// Optional async log writer handle.
     pub log_writer: Option<LogWriterHandle>,
-    /// Hash of the console token; project keys do not grant console access.
-    catalog_token: Option<ring::digest::Digest>,
+    /// OIDC client and validated admin identity configuration.
+    pub oidc: Option<OidcClient>,
 }
 
 impl AppState {
@@ -64,25 +65,15 @@ impl AppState {
             http_client,
             db_pool,
             log_writer,
-            catalog_token: None,
+            oidc: None,
         })
     }
 
-    /// Enables the configuration console with a separate operator bearer token.
+    /// Configures OIDC authentication and admin session verification.
     #[must_use]
-    pub fn with_catalog_token(mut self, token: Option<&str>) -> Self {
-        self.catalog_token = token
-            .filter(|token| !token.is_empty())
-            .map(|token| ring::digest::digest(&ring::digest::SHA256, token.as_bytes()));
+    pub fn with_oidc(mut self, oidc: OidcClient) -> Self {
+        self.oidc = Some(oidc);
         self
-    }
-
-    /// Checks a console token, or returns `None` if console access is not configured.
-    pub(crate) fn verify_catalog_token(&self, token: &str) -> Option<bool> {
-        self.catalog_token.as_ref().map(|expected| {
-            let provided = ring::digest::digest(&ring::digest::SHA256, token.as_bytes());
-            crate::catalog::secrets::tokens_equal(expected.as_ref(), provided.as_ref())
-        })
     }
 
     /// Emits a finalized telemetry record to PostgreSQL if DB logging is active.

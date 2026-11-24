@@ -3,9 +3,8 @@
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
-use axum::extract::{Query, State};
-use axum::http::{StatusCode, header};
-use axum::middleware::from_fn_with_state;
+use axum::extract::{Extension, Query, State};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -16,22 +15,22 @@ use serde_json::{Value, json};
 use sqlx::{PgPool, Row, postgres::PgRow};
 use uuid::Uuid;
 
+use crate::auth::session::AdminSession;
 use crate::billing::fx::{RateSnapshot, convert_totals};
 use crate::billing::{PriceSchedule, PriceTier};
 use crate::state::AppState;
-use crate::web::catalog_api;
+use crate::web::auth_api;
 
-/// Registers price routes without authentication and other billing routes behind the console token.
-pub(super) fn router(state: &AppState) -> Router<AppState> {
+/// Registers billing endpoints (all protected by the admin session middleware).
+pub(super) fn router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/billing/fx", get(exchange_rate))
         .route("/api/v1/billing/report", get(report))
         .route("/api/v1/billing/attempts", get(attempts))
-        .route_layer(from_fn_with_state(state.clone(), catalog_api::authorize))
         .route("/api/v1/billing/prices", get(prices).post(publish_price))
 }
 
-/// Registers public cost projections alongside the public telemetry API.
+/// Registers dashboard billing endpoints under `/api/v1/stats/*` (protected by admin session).
 pub(super) fn stats_router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/stats/billing", post(dashboard))
@@ -83,7 +82,15 @@ async fn prices(State(state): State<AppState>, Query(query): Query<PriceQuery>) 
 }
 
 /// Saves the current price.
-async fn publish_price(State(state): State<AppState>, Json(input): Json<PublishPrice>) -> Response {
+async fn publish_price(
+    State(state): State<AppState>,
+    Extension(session): Extension<AdminSession>,
+    headers: HeaderMap,
+    Json(input): Json<PublishPrice>,
+) -> Response {
+    if !auth_api::verify_csrf(&session, &headers) {
+        return fail(StatusCode::FORBIDDEN, "csrf_mismatch");
+    }
     let Some(pool) = state.db_pool.as_ref() else {
         return fail(StatusCode::SERVICE_UNAVAILABLE, "billing_unavailable");
     };
