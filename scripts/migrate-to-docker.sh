@@ -114,7 +114,7 @@ services:
     restart: unless-stopped
     environment:
       LINGUIST_CATALOG_KEY: ${LINGUIST_CATALOG_KEY:-}
-      LINGUIST_CATALOG_TOKEN: ${LINGUIST_CATALOG_TOKEN:-}
+      LINGUIST_OIDC_ADMIN_SUB: ${LINGUIST_OIDC_ADMIN_SUB:-}
     # ─── 端口映射（仅监听本机回环，由 OpenResty 反代暴露）───
     ports:
       - "127.0.0.1:9527:9527"
@@ -170,7 +170,7 @@ services:
     restart: unless-stopped
     environment:
       LINGUIST_CATALOG_KEY: ${LINGUIST_CATALOG_KEY:-}
-      LINGUIST_CATALOG_TOKEN: ${LINGUIST_CATALOG_TOKEN:-}
+      LINGUIST_OIDC_ADMIN_SUB: ${LINGUIST_OIDC_ADMIN_SUB:-}
     ports:
       - "127.0.0.1:9527:9527"
     user: "65532:65532"
@@ -209,8 +209,8 @@ echo "Migration preparations complete at ${TARGET_DIR}!"
 echo "Next steps:"
 echo "  1. Check ${TARGET_DIR}/docker-compose.yml (ports binding, network, limits)"
 echo "  2. Check ${TARGET_DIR}/config/config.toml (database URL & server host)"
-echo "  3. Set LINGUIST_CATALOG_KEY in ${TARGET_DIR}/.env. Reuse the existing key if the database already has a catalog."
-echo "     For a new catalog, generate the key with 'openssl rand -hex 32'. Set a separate LINGUIST_CATALOG_TOKEN to enable the console."
+echo "  3. Set LINGUIST_CATALOG_KEY and LINGUIST_OIDC_ADMIN_SUB in ${TARGET_DIR}/.env. Reuse the existing LINGUIST_CATALOG_KEY if the database already has a catalog."
+echo "     For a new catalog, generate the key with 'openssl rand -hex 32'. Configure [oidc] in config.toml and place the client secret at /config/secrets/oidc-client-secret."
 echo "     If using an existing Compose file, pass both variables through to the container."
 echo "  4. Validate config (offline in JSON mode):"
 echo "     cd ${TARGET_DIR} && docker compose pull && docker compose run --rm linguist check-config"

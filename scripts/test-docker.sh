@@ -24,8 +24,8 @@ cleanup() {
 trap cleanup EXIT
 
 LINGUIST_CATALOG_KEY="$(openssl rand -hex 32)"
-LINGUIST_CATALOG_TOKEN="$(openssl rand -hex 32)"
-export LINGUIST_CATALOG_KEY LINGUIST_CATALOG_TOKEN
+LINGUIST_OIDC_ADMIN_SUB="ci-admin"
+export LINGUIST_CATALOG_KEY LINGUIST_OIDC_ADMIN_SUB
 
 echo "==> 1. Verifying scratch image filesystem contents for ${IMAGE}"
 docker save "$IMAGE" | python3 -c '
@@ -215,8 +215,17 @@ title = "Linguist CI"
 timezone = "Asia/Shanghai"
 default_days_range = 30
 leaderboard_min_requests = 1
+
+[oidc]
+issuer = "https://idp.example.test/oidc"
+client_id = "linguist-ci"
+redirect_uri = "https://linguist.example.test/auth/callback"
+client_secret_file = "/config/secrets/oidc-client-secret"
 EOF
-  chmod 644 "$WORKDIR/cfg/config.toml"
+  mkdir -p "$WORKDIR/cfg/secrets"
+  printf 'ci-oidc-secret\n' > "$WORKDIR/cfg/secrets/oidc-client-secret"
+  chmod 755 "$WORKDIR/cfg/secrets"
+  chmod 644 "$WORKDIR/cfg/config.toml" "$WORKDIR/cfg/secrets/oidc-client-secret"
 }
 
 chmod 644 "$WORKDIR/cfg/scripts/tag.js" "$WORKDIR/cfg/chatLanguageModels.json" "$WORKDIR/cfg/projects.json" "$WORKDIR/cfg/routes.json"
@@ -334,7 +343,7 @@ docker run -d --name "$APP_NAME" --network "$NET_NAME" \
   --security-opt no-new-privileges:true \
   --tmpfs /tmp:rw,noexec,nosuid,size=16m \
   -e LINGUIST_CATALOG_KEY \
-  -e LINGUIST_CATALOG_TOKEN \
+  -e LINGUIST_OIDC_ADMIN_SUB \
   -v "$WORKDIR/cfg:/config:ro" \
   -p "127.0.0.1:${HOST_PORT}:9527" \
   "$IMAGE" >/dev/null
@@ -388,7 +397,7 @@ docker run -d --name "$APP_NAME" --network "$NET_NAME" \
   --security-opt no-new-privileges:true \
   --tmpfs /tmp:rw,noexec,nosuid,size=16m \
   -e LINGUIST_CATALOG_KEY \
-  -e LINGUIST_CATALOG_TOKEN \
+  -e LINGUIST_OIDC_ADMIN_SUB \
   -e SSL_CERT_FILE=/config/certs/ca.crt \
   -v "$WORKDIR/cfg:/config:ro" \
   -p "127.0.0.1:${HOST_PORT}:9527" \
@@ -426,24 +435,18 @@ docker run -d --name "$APP_NAME" --network "$NET_NAME" \
   --security-opt no-new-privileges:true \
   --tmpfs /tmp:rw,noexec,nosuid,size=16m \
   -e LINGUIST_CATALOG_KEY \
-  -e LINGUIST_CATALOG_TOKEN \
+  -e LINGUIST_OIDC_ADMIN_SUB \
   -e SSL_CERT_FILE=/config/certs/ca.crt \
   -v "$WORKDIR/cfg:/config:ro" \
   -p "127.0.0.1:${HOST_PORT}:9527" \
   "$IMAGE" >/dev/null
 
 wait_healthz
-curl -fsS -H "Authorization: Bearer ${LINGUIST_CATALOG_TOKEN}" \
-  "http://127.0.0.1:${HOST_PORT}/api/v1/catalog/providers" |
-  python3 -c 'import json, sys; assert json.load(sys.stdin)["items"][0]["id"] == "mock-tls"'
-OVERVIEW_JSON="$(curl -fsS "http://127.0.0.1:${HOST_PORT}/api/v1/stats/overview")"
-python3 -c '
-import json, sys
-data = json.loads(sys.stdin.read())
-total = data["summary"]["totalRequests"]
-print("Persisted totalRequests:", total)
-assert total >= 2, f"Expected >= 2 persisted requests, got {total}"
-' <<< "$OVERVIEW_JSON"
+test "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${HOST_PORT}/api/v1/catalog/providers")" = "401"
+test "$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:${HOST_PORT}/api/v1/stats/overview")" = "401"
+PERSISTED_TOTAL="$(docker exec "$PG_NAME" psql -U linguist -d linguist -tAc 'SELECT COUNT(*) FROM request_logs')"
+echo "Persisted totalRequests: ${PERSISTED_TOTAL}"
+test "${PERSISTED_TOTAL}" -ge 2
 
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   {

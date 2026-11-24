@@ -17,7 +17,7 @@ cargo run -- seed-demo --days 180
 
 # Generate once; persist the master key and reuse it on restart and across instances.
 $env:LINGUIST_CATALOG_KEY = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
-$env:LINGUIST_CATALOG_TOKEN = [Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+$env:LINGUIST_OIDC_ADMIN_SUB = "your-oidc-admin-sub"
 cargo run -- serve
 ```
 
@@ -29,8 +29,8 @@ Open `http://127.0.0.1:9527/`. The sidebar keeps telemetry separate from the fiv
 
 - `[configs].source = "json_sync"` (or the legacy `"json_files"`) imports all three JSON catalogs and resolved `@file:` scripts at startup. With `watch_reload = true`, file events and a 10-second recheck trigger validated, all-or-nothing replacements. Invalid changes preserve the last committed version. To change several files together, stop the importer or disable its watcher before editing, then restart it after all files are ready.
 - The gateway and configuration pages read PostgreSQL, not the import files. The gateway swaps complete in-memory snapshots after a commit, without interrupting active requests. Run one JSON importer per database and set other instances to `source = "postgres"` after the first import.
-- `LINGUIST_CATALOG_KEY` is a shared 32-byte random hex key. Back it up separately from the database; it protects upstream credentials and verifies existing project credentials. `LINGUIST_CATALOG_TOKEN` unlocks only the configuration console. Keep it separate from project API keys. If unset, model traffic and telemetry still work, but catalog access is disabled.
-- Price reads and writes have no application-level authentication. Restrict access to `/api/v1/billing/prices` at the network or reverse-proxy layer if needed.
+- `LINGUIST_CATALOG_KEY` is a shared 32-byte random hex key. Back it up separately from the database; it protects upstream credentials and verifies existing project credentials.
+- Console and telemetry access (`/api/v1/stats/*`, `/api/v1/catalog/*`, `/api/v1/billing/*`) is protected by OIDC Authorization Code + PKCE login (`[oidc]` in `config.toml`, client secret in `client_secret_file`, and `LINGUIST_OIDC_ADMIN_SUB` for exact admin `sub` matching) with an 8-hour `HttpOnly` session cookie. Keep `LINGUIST_CATALOG_KEY` separate from OIDC secrets and project API keys.
 
 ### Cost tracking
 
@@ -75,12 +75,12 @@ chmod 644 docker/config/config.toml docker/config/*.json
 
 If your JSON configs reference external `@file:` scripts (e.g. `"@file:scripts/route.js"`), place them inside `docker/config/scripts/` with `0644` (world-readable for UID `65532`) or `chown 65532:65532` + `0640`.
 
-Set `LINGUIST_CATALOG_KEY` in the deployment environment or the ignored root `.env`. Set a separate `LINGUIST_CATALOG_TOKEN` if you want to enable the configuration console. Generate each independently, for example with `openssl rand -hex 32`. Do not regenerate the master key on redeploy. If upgrading an existing installation with its own Compose file, pass the variables through to the `linguist` service:
+Set `LINGUIST_CATALOG_KEY` and `LINGUIST_OIDC_ADMIN_SUB` in the deployment environment or the ignored root `.env`. Generate `LINGUIST_CATALOG_KEY` with `openssl rand -hex 32` and do not regenerate it on redeploy. Configure `[oidc]` in `docker/config/config.toml` and place the OIDC client secret in `docker/config/secrets/oidc-client-secret` (readable by UID `65532`). If upgrading an existing installation with its own Compose file, pass both variables through to the `linguist` service:
 
 ```yaml
 environment:
   LINGUIST_CATALOG_KEY: ${LINGUIST_CATALOG_KEY:-}
-  LINGUIST_CATALOG_TOKEN: ${LINGUIST_CATALOG_TOKEN:-}
+  LINGUIST_OIDC_ADMIN_SUB: ${LINGUIST_OIDC_ADMIN_SUB:-}
 ```
 
 ### 2. External PostgreSQL Requirements & TLS
@@ -148,7 +148,7 @@ curl https://linguist.example.com/model/default/v1/chat/completions \
 
 ### Configuration console API
 
-Use `Authorization: Bearer <LINGUIST_CATALOG_TOKEN>` on the same origin. Catalog lists include configurations that have never received traffic.
+Console endpoints require an authenticated admin session cookie (`linguist_session`) on the same origin. Catalog lists include configurations that have never received traffic.
 
 - `GET /api/v1/catalog/{resource}` — `providers`, `provider-models`, `projects`, `project-models`, or `routes`. Lists support `q`, `page`, and `page_size`. Models accept `provider_id` or `project_id` for their parent; routing accepts `project_id` and `call_model_id` to identify the first matching enabled rule without executing scripts.
 - `GET /api/v1/catalog/{resource}/detail?id=…` — add the parent ID for either model resource. Details expose script source and configuration fields to the console operator, never the dedicated API key values. Endpoint userinfo, query strings and fragments are omitted. Keep secrets out of script source and metadata.
