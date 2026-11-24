@@ -10,7 +10,12 @@ use serde::Deserialize;
 use serde_json::json;
 
 use crate::db;
-use crate::models::{FilterEntityItem, OverviewResponse, OverviewSummary};
+use crate::models::{
+    CostMonitoringResponse, FilterEntityItem, OverviewResponse, OverviewSummary,
+    PerformanceMonitoringResponse, RoutingMonitoringResponse, StreamSplit,
+    TrafficMonitoringResponse,
+};
+use crate::monitoring_db::{self, MonitoringFilter};
 use crate::state::AppState;
 
 /// Registers read-only telemetry API routes.
@@ -22,6 +27,22 @@ pub fn router() -> Router<AppState> {
         .route(
             "/api/v1/stats/recent-requests",
             get(recent_requests_handler),
+        )
+        .route(
+            "/api/v1/stats/monitoring/traffic",
+            get(monitoring_traffic_handler),
+        )
+        .route(
+            "/api/v1/stats/monitoring/performance",
+            get(monitoring_performance_handler),
+        )
+        .route(
+            "/api/v1/stats/monitoring/routing",
+            get(monitoring_routing_handler),
+        )
+        .route(
+            "/api/v1/stats/monitoring/cost",
+            get(monitoring_cost_handler),
         )
 }
 
@@ -225,6 +246,161 @@ async fn recent_requests_handler(
     .await
     {
         Ok(rows) => Json(rows).into_response(),
+        Err(err) => db_error_response(&err),
+    }
+}
+
+/// Query parameters for `/api/v1/stats/monitoring/*`.
+#[derive(Debug, Deserialize)]
+struct MonitoringQuery {
+    /// Time range (`1h`, `6h`, `24h`, `7d`, `30d`, `90d`).
+    #[serde(default)]
+    range: Option<String>,
+    /// Bucket granularity (`auto`, `minute`, `hour`, `day`).
+    #[serde(default)]
+    granularity: Option<String>,
+    /// Optional project filter.
+    #[serde(default)]
+    project_id: Option<String>,
+    /// Optional provider filter.
+    #[serde(default)]
+    provider_id: Option<String>,
+    /// Optional model filter.
+    #[serde(default)]
+    model_id: Option<String>,
+}
+
+/// Normalizes `MonitoringQuery` into a `MonitoringFilter`.
+fn as_monitoring_filter(query: &MonitoringQuery) -> MonitoringFilter<'_> {
+    MonitoringFilter {
+        range: clean_opt(query.range.as_deref()).unwrap_or("24h"),
+        granularity: clean_opt(query.granularity.as_deref()).unwrap_or("auto"),
+        project_id: clean_opt(query.project_id.as_deref()),
+        provider_id: clean_opt(query.provider_id.as_deref()),
+        model_id: clean_opt(query.model_id.as_deref()),
+    }
+}
+
+/// `GET /api/v1/stats/monitoring/traffic` handler.
+async fn monitoring_traffic_handler(
+    State(state): State<AppState>,
+    Query(query): Query<MonitoringQuery>,
+) -> Response {
+    let catalog = state.catalog.load();
+    let filter = as_monitoring_filter(&query);
+    let Some(pool) = &state.db_pool else {
+        return Json(TrafficMonitoringResponse {
+            meta: monitoring_db::build_meta(
+                &catalog,
+                &state.config.ui,
+                filter.range,
+                filter.granularity,
+            ),
+            buckets: Vec::new(),
+            distribution_by_model: Vec::new(),
+            distribution_by_project: Vec::new(),
+        })
+        .into_response();
+    };
+    match monitoring_db::query_traffic_monitoring(pool, &catalog, &state.config.ui, &filter).await {
+        Ok(resp) => Json(resp).into_response(),
+        Err(err) => db_error_response(&err),
+    }
+}
+
+/// `GET /api/v1/stats/monitoring/performance` handler.
+async fn monitoring_performance_handler(
+    State(state): State<AppState>,
+    Query(query): Query<MonitoringQuery>,
+) -> Response {
+    let catalog = state.catalog.load();
+    let filter = as_monitoring_filter(&query);
+    let Some(pool) = &state.db_pool else {
+        return Json(PerformanceMonitoringResponse {
+            meta: monitoring_db::build_meta(
+                &catalog,
+                &state.config.ui,
+                filter.range,
+                filter.granularity,
+            ),
+            buckets: Vec::new(),
+            model_quadrant: Vec::new(),
+        })
+        .into_response();
+    };
+    match monitoring_db::query_performance_monitoring(pool, &catalog, &state.config.ui, &filter)
+        .await
+    {
+        Ok(resp) => Json(resp).into_response(),
+        Err(err) => db_error_response(&err),
+    }
+}
+
+/// `GET /api/v1/stats/monitoring/routing` handler.
+async fn monitoring_routing_handler(
+    State(state): State<AppState>,
+    Query(query): Query<MonitoringQuery>,
+) -> Response {
+    let catalog = state.catalog.load();
+    let filter = as_monitoring_filter(&query);
+    let Some(pool) = &state.db_pool else {
+        return Json(RoutingMonitoringResponse {
+            meta: monitoring_db::build_meta(
+                &catalog,
+                &state.config.ui,
+                filter.range,
+                filter.granularity,
+            ),
+            rule_series_keys: Vec::new(),
+            buckets: Vec::new(),
+            provider_stats: Vec::new(),
+            finish_reasons: Vec::new(),
+            stream_split: StreamSplit {
+                stream_count: 0,
+                non_stream_count: 0,
+            },
+        })
+        .into_response();
+    };
+    match monitoring_db::query_routing_monitoring(pool, &catalog, &state.config.ui, &filter).await {
+        Ok(resp) => Json(resp).into_response(),
+        Err(err) => db_error_response(&err),
+    }
+}
+
+/// `GET /api/v1/stats/monitoring/cost` handler.
+async fn monitoring_cost_handler(
+    State(state): State<AppState>,
+    Query(query): Query<MonitoringQuery>,
+) -> Response {
+    let catalog = state.catalog.load();
+    let filter = as_monitoring_filter(&query);
+    let Some(pool) = &state.db_pool else {
+        return Json(CostMonitoringResponse {
+            meta: monitoring_db::build_meta(
+                &catalog,
+                &state.config.ui,
+                filter.range,
+                filter.granularity,
+            ),
+            currency: state.config.billing.display_currency.clone(),
+            series_keys: Vec::new(),
+            buckets: Vec::new(),
+            rank_by_project: Vec::new(),
+            rank_by_model: Vec::new(),
+        })
+        .into_response();
+    };
+    match monitoring_db::query_cost_monitoring(
+        pool,
+        &catalog,
+        &state.config.ui,
+        &state.config.billing,
+        &filter,
+    )
+    .await
+    {
+        Ok(resp) => Json(resp).into_response(),
         Err(err) => db_error_response(&err),
     }
 }

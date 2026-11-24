@@ -6,15 +6,27 @@ import type { CatalogResource } from "../catalog/types";
 
 interface NavigationGroup {
   title?: string;
-  resources: (CatalogResource | "telemetry")[];
+  resources: (CatalogResource | "telemetry" | "monitoring")[];
 }
 
 const groups: NavigationGroup[] = [
-  { resources: ["telemetry"] },
+  { resources: ["telemetry", "monitoring"] },
   { title: "供给侧", resources: ["providers", "provider-models"] },
   { title: "调用侧", resources: ["projects", "project-models"] },
   { resources: ["routes"] },
 ];
+
+function navTarget(resource: CatalogResource | "telemetry" | "monitoring"): string {
+  if (resource === "telemetry") return "/";
+  if (resource === "monitoring") return "/data";
+  return catalogPath(resource);
+}
+
+function navLabel(resource: CatalogResource | "telemetry" | "monitoring"): string {
+  if (resource === "telemetry") return "统计总览";
+  if (resource === "monitoring") return "数据";
+  return catalogTitles[resource];
+}
 
 function ConsoleNavigation({ onNavigate }: { onNavigate?: () => void }) {
   return (
@@ -26,11 +38,11 @@ function ConsoleNavigation({ onNavigate }: { onNavigate?: () => void }) {
             <NavLink
               key={resource}
               end
-              to={resource === "telemetry" ? "/" : catalogPath(resource)}
+              to={navTarget(resource)}
               className={({ isActive }) => `console-nav-link${isActive ? " active" : ""}`}
               onClick={onNavigate}
             >
-              {resource === "telemetry" ? "统计总览" : catalogTitles[resource]}
+              {navLabel(resource)}
             </NavLink>
           ))}
         </div>

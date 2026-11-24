@@ -922,6 +922,288 @@ pub struct RecentRequestItem {
     pub e2e_tps: f64,
 }
 
+/// Shared metadata and filter options returned by monitoring endpoints.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MonitoringMeta {
+    /// Active time range key (`1h`, `6h`, `24h`, `7d`, `30d`, `90d`).
+    pub range: String,
+    /// Resolved time bucket granularity (`minute`, `hour`, `day`).
+    pub granularity: String,
+    /// Configured display timezone.
+    pub timezone: String,
+    /// Available project filters.
+    pub projects: Vec<FilterEntityItem>,
+    /// Available provider filters.
+    pub providers: Vec<FilterEntityItem>,
+    /// Available model filters (`provider_id/model_id` or `model_id`).
+    pub models: Vec<FilterEntityItem>,
+}
+
+/// One time-bucketed point for the `traffic` monitoring dimension.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrafficBucket {
+    /// Formatted bucket timestamp label.
+    pub label: String,
+    /// Total requests in this bucket.
+    pub total_requests: i64,
+    /// Successful requests (`200..400`).
+    pub success_requests: i64,
+    /// Failed requests (`>= 400`).
+    pub error_requests: i64,
+    /// Input tokens consumed.
+    pub input_tokens: i64,
+    /// Output tokens generated.
+    pub output_tokens: i64,
+    /// Cache read tokens.
+    pub cache_read_tokens: i64,
+    /// Cache creation tokens.
+    pub cache_creation_tokens: i64,
+    /// Reasoning tokens.
+    pub reasoning_tokens: i64,
+    /// Cache hit rate percentage (`0.0..=100.0`).
+    pub cache_hit_rate: f64,
+}
+
+/// Aggregated usage slice for donut / bar distribution charts.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageSlice {
+    /// Entity identifier.
+    pub id: String,
+    /// Human-readable display name.
+    pub name: String,
+    /// Total tokens consumed.
+    pub total_tokens: i64,
+    /// Total request count.
+    pub request_count: i64,
+}
+
+/// Response payload for `GET /api/v1/stats/monitoring/traffic`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrafficMonitoringResponse {
+    /// Shared metadata and filters.
+    pub meta: MonitoringMeta,
+    /// Time-series traffic and token buckets.
+    pub buckets: Vec<TrafficBucket>,
+    /// Top models + "其他" distribution.
+    pub distribution_by_model: Vec<UsageSlice>,
+    /// Top projects + "其他" distribution.
+    pub distribution_by_project: Vec<UsageSlice>,
+}
+
+/// One time-bucketed point for the `performance` monitoring dimension.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformanceBucket {
+    /// Formatted bucket timestamp label.
+    pub label: String,
+    /// Median TTFT in milliseconds.
+    pub ttft_p50: f64,
+    /// P90 TTFT in milliseconds.
+    pub ttft_p90: f64,
+    /// P99 TTFT in milliseconds.
+    pub ttft_p99: f64,
+    /// Mean decode throughput (tokens/sec).
+    pub decode_tps_avg: f64,
+    /// Median decode throughput (tokens/sec).
+    pub decode_tps_p50: f64,
+    /// P90 decode throughput (tokens/sec).
+    pub decode_tps_p90: f64,
+    /// Mean TTFT in milliseconds.
+    pub avg_ttft_ms: f64,
+    /// Mean generation duration in milliseconds.
+    pub avg_generation_ms: f64,
+    /// Mean total request duration in milliseconds.
+    pub avg_total_duration_ms: f64,
+    /// Mean end-to-end throughput (tokens/sec).
+    pub avg_e2e_tps: f64,
+}
+
+/// Scatter point comparing latency vs throughput for one provider/model pair.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelPerformancePoint {
+    /// Provider identifier.
+    pub provider_id: String,
+    /// Provider display name.
+    pub provider_name: String,
+    /// Model identifier.
+    pub model_id: String,
+    /// Model display name.
+    pub model_name: String,
+    /// Mean TTFT in milliseconds.
+    pub avg_ttft_ms: f64,
+    /// Mean decode TPS.
+    pub avg_decode_tps: f64,
+    /// Number of requests in window.
+    pub request_count: i64,
+    /// Total tokens in window.
+    pub total_tokens: i64,
+}
+
+/// Response payload for `GET /api/v1/stats/monitoring/performance`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformanceMonitoringResponse {
+    /// Shared metadata and filters.
+    pub meta: MonitoringMeta,
+    /// Time-series latency and throughput buckets.
+    pub buckets: Vec<PerformanceBucket>,
+    /// Top-10 provider/model performance scatter points.
+    pub model_quadrant: Vec<ModelPerformancePoint>,
+}
+
+/// One time-bucketed point for the `routing` monitoring dimension.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoutingBucket {
+    /// Formatted bucket timestamp label.
+    pub label: String,
+    /// Request counts keyed by rule ID (Top 5 + `"其他"`).
+    pub rule_counts: BTreeMap<String, i64>,
+    /// Requests succeeding on the first attempt (`attempt_index = 1` and `2xx`).
+    pub first_try_success: i64,
+    /// Requests succeeding after retry/fallback (`attempt_index > 1` and `2xx`).
+    pub retry_success: i64,
+    /// Requests failing (`status_code >= 400`).
+    pub final_error: i64,
+    /// HTTP 2xx count.
+    pub status_2xx: i64,
+    /// HTTP 4xx count.
+    pub status_4xx: i64,
+    /// HTTP 5xx count.
+    pub status_5xx: i64,
+    /// Other status codes (`< 200`, `3xx`, or `0`).
+    pub status_other: i64,
+}
+
+/// Per-provider routing volume and success rate summary.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderRoutingStat {
+    /// Provider identifier.
+    pub provider_id: String,
+    /// Provider display name.
+    pub provider_name: String,
+    /// Total attempts routed to this provider.
+    pub request_count: i64,
+    /// Success rate percentage (`0.0..=100.0`).
+    pub success_rate: f64,
+    /// Failed attempt count.
+    pub error_count: i64,
+}
+
+/// Named counter item for categorical distributions (e.g., `finish_reason`).
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NamedCount {
+    /// Category name.
+    pub name: String,
+    /// Count in window.
+    pub count: i64,
+}
+
+/// Streaming vs non-streaming request split.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamSplit {
+    /// Streaming request count.
+    pub stream_count: i64,
+    /// Non-streaming request count.
+    pub non_stream_count: i64,
+}
+
+/// Response payload for `GET /api/v1/stats/monitoring/routing`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoutingMonitoringResponse {
+    /// Shared metadata and filters.
+    pub meta: MonitoringMeta,
+    /// Ordered rule keys matching `RoutingBucket::rule_counts`.
+    pub rule_series_keys: Vec<String>,
+    /// Time-series routing, retry, and status buckets.
+    pub buckets: Vec<RoutingBucket>,
+    /// Per-provider volume and success rate comparison.
+    pub provider_stats: Vec<ProviderRoutingStat>,
+    /// Categorical `finish_reason` counts.
+    pub finish_reasons: Vec<NamedCount>,
+    /// Streaming vs non-streaming split.
+    pub stream_split: StreamSplit,
+}
+
+/// Series metadata for stacked cost chart.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CostSeriesMeta {
+    /// Series key (`provider/model` or `other`).
+    pub key: String,
+    /// Display label.
+    pub name: String,
+}
+
+/// One time-bucketed point for the `cost` monitoring dimension.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CostBucket {
+    /// Formatted bucket timestamp label.
+    pub label: String,
+    /// Total converted cost in display currency.
+    pub total_amount: f64,
+    /// Number of unpriced requests in this bucket.
+    pub unpriced_count: i64,
+    /// Cost breakdown by top models + `"other"`.
+    pub by_model: BTreeMap<String, f64>,
+    /// Input token cost component.
+    pub input_amount: f64,
+    /// Output token cost component.
+    pub output_amount: f64,
+    /// Cache read cost component.
+    pub cache_read_amount: f64,
+    /// Cache write cost component.
+    pub cache_write_amount: f64,
+    /// Effective unit cost per 1M total tokens.
+    pub cost_per_1m_tokens: f64,
+    /// Average cost per priced request.
+    pub avg_cost_per_request: f64,
+}
+
+/// Ranked project or model cost summary item.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CostRankItem {
+    /// Project or model identifier.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Converted total cost.
+    pub amount: f64,
+    /// Unpriced requests for this entity.
+    pub unpriced_count: i64,
+    /// Total requests for this entity.
+    pub request_count: i64,
+}
+
+/// Response payload for `GET /api/v1/stats/monitoring/cost`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CostMonitoringResponse {
+    /// Shared metadata and filters.
+    pub meta: MonitoringMeta,
+    /// Target currency code used for chart values (if convertible).
+    pub currency: Option<String>,
+    /// Ordered series keys for stacked cost chart.
+    pub series_keys: Vec<CostSeriesMeta>,
+    /// Time-series cost, component breakdown, and unit efficiency buckets.
+    pub buckets: Vec<CostBucket>,
+    /// Top-10 projects by spend.
+    pub rank_by_project: Vec<CostRankItem>,
+    /// Top-10 models by spend.
+    pub rank_by_model: Vec<CostRankItem>,
+}
+
 /// Derives a deterministic slug ID from a provider display name when `id` is omitted.
 #[must_use]
 pub fn derive_provider_slug(name: &str) -> String {
