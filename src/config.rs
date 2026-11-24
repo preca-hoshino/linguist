@@ -24,6 +24,135 @@ pub struct AppConfig {
     pub ui: UiConfig,
     /// Optional expense display settings.
     pub billing: BillingConfig,
+    /// OIDC authentication settings for the admin console and telemetry dashboard.
+    pub oidc: OidcConfig,
+}
+
+/// OIDC provider and client settings for admin authentication.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct OidcConfig {
+    /// OIDC issuer URL (must match the discovery document `issuer`).
+    pub issuer: String,
+    /// OAuth2/OIDC client ID registered with the identity provider.
+    pub client_id: String,
+    /// External callback URL registered with the identity provider.
+    pub redirect_uri: String,
+    /// Path to the file containing only the OIDC client secret.
+    pub client_secret_file: PathBuf,
+}
+
+/// Validated OIDC runtime configuration required by `serve`.
+#[derive(Clone)]
+pub struct ValidatedOidcConfig {
+    /// Normalized issuer URL (trimmed of trailing whitespace).
+    pub issuer: String,
+    /// OAuth2/OIDC client ID.
+    pub client_id: String,
+    /// External callback URL.
+    pub redirect_uri: String,
+    /// Whether the redirect URI uses HTTPS (controls `Secure` cookie attribute).
+    pub secure_cookies: bool,
+    /// OIDC client secret loaded from `client_secret_file`.
+    pub client_secret: String,
+    /// Exact OIDC `sub` allowed to hold an admin session.
+    pub admin_sub: String,
+}
+
+impl std::fmt::Debug for ValidatedOidcConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ValidatedOidcConfig")
+            .field("issuer", &self.issuer)
+            .field("client_id", &self.client_id)
+            .field("redirect_uri", &self.redirect_uri)
+            .field("secure_cookies", &self.secure_cookies)
+            .field("client_secret", &"[REDACTED]")
+            .field("admin_sub", &self.admin_sub)
+            .finish()
+    }
+}
+
+impl OidcConfig {
+    /// Validates OIDC configuration fields, reads `client_secret_file`, and requires
+    /// `LINGUIST_OIDC_ADMIN_SUB` for `serve`.
+    ///
+    /// # Errors
+    /// Returns an error when any required OIDC parameter, secret file, or admin `sub`
+    /// is missing or invalid.
+    pub fn validate_for_serve(&self, admin_sub: Option<&str>) -> Result<ValidatedOidcConfig> {
+        let issuer = self.issuer.trim().to_string();
+        if issuer.is_empty() {
+            anyhow::bail!("[oidc].issuer must be configured");
+        }
+        let issuer_url = reqwest::Url::parse(&issuer)
+            .with_context(|| format!("invalid [oidc].issuer URL '{issuer}'"))?;
+        validate_oidc_url(&issuer_url, "[oidc].issuer")?;
+
+        let client_id = self.client_id.trim().to_string();
+        if client_id.is_empty() {
+            anyhow::bail!("[oidc].client_id must be configured");
+        }
+
+        let redirect_uri = self.redirect_uri.trim().to_string();
+        if redirect_uri.is_empty() {
+            anyhow::bail!("[oidc].redirect_uri must be configured");
+        }
+        let redirect_url = reqwest::Url::parse(&redirect_uri)
+            .with_context(|| format!("invalid [oidc].redirect_uri URL '{redirect_uri}'"))?;
+        validate_oidc_url(&redirect_url, "[oidc].redirect_uri")?;
+        let secure_cookies = redirect_url.scheme() == "https";
+
+        if self.client_secret_file.as_os_str().is_empty() {
+            anyhow::bail!("[oidc].client_secret_file must be configured");
+        }
+        let secret_raw = fs::read_to_string(&self.client_secret_file).with_context(|| {
+            format!(
+                "failed to read [oidc].client_secret_file at {}",
+                self.client_secret_file.display()
+            )
+        })?;
+        let client_secret = secret_raw.trim().to_string();
+        if client_secret.is_empty() {
+            anyhow::bail!(
+                "[oidc].client_secret_file {} is empty",
+                self.client_secret_file.display()
+            );
+        }
+
+        let admin_sub = admin_sub
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .context("LINGUIST_OIDC_ADMIN_SUB environment variable must be set")?
+            .to_string();
+
+        Ok(ValidatedOidcConfig {
+            issuer,
+            client_id,
+            redirect_uri,
+            secure_cookies,
+            client_secret,
+            admin_sub,
+        })
+    }
+}
+
+/// Ensures an OIDC URL uses HTTPS, allowing HTTP only for loopback development hosts.
+fn validate_oidc_url(url: &reqwest::Url, field: &str) -> Result<()> {
+    match url.scheme() {
+        "https" => Ok(()),
+        "http" => {
+            let is_loopback = matches!(
+                url.host_str(),
+                Some("localhost" | "127.0.0.1" | "[::1]" | "::1")
+            );
+            if is_loopback {
+                Ok(())
+            } else {
+                anyhow::bail!("{field} must use https:// outside local loopback development");
+            }
+        }
+        other => anyhow::bail!("{field} has unsupported URL scheme '{other}'"),
+    }
 }
 
 /// Optional display currency for cost reports; accounting always uses the price currency.
@@ -209,6 +338,10 @@ impl AppConfig {
         config.configs.providers_path = resolve_relative(base_dir, &config.configs.providers_path);
         config.configs.projects_path = resolve_relative(base_dir, &config.configs.projects_path);
         config.configs.routes_path = resolve_relative(base_dir, &config.configs.routes_path);
+        if !config.oidc.client_secret_file.as_os_str().is_empty() {
+            config.oidc.client_secret_file =
+                resolve_relative(base_dir, &config.oidc.client_secret_file);
+        }
 
         Ok(config)
     }
@@ -248,5 +381,42 @@ custom_icons_dir = "./icons/custom"
 "#;
         let parsed: Result<AppConfig, _> = toml::from_str(raw);
         assert!(parsed.is_ok());
+    }
+
+    #[test]
+    fn oidc_validation_requires_all_fields_and_https_in_prod() {
+        let dir = std::env::temp_dir().join(format!("linguist-oidc-cfg-{}", uuid::Uuid::new_v4()));
+        assert!(fs::create_dir(&dir).is_ok());
+        let secret_path = dir.join("secret");
+        assert!(fs::write(&secret_path, "super-secret\n").is_ok());
+
+        let mut cfg = OidcConfig {
+            issuer: "https://pass.restart.org.cn/oidc".to_string(),
+            client_id: "cid".to_string(),
+            redirect_uri: "https://linguist.example.com/auth/callback".to_string(),
+            client_secret_file: secret_path.clone(),
+        };
+
+        assert!(cfg.validate_for_serve(None).is_err());
+        assert!(cfg.validate_for_serve(Some("  ")).is_err());
+
+        let ok = cfg.validate_for_serve(Some("admin-sub-1"));
+        assert!(ok.is_ok());
+        if let Ok(validated) = ok {
+            assert_eq!(validated.client_secret, "super-secret");
+            assert!(validated.secure_cookies);
+        }
+
+        cfg.redirect_uri = "http://linguist.example.com/auth/callback".to_string();
+        assert!(cfg.validate_for_serve(Some("admin-sub-1")).is_err());
+
+        cfg.redirect_uri = "http://localhost:5173/auth/callback".to_string();
+        let dev_ok = cfg.validate_for_serve(Some("admin-sub-1"));
+        assert!(dev_ok.is_ok());
+        if let Ok(validated) = dev_ok {
+            assert!(!validated.secure_cookies);
+        }
+
+        let _ = fs::remove_dir_all(&dir);
     }
 }

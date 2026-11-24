@@ -47,7 +47,7 @@ services:
       - "host.docker.internal:host-gateway"
     environment:
       LINGUIST_CATALOG_KEY: ${LINGUIST_CATALOG_KEY:-}
-      LINGUIST_CATALOG_TOKEN: ${LINGUIST_CATALOG_TOKEN:-}
+      LINGUIST_OIDC_ADMIN_SUB: ${LINGUIST_OIDC_ADMIN_SUB:-}
       # SSL_CERT_FILE: /config/certs/ca.pem
     # ─── 资源限制与日志轮转 ───
     deploy:

@@ -41,3 +41,16 @@ leaderboard_min_requests = 1
 [billing]
 # 可选：按最新参考汇率显示折算值；省略时只显示原币
 # display_currency = "CNY"
+
+[oidc]
+# 示例值：必须以身份提供商发现文档中的 issuer 为准
+issuer = "https://pass.restart.org.cn/oidc"
+
+# 身份提供商中创建的服务端 Web 应用的 Client ID
+client_id = "your-client-id"
+
+# Linguist 的外部访问地址，需与身份提供商登记的回调地址完全一致
+redirect_uri = "https://linguist.example.com/auth/callback"
+
+# Docker 中的绝对路径；文件只包含 client secret
+client_secret_file = "/config/secrets/oidc-client-secret"
