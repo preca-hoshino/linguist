@@ -1,0 +1,6 @@
+-- Add gateway internal timing breakdown columns to request_logs.
+ALTER TABLE request_logs
+    ADD COLUMN IF NOT EXISTS gateway_overhead_ms DOUBLE PRECISION NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS routing_ms DOUBLE PRECISION NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS attempt_prep_ms DOUBLE PRECISION NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS upstream_header_ms DOUBLE PRECISION NOT NULL DEFAULT 0;

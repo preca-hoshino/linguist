@@ -418,7 +418,8 @@ async fn insert_request_log_row(
             cache_read_tokens, cache_creation_tokens, reasoning_tokens, total_tokens,
             ttft_ms, total_duration_ms, generation_duration_ms, decode_tps, e2e_tps,
             finish_reason, reasoning_effort, token_source, script_state,
-            billing_amount, billing_currency, billing_status, billing_details, extra_tokens
+            billing_amount, billing_currency, billing_status, billing_details, extra_tokens,
+            gateway_overhead_ms, routing_ms, attempt_prep_ms, upstream_header_ms
         )
         VALUES (
             $1, $2, $3, $4,
@@ -427,7 +428,8 @@ async fn insert_request_log_row(
             $14, $15, $16, $17,
             $18, $19, $20, $21,
             $22, $23, $24, $25, $26,
-            $27, $28, $29, $30, $31, $32, $33, $34, $35
+            $27, $28, $29, $30, $31, $32, $33, $34, $35,
+            $36, $37, $38, $39
         )
         ON CONFLICT (request_uid) DO NOTHING
         RETURNING id
@@ -468,6 +470,10 @@ async fn insert_request_log_row(
     .bind(&billing.status)
     .bind(&billing.details)
     .bind(serde_json::to_value(&rec.extra_tokens)?)
+    .bind(rec.gateway_overhead_ms)
+    .bind(rec.routing_ms)
+    .bind(rec.attempt_prep_ms)
+    .bind(rec.upstream_header_ms)
     .fetch_optional(&mut **tx)
     .await?;
 
@@ -766,6 +772,10 @@ fn build_demo_record(
         generation_duration_ms,
         decode_tps,
         e2e_tps,
+        gateway_overhead_ms: 4.5,
+        routing_ms: 2.8,
+        attempt_prep_ms: 1.7,
+        upstream_header_ms: (ttft_ms * 0.45).max(12.0),
         finish_reason: Some("stop".to_string()),
         reasoning_effort: Some("high".to_string()),
         token_source: "upstream_usage".to_string(),

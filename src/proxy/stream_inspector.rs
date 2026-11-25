@@ -65,6 +65,14 @@ pub struct InspectionMetadata {
     pub started_at: chrono::DateTime<chrono::Utc>,
     /// Catalog snapshot captured when the request started (used for async billing).
     pub catalog_snapshot: Option<Arc<crate::catalog::RuntimeCatalog>>,
+    /// Gateway internal pre-send overhead in milliseconds.
+    pub gateway_overhead_ms: f64,
+    /// Stages ①..③ routing duration in milliseconds.
+    pub routing_ms: f64,
+    /// Stages ④..⑤ attempt preparation duration in milliseconds.
+    pub attempt_prep_ms: f64,
+    /// Upstream HTTP response header establishment latency in milliseconds.
+    pub upstream_header_ms: f64,
 }
 
 /// Extracted token counters and timing results computed by the inspector.
@@ -322,6 +330,10 @@ impl StreamTelemetryTracker {
             generation_duration_ms,
             decode_tps,
             e2e_tps,
+            gateway_overhead_ms: self.meta.gateway_overhead_ms,
+            routing_ms: self.meta.routing_ms,
+            attempt_prep_ms: self.meta.attempt_prep_ms,
+            upstream_header_ms: self.meta.upstream_header_ms,
             finish_reason: self.finish_reason.clone(),
             reasoning_effort: self.meta.reasoning_effort.clone(),
             token_source,
@@ -712,6 +724,10 @@ mod tests {
             t_start: Instant::now(),
             started_at: Utc::now(),
             catalog_snapshot: None,
+            gateway_overhead_ms: 0.0,
+            routing_ms: 0.0,
+            attempt_prep_ms: 0.0,
+            upstream_header_ms: 0.0,
         }
     }
 

@@ -445,6 +445,14 @@ pub struct RequestLogRecord {
     pub decode_tps: f64,
     /// End-to-end tokens per second.
     pub e2e_tps: f64,
+    /// Gateway internal pre-send overhead in milliseconds (`routing_ms + attempt_prep_ms`).
+    pub gateway_overhead_ms: f64,
+    /// Stages ①..③ routing & request intake duration in milliseconds.
+    pub routing_ms: f64,
+    /// Stages ④..⑤ attempt context & payload preparation duration in milliseconds.
+    pub attempt_prep_ms: f64,
+    /// Upstream HTTP response header latency in milliseconds.
+    pub upstream_header_ms: f64,
     /// Upstream finish reason (`stop`, `length`, `tool_calls`, etc.).
     pub finish_reason: Option<String>,
     /// Effective `reasoning_effort` value sent to upstream.

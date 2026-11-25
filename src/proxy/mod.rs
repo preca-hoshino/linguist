@@ -94,11 +94,26 @@ async fn project_chat_completions(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
+    let t_ingress = Instant::now();
     let catalog = state.catalog.load_full();
     if let Some(err_resp) = verify_project_auth(&catalog, &project_id, &headers) {
         return err_resp;
     }
-    handle_routed_chat(state, catalog, &project_id, body).await
+    handle_routed_chat(state, catalog, &project_id, body, t_ingress).await
+}
+
+/// Sub-millisecond gateway processing timings (in milliseconds) captured prior to upstream transmission.
+#[derive(Debug, Clone, Copy, Default)]
+#[allow(clippy::struct_field_names)]
+struct AttemptTimings {
+    /// Total gateway overhead before upstream `send()` (`routing_ms + attempt_prep_ms`).
+    gateway_overhead_ms: f64,
+    /// Stages ①..③ routing & auth/parse duration in ms.
+    routing_ms: f64,
+    /// Stages ④..⑤ attempt preparation & payload serialization duration in ms.
+    attempt_prep_ms: f64,
+    /// Upstream HTTP response header establishment latency in ms.
+    upstream_header_ms: f64,
 }
 
 /// Shared Stages ①..③ + upstream dispatch pipeline for `/model/{project_id}/v1/...`.
@@ -107,6 +122,7 @@ async fn handle_routed_chat(
     catalog: Arc<RuntimeCatalog>,
     project_id: &str,
     body: Value,
+    t_ingress: Instant,
 ) -> Response {
     let Some(body_map) = body.as_object().cloned() else {
         return openai_error(
@@ -141,7 +157,10 @@ async fn handle_routed_chat(
     )
     .await
     {
-        Ok(StageOutcome::Ready(plan)) => dispatch_plan(&state, &catalog, parent_uid, plan).await,
+        Ok(StageOutcome::Ready(plan)) => {
+            let routing_ms = t_ingress.elapsed().as_secs_f64() * 1000.0;
+            dispatch_plan(&state, &catalog, parent_uid, plan, routing_ms).await
+        }
         Ok(StageOutcome::Rejected(reject)) => {
             let status =
                 StatusCode::from_u16(reject.status_code).unwrap_or(StatusCode::BAD_REQUEST);
@@ -173,13 +192,17 @@ async fn dispatch_plan(
     catalog: &Arc<RuntimeCatalog>,
     parent_uid: Uuid,
     plan: RoutingPlan,
+    routing_ms: f64,
 ) -> Response {
     let total = plan.endpoints.len();
     let mut last_error_response: Option<(StatusCode, Vec<u8>, Option<String>)> = None;
 
     for (idx, endpoint) in plan.endpoints.iter().enumerate() {
         let has_more = idx + 1 < total;
-        match try_single_endpoint(state, catalog, parent_uid, &plan, idx, endpoint, has_more).await
+        match try_single_endpoint(
+            state, catalog, parent_uid, &plan, idx, endpoint, has_more, routing_ms,
+        )
+        .await
         {
             AttemptOutcome::Respond(resp) => return resp,
             AttemptOutcome::Retry(err_payload) => {
@@ -208,6 +231,7 @@ async fn dispatch_plan(
 }
 
 /// Attempts Stages ④ & ⑤ preparation and upstream HTTP execution for one endpoint.
+#[allow(clippy::too_many_arguments)]
 async fn try_single_endpoint(
     state: &AppState,
     catalog: &Arc<RuntimeCatalog>,
@@ -216,7 +240,9 @@ async fn try_single_endpoint(
     idx: usize,
     endpoint: &crate::models::RouteEndpoint,
     has_more: bool,
+    routing_ms: f64,
 ) -> AttemptOutcome {
+    let t_attempt = Instant::now();
     let attempt_num = u16::try_from(idx + 1).unwrap_or(u16::MAX);
     let Some((provider, model)) = catalog.find_model(&endpoint.provider_id, &endpoint.model_id)
     else {
@@ -272,6 +298,13 @@ async fn try_single_endpoint(
 
     let (outbound_headers, outbound_body) =
         prepare_outbound_payload(&attempt_ctx, &provider.api_key);
+    let attempt_prep_ms = t_attempt.elapsed().as_secs_f64() * 1000.0;
+    let timings = AttemptTimings {
+        gateway_overhead_ms: routing_ms + attempt_prep_ms,
+        routing_ms,
+        attempt_prep_ms,
+        upstream_header_ms: 0.0,
+    };
     let attempt_uid = if idx == 0 { parent_uid } else { Uuid::new_v4() };
 
     send_upstream_attempt(
@@ -289,6 +322,7 @@ async fn try_single_endpoint(
         outbound_headers,
         outbound_body,
         has_more,
+        timings,
     )
     .await
 }
@@ -310,6 +344,7 @@ async fn send_upstream_attempt(
     outbound_headers: BTreeMap<String, String>,
     outbound_body: Map<String, Value>,
     has_more: bool,
+    mut timings: AttemptTimings,
 ) -> AttemptOutcome {
     let t_start = Instant::now();
     let started_at = Utc::now();
@@ -327,9 +362,13 @@ async fn send_upstream_attempt(
     }
 
     let upstream_res = match req_builder.json(&outbound_body).send().await {
-        Ok(resp) => resp,
+        Ok(resp) => {
+            timings.upstream_header_ms = t_start.elapsed().as_secs_f64() * 1000.0;
+            resp
+        }
         Err(err) => {
             let elapsed_ms = t_start.elapsed().as_secs_f64() * 1000.0;
+            timings.upstream_header_ms = elapsed_ms;
             record_failed_attempt(
                 state,
                 catalog,
@@ -345,6 +384,7 @@ async fn send_upstream_attempt(
                 format!("upstream request error: {err}"),
                 None,
                 started_at,
+                timings,
             );
             if has_more {
                 warn!(attempt = attempt_num, provider = %provider_id, model = %model_id, error = %err, "upstream connection failed; falling back");
@@ -390,6 +430,7 @@ async fn send_upstream_attempt(
             t_start,
             started_at,
             has_more,
+            timings,
         )
         .await;
     }
@@ -415,6 +456,7 @@ async fn send_upstream_attempt(
         is_sse,
         t_start,
         started_at,
+        timings,
     );
 
     if is_sse {
@@ -446,6 +488,7 @@ async fn handle_fallback_status(
     t_start: Instant,
     started_at: chrono::DateTime<Utc>,
     has_more: bool,
+    timings: AttemptTimings,
 ) -> AttemptOutcome {
     let status_u16 = status.as_u16();
     let err_bytes = upstream_res.bytes().await.unwrap_or_default();
@@ -467,6 +510,7 @@ async fn handle_fallback_status(
         format!("HTTP {status_u16}: {err_text}"),
         resp_json,
         started_at,
+        timings,
     );
     if has_more {
         warn!(
@@ -699,6 +743,7 @@ fn build_inspection_metadata(
     is_stream: bool,
     t_start: Instant,
     started_at: chrono::DateTime<Utc>,
+    timings: AttemptTimings,
 ) -> InspectionMetadata {
     let keep_req_payload = state.config.database.log_full_payload
         || (state.config.database.log_error_payload && status_code >= 400);
@@ -739,6 +784,10 @@ fn build_inspection_metadata(
         t_start,
         started_at,
         catalog_snapshot: Some(Arc::clone(catalog)),
+        gateway_overhead_ms: timings.gateway_overhead_ms,
+        routing_ms: timings.routing_ms,
+        attempt_prep_ms: timings.attempt_prep_ms,
+        upstream_header_ms: timings.upstream_header_ms,
     }
 }
 
@@ -759,6 +808,7 @@ fn record_failed_attempt(
     error_message: String,
     response_body: Option<Value>,
     started_at: chrono::DateTime<Utc>,
+    timings: AttemptTimings,
 ) {
     let provider_id = ctx
         .provider
@@ -815,6 +865,10 @@ fn record_failed_attempt(
         generation_duration_ms: 0.0,
         decode_tps: 0.0,
         e2e_tps: 0.0,
+        gateway_overhead_ms: timings.gateway_overhead_ms,
+        routing_ms: timings.routing_ms,
+        attempt_prep_ms: timings.attempt_prep_ms,
+        upstream_header_ms: timings.upstream_header_ms,
         finish_reason: None,
         reasoning_effort: ctx
             .request
