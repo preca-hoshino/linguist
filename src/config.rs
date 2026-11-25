@@ -312,14 +312,6 @@ impl AppConfig {
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
 
-        if let Ok(table) = raw.parse::<toml::Table>()
-            && table.contains_key("configs")
-        {
-            tracing::warn!(
-                "config.toml contains deprecated [configs] section; v0.2.0 uses PostgreSQL exclusively"
-            );
-        }
-
         if !config.oidc.client_secret_file.as_os_str().is_empty() {
             config.oidc.client_secret_file =
                 resolve_relative(base_dir, &config.oidc.client_secret_file);
@@ -347,21 +339,6 @@ mod tests {
         let toml_str = toml::to_string(&AppConfig::default()).ok();
         assert!(toml_str.is_some());
         let parsed: Result<AppConfig, _> = toml::from_str(toml_str.as_deref().unwrap_or(""));
-        assert!(parsed.is_ok());
-    }
-
-    #[test]
-    fn legacy_icons_section_is_ignored() {
-        let raw = r#"
-[server]
-host = "0.0.0.0"
-port = 9527
-
-[icons]
-lobe_icons_dir = "./icons/lobe"
-custom_icons_dir = "./icons/custom"
-"#;
-        let parsed: Result<AppConfig, _> = toml::from_str(raw);
         assert!(parsed.is_ok());
     }
 

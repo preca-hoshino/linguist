@@ -1,6 +1,5 @@
 //! Configuration catalog snapshot (`RuntimeCatalog`) and `CatalogProvider` abstraction.
 
-pub mod migrate_v02;
 pub mod postgres;
 pub mod read;
 pub mod secrets;

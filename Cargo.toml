@@ -1,6 +1,6 @@
 [package]
 name = "linguist"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "Programmable script-routed OpenAI Chat API gateway and token telemetry dashboard"
 readme = "README.md"

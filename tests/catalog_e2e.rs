@@ -8,7 +8,6 @@ use arc_swap::ArcSwap;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Method, Request, StatusCode};
-use serde_json::{Value, json};
 use sqlx::PgPool;
 use tower::ServiceExt;
 
@@ -20,7 +19,7 @@ use linguist::catalog::postgres::write::{
 };
 use linguist::catalog::read::Resource;
 use linguist::catalog::secrets::CatalogSecrets;
-use linguist::catalog::{CatalogProvider, RuntimeCatalog, migrate_v02, sync};
+use linguist::catalog::{RuntimeCatalog, sync};
 use linguist::config::{AppConfig, MetricsConfig, ScriptEngineConfig, ValidatedOidcConfig};
 use linguist::metrics_cache::MetricsCache;
 use linguist::models::{
@@ -294,157 +293,4 @@ async fn pg_catalog_crud_reorder_and_runtime_reload(pool: PgPool) {
     let reloaded = sync::reload_now(&provider, &swap).await.unwrap();
     assert!(reloaded > 0);
     assert!(swap.load().providers.is_empty());
-}
-
-#[sqlx::test(migrations = "./migrations")]
-#[ignore = "requires a disposable PostgreSQL server via DATABASE_URL"]
-async fn migrate_v02_transforms_v010_tables_atomically(pool: PgPool) {
-    // Recreate a minimal v0.1.0 schema state to test `run_migrate_v02` end-to-end.
-    sqlx::raw_sql(
-        r"
-        DROP TABLE IF EXISTS catalog_route_targets, catalog_route_rules, catalog_project_models, catalog_projects, catalog_provider_models, catalog_providers CASCADE;
-        CREATE TABLE catalog_providers (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            icon TEXT NOT NULL DEFAULT '',
-            vendor TEXT,
-            api_type TEXT,
-            encrypted_key BYTEA,
-            script TEXT,
-            position BIGINT NOT NULL UNIQUE
-        );
-        CREATE TABLE catalog_provider_models (
-            provider_id TEXT NOT NULL REFERENCES catalog_providers(id) ON DELETE CASCADE,
-            id TEXT NOT NULL,
-            name TEXT NOT NULL,
-            icon TEXT NOT NULL DEFAULT '',
-            url TEXT NOT NULL,
-            supports_reasoning_effort TEXT[],
-            tool_calling BOOLEAN,
-            vision BOOLEAN,
-            thinking BOOLEAN,
-            streaming BOOLEAN,
-            max_input_tokens BIGINT,
-            max_output_tokens BIGINT,
-            script TEXT,
-            position BIGINT NOT NULL,
-            PRIMARY KEY (provider_id, id),
-            UNIQUE (provider_id, position)
-        );
-        CREATE TABLE catalog_projects (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            icon TEXT NOT NULL DEFAULT '',
-            key_digest BYTEA NOT NULL,
-            meta JSONB NOT NULL DEFAULT '{}'::jsonb,
-            script TEXT,
-            position BIGINT NOT NULL UNIQUE
-        );
-        CREATE TABLE catalog_project_models (
-            project_id TEXT NOT NULL REFERENCES catalog_projects(id) ON DELETE CASCADE,
-            id TEXT NOT NULL,
-            name TEXT NOT NULL,
-            icon TEXT NOT NULL DEFAULT '',
-            meta JSONB NOT NULL DEFAULT '{}'::jsonb,
-            script TEXT,
-            position BIGINT NOT NULL,
-            PRIMARY KEY (project_id, id),
-            UNIQUE (project_id, position)
-        );
-        CREATE TABLE catalog_route_rules (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL,
-            enabled BOOLEAN NOT NULL DEFAULT TRUE,
-            priority INTEGER NOT NULL DEFAULT 0,
-            project_ids TEXT[] NOT NULL DEFAULT ARRAY['*']::text[],
-            call_model_ids TEXT[] NOT NULL DEFAULT ARRAY['*']::text[],
-            allow_patterns TEXT[] NOT NULL DEFAULT '{}'::text[],
-            deny_patterns TEXT[] NOT NULL DEFAULT '{}'::text[],
-            rewrite_response_model BOOLEAN NOT NULL DEFAULT TRUE,
-            script TEXT,
-            position BIGINT NOT NULL UNIQUE
-        );
-        CREATE TABLE catalog_route_targets (
-            route_id TEXT NOT NULL REFERENCES catalog_route_rules(id) ON DELETE CASCADE,
-            position BIGINT NOT NULL,
-            provider_id TEXT NOT NULL,
-            model_id TEXT NOT NULL,
-            max_attempts SMALLINT NOT NULL DEFAULT 1,
-            PRIMARY KEY (route_id, position)
-        );
-        ALTER TABLE catalog_state DROP COLUMN IF EXISTS schema_version;
-        ALTER TABLE catalog_state ADD COLUMN IF NOT EXISTS billing_prices JSONB NOT NULL DEFAULT '[]'::jsonb;
-        ",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-
-    let secrets = test_secrets();
-    let app_digest = secrets.digest_project("app", "migrated-plain-key");
-
-    sqlx::query("INSERT INTO catalog_providers (id, name, icon, position) VALUES ('prov', 'Prov', 'openai', 1)")
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query("INSERT INTO catalog_provider_models (provider_id, id, name, icon, url, position) VALUES ('prov', 'm1', 'M1', 'openai', 'https://mock.test/v1', 1)")
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query("INSERT INTO catalog_projects (id, name, icon, key_digest, position) VALUES ('app', 'App', 'openai', $1, 1)")
-        .bind(app_digest.as_slice())
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query("INSERT INTO catalog_project_models (project_id, id, name, icon, position) VALUES ('app', 'cm1', 'CM1', 'openai', 1)")
-        .execute(&pool)
-        .await
-        .unwrap();
-    sqlx::query(
-        "INSERT INTO catalog_route_rules (id, name, enabled, priority, project_ids, call_model_ids, position) VALUES ('r1', 'R1', true, 100, ARRAY['app'], ARRAY['cm1'], 1)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-    sqlx::query(
-        "INSERT INTO catalog_route_targets (route_id, position, provider_id, model_id, max_attempts) VALUES ('r1', 0, 'prov', 'm1', 2)",
-    )
-    .execute(&pool)
-    .await
-    .unwrap();
-
-    let dir = std::env::temp_dir().join(format!("linguist-v02-mig-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&dir).unwrap();
-    let proj_json = dir.join("projects.json");
-    std::fs::write(
-        &proj_json,
-        serde_json::to_vec(&json!([{ "id": "app", "apiKey": "migrated-plain-key" }])).unwrap(),
-    )
-    .unwrap();
-
-    let engine = ScriptEngine::new(ScriptEngineConfig::default());
-    let report = migrate_v02::run_migrate_v02(&pool, &test_secrets(), &engine, Some(&proj_json))
-        .await
-        .unwrap();
-    let _ = std::fs::remove_dir_all(&dir);
-
-    assert_eq!(report.providers, 1);
-    assert_eq!(report.provider_models, 1);
-    assert_eq!(report.projects, 1);
-    assert_eq!(report.project_models, 1);
-    assert_eq!(report.routes, 1);
-
-    let loaded = PgCatalogProvider::new(pool, test_secrets(), engine)
-        .load_catalog()
-        .await
-        .unwrap();
-    assert_eq!(loaded.projects[0].api_key, "migrated-plain-key");
-    assert_eq!(
-        loaded.providers[0].models[0]
-            .compiled
-            .meta
-            .get("url")
-            .and_then(Value::as_str),
-        Some("https://mock.test/v1")
-    );
 }

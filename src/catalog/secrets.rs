@@ -10,8 +10,6 @@ use ring::rand::{SecureRandom, SystemRandom};
 /// Context-separated keys derived from the instance's catalog master key.
 #[derive(Clone)]
 pub struct CatalogSecrets {
-    /// Authentication key for project credentials.
-    projects: hmac::Key,
     /// Authentication key for configuration fingerprints and master key checks.
     fingerprints: hmac::Key,
     /// Key material for authenticated encryption of upstream credentials.
@@ -52,7 +50,6 @@ impl CatalogSecrets {
         let key = hmac::Key::new(hmac::HMAC_SHA256, &master);
         let derive = |label| tag_bytes(hmac::sign(&key, label));
         Ok(Self {
-            projects: hmac::Key::new(hmac::HMAC_SHA256, &derive(b"linguist project keys v1")),
             fingerprints: hmac::Key::new(hmac::HMAC_SHA256, &derive(b"linguist catalog v1")),
             upstream: derive(b"linguist upstream keys v1"),
         })
@@ -66,26 +63,6 @@ impl CatalogSecrets {
     /// Identifies the shared master key without revealing it.
     pub(in crate::catalog) fn key_tag(&self) -> [u8; 32] {
         self.fingerprint(b"linguist catalog key check")
-    }
-
-    /// Computes the digest stored for a project bearer key.
-    #[must_use]
-    pub fn digest_project(&self, project_id: &str, token: &str) -> [u8; 32] {
-        tag_bytes(hmac::sign(
-            &self.projects,
-            &project_message(project_id, token),
-        ))
-    }
-
-    /// Checks a supplied project key against its stored digest.
-    #[allow(dead_code)]
-    pub(in crate::catalog) fn verify_project(
-        &self,
-        project_id: &str,
-        token: &str,
-        digest: &[u8],
-    ) -> bool {
-        hmac::verify(&self.projects, &project_message(project_id, token), digest).is_ok()
     }
 
     /// Encrypts one provider key with a random nonce bound to the provider ID.
@@ -148,11 +125,6 @@ pub(crate) fn tokens_equal(a: &[u8], b: &[u8]) -> bool {
         diff |= usize::from(a.get(i).copied().unwrap_or(0) ^ b.get(i).copied().unwrap_or(0));
     }
     diff == 0
-}
-
-/// Separates the project namespace from the raw token (project IDs exclude NUL).
-fn project_message(project_id: &str, token: &str) -> Vec<u8> {
-    [project_id.as_bytes(), &[0], token.as_bytes()].concat()
 }
 
 /// Copies a SHA-256 HMAC tag to a fixed buffer.

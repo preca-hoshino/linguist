@@ -1,4 +1,4 @@
-//! Linguist CLI entrypoint (`serve`, `check-config`, `migrate-v02`, `dry-run`, `seed-demo`).
+//! Linguist CLI entrypoint (`serve`, `check-config`, `dry-run`, `seed-demo`).
 
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -15,7 +15,7 @@ use uuid::Uuid;
 use linguist::auth::oidc::OidcClient;
 use linguist::catalog::postgres::PgCatalogProvider;
 use linguist::catalog::secrets::CatalogSecrets;
-use linguist::catalog::{CatalogProvider, RuntimeCatalog, migrate_v02, sync};
+use linguist::catalog::{CatalogProvider, RuntimeCatalog, sync};
 use linguist::config::AppConfig;
 use linguist::db::{self, LogWriterHandle};
 use linguist::metrics_cache::MetricsCache;
@@ -50,12 +50,6 @@ enum Commands {
     Serve,
     /// Validate the PostgreSQL catalog and compile all five script chains.
     CheckConfig,
-    /// One-shot offline migration from v0.1.0 PostgreSQL catalog tables to v0.2.0.
-    MigrateV02 {
-        /// Optional path to legacy `projects.json` when v0.1.0 DB lacked projects.
-        #[arg(long)]
-        projects_json: Option<PathBuf>,
-    },
     /// Dry-run the 5-stage routing & request script pipeline without sending upstream HTTP requests.
     DryRun {
         /// Project ID to simulate.
@@ -96,22 +90,6 @@ async fn main() -> Result<()> {
                 catalog.projects.len(),
                 catalog.routes.len(),
                 script_count
-            );
-        }
-        Commands::MigrateV02 { projects_json } => {
-            let secrets = CatalogSecrets::from_env()?;
-            let pool = db::init_db_pool(&cfg.database).await?;
-            let engine = ScriptEngine::new(cfg.script_engine.clone());
-            let report =
-                migrate_v02::run_migrate_v02(&pool, &secrets, &engine, projects_json.as_deref())
-                    .await?;
-            println!(
-                "Migrated v0.1.0 -> v0.2.0: providers={}, models={}, projects={}, project_models={}, routes={}",
-                report.providers,
-                report.provider_models,
-                report.projects,
-                report.project_models,
-                report.routes
             );
         }
         Commands::DryRun {

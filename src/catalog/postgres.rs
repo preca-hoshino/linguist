@@ -65,7 +65,7 @@ impl PgCatalogProvider {
         .await?;
         ensure!(
             has_schema_version,
-            "Database still contains v0.1.0 catalog data. Stop the service and run `linguist migrate-v02 --projects-json <path>` first."
+            "Database catalog schema is not on v0.2 (missing catalog_state.schema_version); upgrade to v0.2.0 before running v0.2.1."
         );
         Ok(())
     }
