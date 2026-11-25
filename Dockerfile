@@ -4,6 +4,7 @@ FROM --platform=$BUILDPLATFORM node:24-bookworm-slim AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
+COPY linguist.d.ts ../linguist.d.ts
 COPY frontend/ ./
 RUN npm run build
 
