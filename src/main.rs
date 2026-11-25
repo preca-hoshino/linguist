@@ -142,7 +142,7 @@ fn count_catalog_scripts(catalog: &RuntimeCatalog) -> usize {
 /// Executes a dry-run of Stages ①..⑤ against the PostgreSQL catalog.
 async fn run_dry_run(cfg: &AppConfig, project_id: &str, model: &str, stream: bool) -> Result<()> {
     let engine = ScriptEngine::new(cfg.script_engine.clone());
-    let catalog = load_for_cli(cfg, None).await?;
+    let catalog = std::sync::Arc::new(load_for_cli(cfg, None).await?);
     let metrics = MetricsCache::new(&cfg.metrics);
     let mut body = Map::new();
     body.insert("model".to_string(), Value::String(model.to_string()));
@@ -186,7 +186,15 @@ async fn run_dry_run(cfg: &AppConfig, project_id: &str, model: &str, stream: boo
                     continue;
                 };
                 let attempt = u16::try_from(idx + 1).unwrap_or(u16::MAX);
-                match prepare_attempt_context(&plan.snapshot_ctx, attempt, prov, pm, &engine).await
+                match prepare_attempt_context(
+                    &catalog,
+                    &plan.snapshot_ctx,
+                    attempt,
+                    prov,
+                    pm,
+                    &engine,
+                )
+                .await
                 {
                     Ok(StageOutcome::Ready(ctx)) => candidates.push(json!({
                         "providerId": ep.provider_id,

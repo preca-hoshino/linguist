@@ -1,6 +1,7 @@
 //! Five-stage ordered multi-script outbound routing pipeline and Post-Stage-③ snapshot isolation.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use anyhow::{Result, anyhow};
 use serde_json::{Map, Value};
@@ -9,9 +10,8 @@ use uuid::Uuid;
 use crate::catalog::RuntimeCatalog;
 use crate::metrics_cache::MetricsCache;
 use crate::models::{
-    CompiledScriptUnit, ModelConfig, ProviderConfig, RejectDirective, RequestState, RouteEndpoint,
-    RouteState, ScriptContext, ScriptStage, extract_request_signals,
-    normalize_chat_completions_url,
+    ModelConfig, ProviderConfig, RejectDirective, RequestState, RouteEndpoint, RouteState,
+    ScriptContext, ScriptStage, extract_request_signals, normalize_chat_completions_url,
 };
 use crate::script_engine::ScriptEngine;
 
@@ -37,31 +37,13 @@ pub enum StageOutcome<T> {
     Rejected(RejectDirective),
 }
 
-/// Runs an entity's compiled `onRequest` units in order, short-circuiting on `ctx.reject`.
-async fn execute_request_chain(
-    engine: &ScriptEngine,
-    units: &[CompiledScriptUnit],
-    mut ctx: ScriptContext,
-) -> Result<StageOutcome<ScriptContext>> {
-    for unit in units {
-        if !unit.has_on_request {
-            continue;
-        }
-        ctx = engine.execute_request_unit(unit, &ctx).await?;
-        if let Some(reject) = ctx.reject.take() {
-            return Ok(StageOutcome::Rejected(reject));
-        }
-    }
-    Ok(StageOutcome::Ready(ctx))
-}
-
 /// Runs Stages ① (`project`), ② (`callModel`), and ③ (ordered `routes[]`) to produce a
 /// `RoutingPlan` containing the ordered endpoints and the Post-Stage-③ snapshot.
 ///
 /// # Errors
 /// Returns an error if script execution fails unexpectedly.
 pub async fn run_routing_stages(
-    catalog: &RuntimeCatalog,
+    catalog: &Arc<RuntimeCatalog>,
     metrics: &MetricsCache,
     engine: &ScriptEngine,
     request_uid: Uuid,
@@ -85,7 +67,7 @@ pub async fn run_routing_stages(
     let mut headers = BTreeMap::new();
     headers.insert("content-type".to_string(), "application/json".to_string());
 
-    let mut ctx = ScriptContext {
+    let ctx = ScriptContext {
         stage: ScriptStage::Project,
         project: project.to_entity_info(),
         call_model: call_model.to_entity_info(),
@@ -115,40 +97,24 @@ pub async fn run_routing_stages(
         reject: None,
     };
 
-    // Stage ①: Project script chain
-    ctx = match execute_request_chain(engine, &project.compiled.units, ctx).await? {
-        StageOutcome::Ready(next) => next,
-        StageOutcome::Rejected(rej) => return Ok(StageOutcome::Rejected(rej)),
-    };
+    let has_any_hook = project.compiled.units.iter().any(|u| u.has_on_request)
+        || call_model.compiled.units.iter().any(|u| u.has_on_request)
+        || catalog
+            .routes
+            .iter()
+            .any(|r| r.enabled && r.compiled.units.iter().any(|u| u.has_on_request));
 
-    // Stage ②: CallModel script chain
-    ctx.stage = ScriptStage::CallModel;
-    ctx = match execute_request_chain(engine, &call_model.compiled.units, ctx).await? {
-        StageOutcome::Ready(next) => next,
-        StageOutcome::Rejected(rej) => return Ok(StageOutcome::Rejected(rej)),
-    };
-
-    // Stage ③: Ordered Route responsibility chain
-    ctx.stage = ScriptStage::Route;
-    for rule in &catalog.routes {
-        if !rule.enabled {
-            continue;
-        }
-        ctx.route_info = Some(rule.to_entity_info());
-        ctx = match execute_request_chain(engine, &rule.compiled.units, ctx).await? {
+    let ctx = if has_any_hook {
+        match engine
+            .execute_routing_batch(Arc::clone(catalog), &project.id, &call_model.id, ctx)
+            .await?
+        {
             StageOutcome::Ready(next) => next,
             StageOutcome::Rejected(rej) => return Ok(StageOutcome::Rejected(rej)),
-        };
-
-        if ctx.route.target.is_some() {
-            ctx.route.rule_id = Some(rule.id.clone());
-            if !ctx.route.continue_routing {
-                break;
-            }
-            ctx.route.continue_routing = false;
         }
-    }
-    ctx.route_info = None;
+    } else {
+        ctx
+    };
 
     let Some(primary) = ctx.route.target.clone() else {
         return Ok(StageOutcome::Rejected(RejectDirective {
@@ -185,6 +151,7 @@ pub async fn run_routing_stages(
 /// # Errors
 /// Returns an error if script execution fails unexpectedly or leaves the URL empty.
 pub async fn prepare_attempt_context(
+    catalog: &Arc<RuntimeCatalog>,
     snapshot: &ScriptContext,
     attempt: u16,
     provider: &ProviderConfig,
@@ -223,19 +190,22 @@ pub async fn prepare_attempt_context(
         "model".to_string(),
         Value::String(upstream_model.to_string()),
     );
-
-    // Stage ④: Model script chain
     ctx.stage = ScriptStage::Model;
-    ctx = match execute_request_chain(engine, &model.compiled.units, ctx).await? {
-        StageOutcome::Ready(next) => next,
-        StageOutcome::Rejected(rej) => return Ok(StageOutcome::Rejected(rej)),
-    };
 
-    // Stage ⑤: Provider script chain
-    ctx.stage = ScriptStage::Provider;
-    ctx = match execute_request_chain(engine, &provider.compiled.units, ctx).await? {
-        StageOutcome::Ready(next) => next,
-        StageOutcome::Rejected(rej) => return Ok(StageOutcome::Rejected(rej)),
+    let has_any_hook = model.compiled.units.iter().any(|u| u.has_on_request)
+        || provider.compiled.units.iter().any(|u| u.has_on_request);
+
+    let ctx = if has_any_hook {
+        match engine
+            .execute_attempt_batch(Arc::clone(catalog), &provider.id, &model.id, ctx)
+            .await?
+        {
+            StageOutcome::Ready(next) => next,
+            StageOutcome::Rejected(rej) => return Ok(StageOutcome::Rejected(rej)),
+        }
+    } else {
+        ctx.stage = ScriptStage::Provider;
+        ctx
     };
 
     if ctx.request.url.trim().is_empty() {
@@ -326,7 +296,7 @@ mod tests {
             "#,
         );
 
-        let catalog = RuntimeCatalog::new(
+        let catalog = Arc::new(RuntimeCatalog::new(
             vec![
                 ProviderConfig {
                     id: "p1".to_string(),
@@ -400,7 +370,7 @@ mod tests {
                     compiled: r2_comp,
                 },
             ],
-        );
+        ));
 
         let metrics = MetricsCache::new(&crate::config::MetricsConfig::default());
         let mut body = Map::new();
@@ -431,7 +401,7 @@ mod tests {
             return;
         };
         let Ok(StageOutcome::Ready(ctx1)) =
-            prepare_attempt_context(&plan.snapshot_ctx, 1, p1, m1, &engine).await
+            prepare_attempt_context(&catalog, &plan.snapshot_ctx, 1, p1, m1, &engine).await
         else {
             return;
         };
@@ -445,7 +415,7 @@ mod tests {
             return;
         };
         let Ok(StageOutcome::Ready(ctx2)) =
-            prepare_attempt_context(&plan.snapshot_ctx, 2, p2, m2, &engine).await
+            prepare_attempt_context(&catalog, &plan.snapshot_ctx, 2, p2, m2, &engine).await
         else {
             return;
         };

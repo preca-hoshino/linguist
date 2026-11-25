@@ -9,9 +9,11 @@ use std::sync::Arc;
 
 use anyhow::Result;
 
+use crate::catalog::RuntimeCatalog;
 use crate::config::ScriptEngineConfig;
 use crate::models::{CompiledScriptChain, CompiledScriptUnit, ScriptContext, ScriptItem};
 use crate::script_engine::compiler::compile_script_chain;
+use crate::script_engine::pipeline::StageOutcome;
 use crate::script_engine::runtime::{BillingExecutionOutput, BillingInput, ScriptRuntimePool};
 
 /// Sandboxed TypeScript-to-JavaScript execution engine backed by `boa_engine`.
@@ -51,7 +53,39 @@ impl ScriptEngine {
         input_ctx: &ScriptContext,
     ) -> Result<ScriptContext> {
         self.pool
-            .execute_request_unit(&unit.js_code, input_ctx)
+            .execute_request_unit(unit.compile_id, &unit.js_code, input_ctx)
+            .await
+    }
+
+    /// Executes Stages ①..③ (`project` -> `callModel` -> `routes[]`) in a single worker dispatch.
+    ///
+    /// # Errors
+    /// Returns an error if execution fails, times out, or exceeds sandbox limits.
+    pub async fn execute_routing_batch(
+        &self,
+        catalog: Arc<RuntimeCatalog>,
+        project_id: &str,
+        call_model_id: &str,
+        input_ctx: ScriptContext,
+    ) -> Result<StageOutcome<ScriptContext>> {
+        self.pool
+            .execute_routing_batch(catalog, project_id, call_model_id, input_ctx)
+            .await
+    }
+
+    /// Executes Stages ④..⑤ (`model` -> `provider`) in a single worker dispatch.
+    ///
+    /// # Errors
+    /// Returns an error if execution fails, times out, or exceeds sandbox limits.
+    pub async fn execute_attempt_batch(
+        &self,
+        catalog: Arc<RuntimeCatalog>,
+        provider_id: &str,
+        model_id: &str,
+        input_ctx: ScriptContext,
+    ) -> Result<StageOutcome<ScriptContext>> {
+        self.pool
+            .execute_attempt_batch(catalog, provider_id, model_id, input_ctx)
             .await
     }
 

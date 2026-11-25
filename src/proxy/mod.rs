@@ -139,7 +139,7 @@ async fn handle_routed_chat(
     body: Value,
     t_ingress: Instant,
 ) -> Response {
-    let Some(body_map) = body.as_object().cloned() else {
+    let Value::Object(body_map) = body else {
         return openai_error(
             StatusCode::BAD_REQUEST,
             "Request body must be a JSON object",
@@ -269,7 +269,8 @@ async fn try_single_endpoint(
         return AttemptOutcome::Retry(None);
     };
 
-    let attempt_ctx = match prepare_attempt_context(
+    let mut attempt_ctx = match prepare_attempt_context(
+        catalog,
         &plan.snapshot_ctx,
         attempt_num,
         provider,
@@ -312,7 +313,7 @@ async fn try_single_endpoint(
     };
 
     let (outbound_headers, outbound_body) =
-        prepare_outbound_payload(&attempt_ctx, &provider.api_key);
+        prepare_outbound_payload(&mut attempt_ctx, &provider.api_key);
     let attempt_prep_ms = t_attempt.elapsed().as_secs_f64() * 1000.0;
     let timings = AttemptTimings {
         gateway_overhead_ms: routing_ms + attempt_prep_ms,
@@ -405,6 +406,15 @@ async fn send_upstream_attempt(
         std::sync::atomic::Ordering::Relaxed,
     );
 
+    let reasoning_effort = outbound_body
+        .get("reasoning_effort")
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let keep_error_payload =
+        state.config.database.log_full_payload || state.config.database.log_error_payload;
+    let saved_headers = keep_error_payload.then_some(outbound_headers);
+    let saved_body = keep_error_payload.then_some(outbound_body);
+
     let upstream_res = match req_builder
         .header(CONTENT_TYPE, "application/json")
         .body(body_bytes)
@@ -434,6 +444,9 @@ async fn send_upstream_attempt(
                 elapsed_ms,
                 format!("upstream request error: {err}"),
                 None,
+                reasoning_effort,
+                saved_headers.as_ref(),
+                saved_body,
                 started_at,
                 timings,
             );
@@ -480,6 +493,9 @@ async fn send_upstream_attempt(
             upstream_res,
             status,
             content_type,
+            reasoning_effort,
+            saved_headers.as_ref(),
+            saved_body,
             t_start,
             started_at,
             has_more,
@@ -498,8 +514,9 @@ async fn send_upstream_attempt(
         catalog,
         attempt_ctx,
         plan,
-        &outbound_headers,
-        &outbound_body,
+        saved_headers.as_ref(),
+        saved_body,
+        reasoning_effort,
         provider_name.to_string(),
         model_name.to_string(),
         attempt_uid,
@@ -538,6 +555,9 @@ async fn handle_fallback_status(
     upstream_res: reqwest::Response,
     status: StatusCode,
     content_type: Option<String>,
+    reasoning_effort: Option<String>,
+    outbound_headers: Option<&BTreeMap<String, String>>,
+    outbound_body: Option<Map<String, Value>>,
     t_start: Instant,
     started_at: chrono::DateTime<Utc>,
     has_more: bool,
@@ -566,6 +586,9 @@ async fn handle_fallback_status(
         elapsed_ms,
         format!("HTTP {status_u16}: {err_text}"),
         resp_json,
+        reasoning_effort,
+        outbound_headers,
+        outbound_body,
         started_at,
         timings,
     );
@@ -581,12 +604,13 @@ async fn handle_fallback_status(
     AttemptOutcome::Retry(Some((status, err_bytes.to_vec(), content_type)))
 }
 
-/// Builds final outbound headers (with provider bearer fallback) and body (`stream_options`).
+/// Builds final outbound headers (with provider bearer fallback) and body (`stream_options`)
+/// by moving `body` and `headers` out of `attempt_ctx` without deep cloning.
 fn prepare_outbound_payload(
-    attempt_ctx: &ScriptContext,
+    attempt_ctx: &mut ScriptContext,
     api_key: &str,
 ) -> (BTreeMap<String, String>, Map<String, Value>) {
-    let mut outbound_body = attempt_ctx.request.body.clone();
+    let mut outbound_body = std::mem::take(&mut attempt_ctx.request.body);
     if attempt_ctx.request.signals.is_stream
         && attempt_ctx.request.inject_stream_options
         && !outbound_body.contains_key("stream_options")
@@ -596,7 +620,7 @@ fn prepare_outbound_payload(
             json!({ "include_usage": true }),
         );
     }
-    let mut outbound_headers = attempt_ctx.request.headers.clone();
+    let mut outbound_headers = std::mem::take(&mut attempt_ctx.request.headers);
     inject_provider_auth_if_absent(&mut outbound_headers, api_key);
     (outbound_headers, outbound_body)
 }
@@ -795,8 +819,9 @@ fn build_inspection_metadata(
     catalog: &Arc<RuntimeCatalog>,
     ctx: &ScriptContext,
     plan: &RoutingPlan,
-    headers: &BTreeMap<String, String>,
-    body: &Map<String, Value>,
+    headers: Option<&BTreeMap<String, String>>,
+    body: Option<Map<String, Value>>,
+    reasoning_effort: Option<String>,
     provider_name: String,
     model_name: String,
     request_uid: Uuid,
@@ -837,13 +862,16 @@ fn build_inspection_metadata(
         is_stream,
         rewrite_response_model: ctx.route.rewrite_response_model,
         estimated_input_chars: ctx.request.signals.estimated_input_chars,
-        reasoning_effort: body
-            .get("reasoning_effort")
-            .and_then(Value::as_str)
-            .map(str::to_string),
+        reasoning_effort,
         script_state: Value::Object(ctx.state.clone()),
-        request_headers: keep_req_payload.then(|| redact_headers_json(headers)),
-        request_body: keep_req_payload.then(|| Value::Object(body.clone())),
+        request_headers: keep_req_payload
+            .then(|| headers.map(redact_headers_json))
+            .flatten(),
+        request_body: if keep_req_payload {
+            body.map(Value::Object)
+        } else {
+            None
+        },
         t_start,
         started_at,
         catalog_snapshot: Some(Arc::clone(catalog)),
@@ -871,6 +899,9 @@ fn record_failed_attempt(
     elapsed_ms: f64,
     error_message: String,
     response_body: Option<Value>,
+    reasoning_effort: Option<String>,
+    outbound_headers: Option<&BTreeMap<String, String>>,
+    outbound_body: Option<Map<String, Value>>,
     started_at: chrono::DateTime<Utc>,
     timings: AttemptTimings,
 ) {
@@ -934,17 +965,18 @@ fn record_failed_attempt(
         attempt_prep_ms: timings.attempt_prep_ms,
         upstream_header_ms: timings.upstream_header_ms,
         finish_reason: None,
-        reasoning_effort: ctx
-            .request
-            .body
-            .get("reasoning_effort")
-            .and_then(Value::as_str)
-            .map(str::to_string),
+        reasoning_effort,
         token_source: "upstream_error".to_string(),
         script_state: Value::Object(ctx.state.clone()),
         error_message: keep_payload.then_some(error_message),
-        request_headers: keep_payload.then(|| redact_headers_json(&ctx.request.headers)),
-        request_body: keep_payload.then(|| Value::Object(ctx.request.body.clone())),
+        request_headers: keep_payload
+            .then(|| outbound_headers.map(redact_headers_json))
+            .flatten(),
+        request_body: if keep_payload {
+            outbound_body.map(Value::Object)
+        } else {
+            None
+        },
         response_body: keep_payload.then_some(response_body).flatten(),
     });
 }

@@ -33,6 +33,8 @@ const fn default_true() -> bool {
 /// Pre-compiled executable representation of a single enabled `ScriptItem`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledScriptUnit {
+    /// Process-unique monotonic identifier for VM module caching.
+    pub compile_id: u64,
     /// Script identifier.
     pub id: String,
     /// Script display name.

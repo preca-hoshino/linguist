@@ -3,8 +3,12 @@
 
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
+
+/// Monotonic ID generator for compiled script units.
+static NEXT_COMPILE_ID: AtomicU64 = AtomicU64::new(1);
 
 use anyhow::{Context as AnyhowContext, Result, anyhow, bail};
 use boa_engine::context::HostHooks;
@@ -124,6 +128,7 @@ pub fn compile_script_chain(
         }
         if unit.has_on_request || unit.has_on_billing {
             chain.units.push(CompiledScriptUnit {
+                compile_id: NEXT_COMPILE_ID.fetch_add(1, Ordering::Relaxed),
                 id: item.id.clone(),
                 name: item.name.clone(),
                 js_code: unit.js_code,

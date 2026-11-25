@@ -2,7 +2,7 @@
 //! `rust_decimal` billing helpers, and SSRF-guarded Singleflight `linguist.http`.
 
 use std::cell::{Cell, RefCell};
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::net::{IpAddr, SocketAddr};
 use std::rc::Rc;
 use std::str::FromStr;
@@ -15,18 +15,21 @@ use boa_engine::builtins::promise::PromiseState;
 use boa_engine::job::{FutureJob, JobQueue, NativeJob};
 use boa_engine::object::ObjectInitializer;
 use boa_engine::object::builtins::JsPromise;
-use boa_engine::property::Attribute;
+use boa_engine::property::{Attribute, PropertyDescriptor, PropertyKey};
 use boa_engine::{
-    Context, JsArgs, JsNativeError, JsResult, JsValue, NativeFunction, Source, js_string,
+    Context, JsArgs, JsNativeError, JsObject, JsResult, JsString, JsValue, NativeFunction, Source,
+    js_string,
 };
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use tokio::sync::{mpsc, oneshot, watch};
 
+use crate::catalog::RuntimeCatalog;
 use crate::config::ScriptEngineConfig;
-use crate::models::{CompiledScriptUnit, EntityInfo, ProviderInfo, ScriptContext};
+use crate::models::{CompiledScriptUnit, EntityInfo, ProviderInfo, RejectDirective, ScriptContext};
 use crate::script_engine::compiler::host_hooks_for_mb;
+use crate::script_engine::pipeline::StageOutcome;
 
 /// Maximum response body size accepted by `linguist.http` (1 MiB).
 const MAX_HTTP_BODY_BYTES: usize = 1024 * 1024;
@@ -318,6 +321,9 @@ struct HttpContext {
 struct HostInvocationSlot {
     /// Shared billing draft buffer (populated during `onBilling` runs).
     draft: Rc<RefCell<DraftBuffer>>,
+    /// Deferred large JSON fields (`"body.messages"`, `"body.tools"`, `"route.candidates"`)
+    /// materialized lazily only when JS accesses or mutates them.
+    deferred: Rc<RefCell<HashMap<&'static str, Value>>>,
     /// HTTP helper context.
     http: HttpContext,
     /// Remaining HTTP call budget for this invocation.
@@ -333,6 +339,187 @@ struct HostInvocationSlot {
 thread_local! {
     /// Thread-local active invocation registry keyed by `slot_id`.
     static HOST_SLOTS: RefCell<HashMap<u64, HostInvocationSlot>> = RefCell::new(HashMap::new());
+    /// Per-worker pool of warm reusable Boa VMs.
+    static WARM_VM_POOL: RefCell<Vec<WarmBoaVm>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Cached compiled JS module factory inside a `WarmBoaVm`.
+struct CachedJsFactory {
+    /// Compiled `__linguist_module` factory function.
+    factory: JsObject,
+}
+
+/// Reusable Boa VM instance with pre-registered `linguist` globals, frozen built-in prototypes,
+/// and per-`compile_id` factory cache.
+struct WarmBoaVm {
+    /// Underlying Boa JS context.
+    boa: Context,
+    /// Shared async job queue.
+    job_queue: Rc<TokioJobQueue>,
+    /// Cached `__linguist_module` factories keyed by `CompiledScriptUnit::compile_id`.
+    factories: HashMap<u64, CachedJsFactory>,
+    /// Clean baseline global property keys snapshot.
+    clean_globals: HashSet<JsString>,
+    /// Number of invocations served by this VM (recycled periodically to bound GC heap).
+    invocations: u64,
+    /// Whether an unhandled error/timeout tainted this VM.
+    tainted: bool,
+}
+
+impl WarmBoaVm {
+    /// Builds a fresh `WarmBoaVm`, registers `linguist` globals, and freezes built-in prototypes.
+    fn new(config: &ScriptEngineConfig) -> Result<Self> {
+        let cpu_limit = Duration::from_millis(config.timeout_ms.max(1));
+        let job_queue = Rc::new(TokioJobQueue::new(cpu_limit));
+        let mut boa = boa_engine::context::ContextBuilder::new()
+            .host_hooks(host_hooks_for_mb(config.memory_limit_mb))
+            .job_queue(Rc::clone(&job_queue))
+            .build()
+            .map_err(|err| anyhow!("failed to initialize Boa JS context: {err}"))?;
+
+        let limits = boa.runtime_limits_mut();
+        limits.set_loop_iteration_limit(50_000);
+        limits.set_recursion_limit(256);
+        limits.set_stack_size_limit(8_192);
+
+        register_linguist_globals(&mut boa, 0)?;
+
+        // Freeze standard prototypes so user scripts cannot pollute them across invocations.
+        let freeze_code = b"
+            for (const proto of [
+                Object.prototype,
+                Array.prototype,
+                Function.prototype,
+                String.prototype,
+                Number.prototype,
+                Boolean.prototype,
+                Promise.prototype
+            ]) {
+                if (proto) Object.freeze(proto);
+            }
+        ";
+        if let Ok(script) =
+            boa_engine::Script::parse(Source::from_bytes(freeze_code), None, &mut boa)
+        {
+            let _ = script.evaluate(&mut boa);
+        }
+
+        let mut clean_globals = HashSet::new();
+        if let Ok(keys) = boa.global_object().own_property_keys(&mut boa) {
+            for k in keys {
+                if let PropertyKey::String(s) = k {
+                    clean_globals.insert(s);
+                }
+            }
+        }
+
+        Ok(Self {
+            boa,
+            job_queue,
+            factories: HashMap::new(),
+            clean_globals,
+            invocations: 0,
+            tainted: false,
+        })
+    }
+
+    /// Resets job queue budget and active slot ID before an invocation.
+    fn prepare(&mut self, slot_id: u64, cpu_limit: Duration) {
+        self.job_queue.reset(cpu_limit);
+        self.boa.insert_data(slot_id);
+    }
+
+    /// Compiles (on cache miss) and instantiates `__linguist_module()` for `compile_id`.
+    fn instantiate_module(&mut self, compile_id: u64, js_code: &str) -> Result<JsObject> {
+        if compile_id != 0
+            && let Some(cached) = self.factories.get(&compile_id)
+        {
+            let factory = cached.factory.clone();
+            let res = factory
+                .call(&JsValue::undefined(), &[], &mut self.boa)
+                .map_err(|err| anyhow!("script module instantiation error: {err}"))?;
+            return res
+                .as_object()
+                .cloned()
+                .ok_or_else(|| anyhow!("__linguist_module did not return an object"));
+        }
+
+        let src = format!("{js_code}\n__linguist_module;");
+        let script =
+            boa_engine::Script::parse(Source::from_bytes(src.as_bytes()), None, &mut self.boa)
+                .map_err(|err| anyhow!("script syntax error: {err}"))?;
+        let factory_val = script
+            .evaluate(&mut self.boa)
+            .map_err(|err| anyhow!("script runtime error: {err}"))?;
+        let factory = factory_val
+            .as_object()
+            .cloned()
+            .ok_or_else(|| anyhow!("missing __linguist_module factory"))?;
+
+        if compile_id != 0 {
+            if self.factories.len() > 512 {
+                self.factories.clear();
+            }
+            self.factories.insert(
+                compile_id,
+                CachedJsFactory {
+                    factory: factory.clone(),
+                },
+            );
+        }
+
+        let res = factory
+            .call(&JsValue::undefined(), &[], &mut self.boa)
+            .map_err(|err| anyhow!("script module instantiation error: {err}"))?;
+        res.as_object()
+            .cloned()
+            .ok_or_else(|| anyhow!("__linguist_module did not return an object"))
+    }
+
+    /// Cleans any user-added global properties after an invocation.
+    fn cleanup_globals(&mut self) {
+        let Ok(keys) = self.boa.global_object().own_property_keys(&mut self.boa) else {
+            self.tainted = true;
+            return;
+        };
+        let global = self.boa.global_object();
+        for key in keys {
+            if let PropertyKey::String(ref s) = key
+                && !self.clean_globals.contains(s)
+                && global.delete_property_or_throw(key, &mut self.boa).is_err()
+            {
+                self.tainted = true;
+                return;
+            }
+        }
+    }
+}
+
+/// Acquires a warm Boa VM from the current worker thread's pool or constructs a new one.
+fn acquire_warm_vm(config: &ScriptEngineConfig) -> Result<WarmBoaVm> {
+    let pooled = WARM_VM_POOL.with(|pool| pool.borrow_mut().pop());
+    match pooled {
+        Some(vm) => Ok(vm),
+        None => WarmBoaVm::new(config),
+    }
+}
+
+/// Returns a clean `WarmBoaVm` to the current worker thread's pool (max 4 cached VMs).
+fn release_warm_vm(mut vm: WarmBoaVm) {
+    vm.invocations = vm.invocations.saturating_add(1);
+    if vm.tainted || vm.invocations >= 1000 {
+        return;
+    }
+    vm.cleanup_globals();
+    if vm.tainted {
+        return;
+    }
+    WARM_VM_POOL.with(|pool| {
+        let mut guard = pool.borrow_mut();
+        if guard.len() < 4 {
+            guard.push(vm);
+        }
+    });
 }
 
 /// Next monotonic slot ID.
@@ -363,7 +550,7 @@ struct TokioJobQueue {
     /// Accumulated JS CPU time.
     cpu_elapsed: Cell<Duration>,
     /// CPU time budget.
-    cpu_limit: Duration,
+    cpu_limit: Cell<Duration>,
     /// Flag set if CPU budget was exceeded.
     cpu_timed_out: Cell<bool>,
 }
@@ -378,8 +565,20 @@ impl TokioJobQueue {
             tx,
             rx: tokio::sync::Mutex::new(rx),
             cpu_elapsed: Cell::new(Duration::ZERO),
-            cpu_limit,
+            cpu_limit: Cell::new(cpu_limit),
             cpu_timed_out: Cell::new(false),
+        }
+    }
+
+    /// Resets the job queue state for reuse across warm VM invocations.
+    fn reset(&self, cpu_limit: Duration) {
+        self.jobs.borrow_mut().clear();
+        self.pending_futures.set(0);
+        self.cpu_elapsed.set(Duration::ZERO);
+        self.cpu_limit.set(cpu_limit);
+        self.cpu_timed_out.set(false);
+        if let Ok(mut rx) = self.rx.try_lock() {
+            while rx.try_recv().is_ok() {}
         }
     }
 
@@ -387,7 +586,7 @@ impl TokioJobQueue {
     fn record_cpu(&self, delta: Duration) -> bool {
         let total = self.cpu_elapsed.get().saturating_add(delta);
         self.cpu_elapsed.set(total);
-        if total > self.cpu_limit {
+        if total > self.cpu_limit.get() {
             self.cpu_timed_out.set(true);
             true
         } else {
@@ -458,7 +657,9 @@ impl JobQueue for TokioJobQueue {
 /// Request sent to a `LocalSet` worker thread.
 enum RuntimeJob {
     /// Execute one `CompiledScriptUnit::onRequest` against `ScriptContext`.
-    ExecuteRequest {
+    Request {
+        /// Monotonic compile ID for module factory caching.
+        compile_id: u64,
         /// Pre-compiled JS factory source.
         js_code: String,
         /// Input context.
@@ -466,8 +667,34 @@ enum RuntimeJob {
         /// Completion channel.
         reply: oneshot::Sender<Result<ScriptContext>>,
     },
+    /// Execute Stages ①..③ (`project` -> `callModel` -> `routes[]`) in a single worker hop.
+    RoutingBatch {
+        /// Active catalog snapshot.
+        catalog: Arc<RuntimeCatalog>,
+        /// Resolved project ID.
+        project_id: String,
+        /// Resolved call-model ID.
+        call_model_id: String,
+        /// Initial `ScriptContext`.
+        input_ctx: Box<ScriptContext>,
+        /// Completion channel.
+        reply: oneshot::Sender<Result<StageOutcome<ScriptContext>>>,
+    },
+    /// Execute Stages ④..⑤ (`model` -> `provider`) in a single worker hop.
+    AttemptBatch {
+        /// Active catalog snapshot.
+        catalog: Arc<RuntimeCatalog>,
+        /// Target provider ID.
+        provider_id: String,
+        /// Target model ID.
+        model_id: String,
+        /// Prepared attempt `ScriptContext`.
+        input_ctx: Box<ScriptContext>,
+        /// Completion channel.
+        reply: oneshot::Sender<Result<StageOutcome<ScriptContext>>>,
+    },
     /// Execute an ordered list of `onBilling` units against `BillingInput`.
-    ExecuteBilling {
+    Billing {
         /// Compiled units exporting `onBilling` (in `Provider` -> `Model` order).
         units: Vec<CompiledScriptUnit>,
         /// Billing context input.
@@ -477,11 +704,82 @@ enum RuntimeJob {
     },
 }
 
+/// Spawns one single-threaded `LocalSet` Boa worker thread and returns its bounded sender.
+fn spawn_worker_thread(idx: usize, http_ctx: HttpContext) -> mpsc::Sender<RuntimeJob> {
+    let (tx, mut rx) = mpsc::channel::<RuntimeJob>(4096);
+    let _ = std::thread::Builder::new()
+        .name(format!("linguist-js-{idx}"))
+        .spawn(move || {
+            let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+            else {
+                return;
+            };
+            let local = tokio::task::LocalSet::new();
+            local.block_on(&rt, async move {
+                while let Some(job) = rx.recv().await {
+                    let hc = http_ctx.clone();
+                    tokio::task::spawn_local(async move {
+                        dispatch_runtime_job(job, hc).await;
+                    });
+                }
+            });
+        });
+    tx
+}
+
+/// Dispatches a single `RuntimeJob` inside the worker thread's `LocalSet`.
+async fn dispatch_runtime_job(job: RuntimeJob, hc: HttpContext) {
+    match job {
+        RuntimeJob::Request {
+            compile_id,
+            js_code,
+            input_ctx,
+            reply,
+        } => {
+            let res = run_request_unit_local(compile_id, &js_code, &input_ctx, hc).await;
+            let _ = reply.send(res);
+        }
+        RuntimeJob::RoutingBatch {
+            catalog,
+            project_id,
+            call_model_id,
+            input_ctx,
+            reply,
+        } => {
+            let res =
+                run_routing_batch_local(&catalog, &project_id, &call_model_id, *input_ctx, hc)
+                    .await;
+            let _ = reply.send(res);
+        }
+        RuntimeJob::AttemptBatch {
+            catalog,
+            provider_id,
+            model_id,
+            input_ctx,
+            reply,
+        } => {
+            let res =
+                run_attempt_batch_local(&catalog, &provider_id, &model_id, *input_ctx, hc).await;
+            let _ = reply.send(res);
+        }
+        RuntimeJob::Billing {
+            units,
+            input,
+            reply,
+        } => {
+            let res = run_billing_chain_local(&units, &input, hc).await;
+            let _ = reply.send(res);
+        }
+    }
+}
+
 /// Pool of dedicated single-threaded `LocalSet` workers running `!Send` Boa VMs.
 #[derive(Debug, Clone)]
 pub struct ScriptRuntimePool {
-    /// Round-robin worker senders.
-    workers: Arc<Vec<mpsc::UnboundedSender<RuntimeJob>>>,
+    /// Round-robin bounded worker senders.
+    workers: Arc<Vec<mpsc::Sender<RuntimeJob>>>,
     /// Round-robin index.
     rr: Arc<AtomicUsize>,
     /// Shared HTTP cache for stats inspection.
@@ -515,46 +813,7 @@ impl ScriptRuntimePool {
 
         let mut workers = Vec::with_capacity(count);
         for idx in 0..count {
-            let (tx, mut rx) = mpsc::unbounded_channel::<RuntimeJob>();
-            let ctx_clone = http_ctx.clone();
-            let _ = std::thread::Builder::new()
-                .name(format!("linguist-js-{idx}"))
-                .spawn(move || {
-                    let Ok(rt) = tokio::runtime::Builder::new_current_thread()
-                        .enable_all()
-                        .build()
-                    else {
-                        return;
-                    };
-                    let local = tokio::task::LocalSet::new();
-                    local.block_on(&rt, async move {
-                        while let Some(job) = rx.recv().await {
-                            let hc = ctx_clone.clone();
-                            tokio::task::spawn_local(async move {
-                                match job {
-                                    RuntimeJob::ExecuteRequest {
-                                        js_code,
-                                        input_ctx,
-                                        reply,
-                                    } => {
-                                        let res =
-                                            run_request_unit_local(&js_code, &input_ctx, hc).await;
-                                        let _ = reply.send(res);
-                                    }
-                                    RuntimeJob::ExecuteBilling {
-                                        units,
-                                        input,
-                                        reply,
-                                    } => {
-                                        let res = run_billing_chain_local(&units, &input, hc).await;
-                                        let _ = reply.send(res);
-                                    }
-                                }
-                            });
-                        }
-                    });
-                });
-            workers.push(tx);
+            workers.push(spawn_worker_thread(idx, http_ctx.clone()));
         }
 
         Self {
@@ -592,17 +851,20 @@ impl ScriptRuntimePool {
     /// Returns an error if the worker is unavailable, JS throws, or CPU/IO limits are exceeded.
     pub async fn execute_request_unit(
         &self,
+        compile_id: u64,
         js_code: &str,
         input_ctx: &ScriptContext,
     ) -> Result<ScriptContext> {
         let idx = self.rr.fetch_add(1, Ordering::Relaxed) % self.workers.len();
         let (tx, rx) = oneshot::channel();
         self.workers[idx]
-            .send(RuntimeJob::ExecuteRequest {
+            .send(RuntimeJob::Request {
+                compile_id,
                 js_code: js_code.to_string(),
                 input_ctx: Box::new(input_ctx.clone()),
                 reply: tx,
             })
+            .await
             .map_err(|_| anyhow!("script worker pool channel closed"))?;
         self.counters
             .on_request_calls
@@ -610,6 +872,80 @@ impl ScriptRuntimePool {
         let res = rx
             .await
             .map_err(|_| anyhow!("script worker dropped request"))?;
+        if res.is_err() {
+            self.counters
+                .on_request_errors
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        res
+    }
+
+    /// Executes Stages ①..③ (`project` -> `callModel` -> `routes[]`) in a single worker dispatch.
+    ///
+    /// # Errors
+    /// Returns an error if the worker is unavailable, JS throws, or CPU/IO limits are exceeded.
+    pub async fn execute_routing_batch(
+        &self,
+        catalog: Arc<RuntimeCatalog>,
+        project_id: &str,
+        call_model_id: &str,
+        input_ctx: ScriptContext,
+    ) -> Result<StageOutcome<ScriptContext>> {
+        let idx = self.rr.fetch_add(1, Ordering::Relaxed) % self.workers.len();
+        let (tx, rx) = oneshot::channel();
+        self.workers[idx]
+            .send(RuntimeJob::RoutingBatch {
+                catalog,
+                project_id: project_id.to_string(),
+                call_model_id: call_model_id.to_string(),
+                input_ctx: Box::new(input_ctx),
+                reply: tx,
+            })
+            .await
+            .map_err(|_| anyhow!("script worker pool channel closed"))?;
+        self.counters
+            .on_request_calls
+            .fetch_add(1, Ordering::Relaxed);
+        let res = rx
+            .await
+            .map_err(|_| anyhow!("script worker dropped routing batch"))?;
+        if res.is_err() {
+            self.counters
+                .on_request_errors
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        res
+    }
+
+    /// Executes Stages ④..⑤ (`model` -> `provider`) in a single worker dispatch.
+    ///
+    /// # Errors
+    /// Returns an error if the worker is unavailable, JS throws, or CPU/IO limits are exceeded.
+    pub async fn execute_attempt_batch(
+        &self,
+        catalog: Arc<RuntimeCatalog>,
+        provider_id: &str,
+        model_id: &str,
+        input_ctx: ScriptContext,
+    ) -> Result<StageOutcome<ScriptContext>> {
+        let idx = self.rr.fetch_add(1, Ordering::Relaxed) % self.workers.len();
+        let (tx, rx) = oneshot::channel();
+        self.workers[idx]
+            .send(RuntimeJob::AttemptBatch {
+                catalog,
+                provider_id: provider_id.to_string(),
+                model_id: model_id.to_string(),
+                input_ctx: Box::new(input_ctx),
+                reply: tx,
+            })
+            .await
+            .map_err(|_| anyhow!("script worker pool channel closed"))?;
+        self.counters
+            .on_request_calls
+            .fetch_add(1, Ordering::Relaxed);
+        let res = rx
+            .await
+            .map_err(|_| anyhow!("script worker dropped attempt batch"))?;
         if res.is_err() {
             self.counters
                 .on_request_errors
@@ -630,11 +966,12 @@ impl ScriptRuntimePool {
         let idx = self.rr.fetch_add(1, Ordering::Relaxed) % self.workers.len();
         let (tx, rx) = oneshot::channel();
         self.workers[idx]
-            .send(RuntimeJob::ExecuteBilling {
+            .send(RuntimeJob::Billing {
                 units: units.to_vec(),
                 input: Box::new(input.clone()),
                 reply: tx,
             })
+            .await
             .map_err(|_| anyhow!("script worker pool channel closed"))?;
         self.counters
             .on_billing_calls
@@ -651,89 +988,673 @@ impl ScriptRuntimePool {
     }
 }
 
-/// Runs a single `onRequest` module unit inside the current `LocalSet`.
-async fn run_request_unit_local(
-    js_code: &str,
-    input_ctx: &ScriptContext,
+/// Registers an `HostInvocationSlot` in `HOST_SLOTS` and returns `(slot_id, SlotGuard)`.
+fn register_slot(
     http: HttpContext,
-) -> Result<ScriptContext> {
-    let cpu_limit = Duration::from_millis(http.config.timeout_ms.max(1));
-    let job_queue = Rc::new(TokioJobQueue::new(cpu_limit));
-    let mut boa = boa_engine::context::ContextBuilder::new()
-        .host_hooks(host_hooks_for_mb(http.config.memory_limit_mb))
-        .job_queue(Rc::clone(&job_queue))
-        .build()
-        .map_err(|err| anyhow!("failed to initialize Boa JS context: {err}"))?;
-
-    let limits = boa.runtime_limits_mut();
-    limits.set_loop_iteration_limit(50_000);
-    limits.set_recursion_limit(256);
-    limits.set_stack_size_limit(8_192);
-
+    draft: Rc<RefCell<DraftBuffer>>,
+    deferred: Rc<RefCell<HashMap<&'static str, Value>>>,
+    max_http_calls: usize,
+    default_net_timeout_ms: u64,
+) -> (u64, SlotGuard) {
     let slot_id = NEXT_SLOT_ID.fetch_add(1, Ordering::Relaxed);
-    let _guard = SlotGuard(slot_id);
+    let guard = SlotGuard(slot_id);
     let slot = HostInvocationSlot {
-        draft: Rc::new(RefCell::new(DraftBuffer::default())),
-        http: http.clone(),
+        draft,
+        deferred,
+        http,
         http_calls_used: Rc::new(AtomicUsize::new(0)),
-        max_http_calls: http.config.max_http_calls_per_stage,
-        default_net_timeout_ms: http.config.net_timeout_ms.max(100),
+        max_http_calls,
+        default_net_timeout_ms,
         allow_network: true,
     };
     HOST_SLOTS.with(|map| {
         map.borrow_mut().insert(slot_id, slot);
     });
+    (slot_id, guard)
+}
 
-    register_linguist_globals(&mut boa, slot_id)?;
+/// Extracts heavy fields (`body.messages`, `body.tools`, and optionally `route.candidates`)
+/// from `ctx` into `deferred`, converts the slim `ScriptContext` into Boa, and attaches
+/// standard ECMAScript `Object.defineProperty` lazy getters/setters.
+fn build_lazy_js_context(
+    boa: &mut Context,
+    ctx: &mut ScriptContext,
+    deferred: &Rc<RefCell<HashMap<&'static str, Value>>>,
+    defer_candidates: bool,
+) -> Result<JsValue> {
+    let mut def = deferred.borrow_mut();
+    if let Some(messages) = ctx.request.body.remove("messages") {
+        def.insert("body.messages", messages);
+    }
+    if let Some(tools) = ctx.request.body.remove("tools") {
+        def.insert("body.tools", tools);
+    }
+    let saved_candidates = if defer_candidates && !ctx.route.candidates.is_empty() {
+        let taken = std::mem::take(&mut ctx.route.candidates);
+        let val = serde_json::to_value(&taken).context("failed to serialize route.candidates")?;
+        def.insert("route.candidates", val);
+        Some(taken)
+    } else {
+        None
+    };
+    drop(def);
 
-    let ctx_json = serde_json::to_value(input_ctx)
-        .context("failed to serialize ScriptContext to JSON value")?;
-    let ctx_val = JsValue::from_json(&ctx_json, &mut boa)
+    let ctx_json =
+        serde_json::to_value(&*ctx).context("failed to serialize ScriptContext to JSON value")?;
+    let ctx_val = JsValue::from_json(&ctx_json, boa)
         .map_err(|err| anyhow!("failed to convert ScriptContext JSON into JS VM: {err}"))?;
 
-    boa.register_global_property(
-        js_string!("__linguist_input_ctx"),
-        ctx_val,
-        Attribute::all(),
-    )
-    .map_err(|err| anyhow!("failed to bind input ctx in JS VM: {err}"))?;
+    // Restore on `ctx` immediately so `ctx` stays intact for `enforce_readonly_fields`.
+    if let Some(cands) = saved_candidates {
+        ctx.route.candidates = cands;
+    }
 
-    let wrapper = format!(
-        "{js_code}\n\
-         const __linguist_mod = __linguist_module();\n\
-         Promise.resolve(\n\
-           typeof __linguist_mod.onRequest === 'function'\n\
-             ? __linguist_mod.onRequest(__linguist_input_ctx)\n\
-             : undefined\n\
-         ).then((__ret) => (__ret && typeof __ret === 'object') ? __ret : __linguist_input_ctx);"
-    );
+    if let Some(ctx_obj) = ctx_val.as_object() {
+        if let Ok(req_val) = ctx_obj.get(js_string!("request"), boa)
+            && let Some(req_obj) = req_val.as_object()
+            && let Ok(body_val) = req_obj.get(js_string!("body"), boa)
+            && let Some(body_obj) = body_val.as_object()
+        {
+            let def_ref = deferred.borrow();
+            if def_ref.contains_key("body.messages") {
+                define_lazy_prop(boa, body_obj, "messages", "body.messages")?;
+            }
+            if def_ref.contains_key("body.tools") {
+                define_lazy_prop(boa, body_obj, "tools", "body.tools")?;
+            }
+        }
+        if defer_candidates
+            && deferred.borrow().contains_key("route.candidates")
+            && let Ok(route_val) = ctx_obj.get(js_string!("route"), boa)
+            && let Some(route_obj) = route_val.as_object()
+        {
+            define_lazy_prop(boa, route_obj, "candidates", "route.candidates")?;
+        }
+    }
 
+    Ok(ctx_val)
+}
+
+/// Defines a lazy getter/setter property on `target_obj` backed by `HostInvocationSlot::deferred`.
+fn define_lazy_prop(
+    boa: &mut Context,
+    target_obj: &JsObject,
+    prop_name: &'static str,
+    deferred_key: &'static str,
+) -> Result<()> {
+    let getter = NativeFunction::from_copy_closure(move |this, _args, ctx| {
+        lazy_get_prop(this, ctx, prop_name, deferred_key)
+    })
+    .to_js_function(boa.realm());
+    let setter = NativeFunction::from_copy_closure(move |this, args, ctx| {
+        lazy_set_prop(this, args, ctx, prop_name, deferred_key)
+    })
+    .to_js_function(boa.realm());
+
+    let desc = PropertyDescriptor::builder()
+        .get(getter)
+        .set(setter)
+        .enumerable(true)
+        .configurable(true)
+        .build();
+    target_obj
+        .define_property_or_throw(js_string!(prop_name), desc, boa)
+        .map_err(|err| anyhow!("failed to define lazy property '{prop_name}': {err}"))?;
+    Ok(())
+}
+
+/// Getter callback that materializes a deferred JSON field into a regular JS data property on first access.
+fn lazy_get_prop(
+    this: &JsValue,
+    ctx: &mut Context,
+    prop_name: &'static str,
+    deferred_key: &'static str,
+) -> JsResult<JsValue> {
+    let slot_id = active_slot_id(ctx)?;
+    let raw_val = HOST_SLOTS.with(|map| {
+        let map_ref = map.borrow();
+        let slot = map_ref
+            .get(&slot_id)
+            .ok_or_else(|| JsNativeError::typ().with_message("expired host slot"))?;
+        Ok::<_, boa_engine::JsError>(slot.deferred.borrow_mut().remove(deferred_key))
+    })?;
+
+    let Some(json_val) = raw_val else {
+        return Ok(JsValue::undefined());
+    };
+    let js_val = JsValue::from_json(&json_val, ctx).map_err(|err| {
+        JsNativeError::typ().with_message(format!("failed to materialize {prop_name}: {err}"))
+    })?;
+    if let Some(obj) = this.as_object() {
+        let desc = PropertyDescriptor::builder()
+            .value(js_val.clone())
+            .writable(true)
+            .enumerable(true)
+            .configurable(true)
+            .build();
+        let _ = obj.define_property_or_throw(js_string!(prop_name), desc, ctx);
+    }
+    Ok(js_val)
+}
+
+/// Setter callback that overwrites a deferred property with a normal JS data property.
+fn lazy_set_prop(
+    this: &JsValue,
+    args: &[JsValue],
+    ctx: &mut Context,
+    prop_name: &'static str,
+    deferred_key: &'static str,
+) -> JsResult<JsValue> {
+    let slot_id = active_slot_id(ctx)?;
+    HOST_SLOTS.with(|map| {
+        if let Some(slot) = map.borrow().get(&slot_id) {
+            slot.deferred.borrow_mut().remove(deferred_key);
+        }
+    });
+    let new_val = args.get_or_undefined(0).clone();
+    if let Some(obj) = this.as_object() {
+        let desc = PropertyDescriptor::builder()
+            .value(new_val)
+            .writable(true)
+            .enumerable(true)
+            .configurable(true)
+            .build();
+        obj.define_property_or_throw(js_string!(prop_name), desc, ctx)?;
+    }
+    Ok(JsValue::undefined())
+}
+
+/// Extracts `ScriptContext` from `final_val`, restoring any untouched deferred fields.
+fn extract_lazy_js_context(
+    boa: &mut Context,
+    final_val: &JsValue,
+    deferred: &Rc<RefCell<HashMap<&'static str, Value>>>,
+    original: &ScriptContext,
+) -> Result<ScriptContext> {
+    // Check which deferred properties are still present on the JS objects (if JS `delete`d one,
+    // `has_own_property` is false and we must NOT restore it).
+    let (has_messages, has_tools, has_candidates) = if let Some(ctx_obj) = final_val.as_object() {
+        let (hm, ht) = if let Ok(req_val) = ctx_obj.get(js_string!("request"), boa)
+            && let Some(req_obj) = req_val.as_object()
+            && let Ok(body_val) = req_obj.get(js_string!("body"), boa)
+            && let Some(body_obj) = body_val.as_object()
+        {
+            (
+                body_obj
+                    .has_own_property(js_string!("messages"), boa)
+                    .unwrap_or(false),
+                body_obj
+                    .has_own_property(js_string!("tools"), boa)
+                    .unwrap_or(false),
+            )
+        } else {
+            (false, false)
+        };
+        let hc = if let Ok(route_val) = ctx_obj.get(js_string!("route"), boa)
+            && let Some(route_obj) = route_val.as_object()
+        {
+            route_obj
+                .has_own_property(js_string!("candidates"), boa)
+                .unwrap_or(false)
+        } else {
+            false
+        };
+        (hm, ht, hc)
+    } else {
+        (false, false, false)
+    };
+
+    // Temporarily delete un-materialized accessor properties before `to_json` so `to_json`
+    // does NOT invoke getters on untouched fields!
+    let mut def = deferred.borrow_mut();
+    if let Some(ctx_obj) = final_val.as_object() {
+        if let Ok(req_val) = ctx_obj.get(js_string!("request"), boa)
+            && let Some(req_obj) = req_val.as_object()
+            && let Ok(body_val) = req_obj.get(js_string!("body"), boa)
+            && let Some(body_obj) = body_val.as_object()
+        {
+            if def.contains_key("body.messages") {
+                let _ = body_obj.delete_property_or_throw(js_string!("messages"), boa);
+            }
+            if def.contains_key("body.tools") {
+                let _ = body_obj.delete_property_or_throw(js_string!("tools"), boa);
+            }
+        }
+        if def.contains_key("route.candidates")
+            && let Ok(route_val) = ctx_obj.get(js_string!("route"), boa)
+            && let Some(route_obj) = route_val.as_object()
+        {
+            let _ = route_obj.delete_property_or_throw(js_string!("candidates"), boa);
+        }
+    }
+
+    let mut json_out = final_val
+        .to_json(boa)
+        .map_err(|err| anyhow!("failed to extract ScriptContext JSON output: {err}"))?;
+    normalize_whole_json_numbers(&mut json_out);
+    if def.contains_key("route.candidates")
+        && let Some(route_map) = json_out.get_mut("route").and_then(Value::as_object_mut)
+    {
+        route_map
+            .entry("candidates")
+            .or_insert_with(|| Value::Array(Vec::new()));
+    }
+
+    let mut mutated: ScriptContext = serde_json::from_value(json_out)
+        .context("script mutated ScriptContext into incompatible shape")?;
+
+    if has_messages && let Some(v) = def.remove("body.messages") {
+        mutated.request.body.insert("messages".to_string(), v);
+    }
+    if has_tools && let Some(v) = def.remove("body.tools") {
+        mutated.request.body.insert("tools".to_string(), v);
+    }
+    if has_candidates && let Some(v) = def.remove("route.candidates") {
+        mutated.route.candidates =
+            serde_json::from_value(v).context("failed to restore route.candidates")?;
+    }
+
+    enforce_readonly_fields(original, &mut mutated);
+    Ok(mutated)
+}
+
+/// Calls `onRequest(ctx_val)` on an instantiated JS module, awaiting only if a Promise is returned.
+async fn invoke_on_request_module(
+    vm: &mut WarmBoaVm,
+    unit_compile_id: u64,
+    unit_js_code: &str,
+    ctx_val: JsValue,
+    cpu_limit: Duration,
+) -> Result<JsValue> {
     let t0 = Instant::now();
-    let script = boa_engine::Script::parse(Source::from_bytes(wrapper.as_bytes()), None, &mut boa)
-        .map_err(|err| anyhow!("script syntax error: {err}"))?;
-    let promise_val = script
-        .evaluate(&mut boa)
-        .map_err(|err| anyhow!("script runtime error: {err}"))?;
-    if job_queue.record_cpu(t0.elapsed()) {
+    let module_obj = vm.instantiate_module(unit_compile_id, unit_js_code)?;
+    let on_req = module_obj
+        .get(js_string!("onRequest"), &mut vm.boa)
+        .map_err(|err| anyhow!("script error reading onRequest: {err}"))?;
+
+    let ret_val = if let Some(callable) = on_req.as_callable() {
+        callable
+            .call(
+                &JsValue::undefined(),
+                std::slice::from_ref(&ctx_val),
+                &mut vm.boa,
+            )
+            .map_err(|err| anyhow!("script runtime error: {err}"))?
+    } else {
+        JsValue::undefined()
+    };
+
+    if vm.job_queue.record_cpu(t0.elapsed()) {
+        vm.tainted = true;
         bail!(
             "script CPU execution exceeded {}ms budget",
             cpu_limit.as_millis()
         );
     }
 
-    let final_val = resolve_js_promise(&mut boa, &job_queue, promise_val, cpu_limit).await?;
-    let mut json_out = final_val
-        .to_json(&mut boa)
-        .map_err(|err| anyhow!("failed to extract ScriptContext JSON output: {err}"))?;
-    normalize_whole_json_numbers(&mut json_out);
+    let is_promise = ret_val
+        .as_object()
+        .is_some_and(|obj| JsPromise::from_object(obj.clone()).is_ok());
 
-    let mut mutated: ScriptContext = serde_json::from_value(json_out)
-        .context("script mutated ScriptContext into incompatible shape")?;
-    enforce_readonly_fields(input_ctx, &mut mutated);
-    Ok(mutated)
+    let resolved = if is_promise {
+        match resolve_js_promise(&mut vm.boa, &vm.job_queue, ret_val, cpu_limit).await {
+            Ok(v) => v,
+            Err(e) => {
+                vm.tainted = true;
+                return Err(e);
+            }
+        }
+    } else {
+        ret_val
+    };
+
+    if resolved.is_object() && !resolved.is_null() {
+        Ok(resolved)
+    } else {
+        Ok(ctx_val)
+    }
 }
 
-/// Runs an ordered chain of `onBilling` modules (`Provider` -> `Model`) sharing one `b.draft`.
+/// Reads `ctx.reject` from `ctx_val` if non-null/non-undefined.
+fn check_js_reject(boa: &mut Context, ctx_val: &JsValue) -> Result<Option<RejectDirective>> {
+    let Some(obj) = ctx_val.as_object() else {
+        return Ok(None);
+    };
+    let reject_val = obj
+        .get(js_string!("reject"), boa)
+        .map_err(|err| anyhow!("failed to read ctx.reject: {err}"))?;
+    if reject_val.is_null_or_undefined() {
+        return Ok(None);
+    }
+    let json_val = reject_val
+        .to_json(boa)
+        .map_err(|err| anyhow!("failed to serialize ctx.reject: {err}"))?;
+    let rej: RejectDirective =
+        serde_json::from_value(json_val).context("invalid ctx.reject shape")?;
+    Ok(Some(rej))
+}
+
+/// Runs a single `onRequest` module unit inside the current `LocalSet` using a warm Boa VM.
+async fn run_request_unit_local(
+    compile_id: u64,
+    js_code: &str,
+    input_ctx: &ScriptContext,
+    http: HttpContext,
+) -> Result<ScriptContext> {
+    let cpu_limit = Duration::from_millis(http.config.timeout_ms.max(1));
+    let deferred = Rc::new(RefCell::new(HashMap::new()));
+    let (slot_id, _guard) = register_slot(
+        http.clone(),
+        Rc::new(RefCell::new(DraftBuffer::default())),
+        Rc::clone(&deferred),
+        http.config.max_http_calls_per_stage,
+        http.config.net_timeout_ms.max(100),
+    );
+
+    let mut vm = acquire_warm_vm(&http.config)?;
+    vm.prepare(slot_id, cpu_limit);
+
+    let mut working_ctx = input_ctx.clone();
+    let ctx_val = build_lazy_js_context(&mut vm.boa, &mut working_ctx, &deferred, false)?;
+    let final_val =
+        match invoke_on_request_module(&mut vm, compile_id, js_code, ctx_val, cpu_limit).await {
+            Ok(v) => v,
+            Err(e) => {
+                vm.tainted = true;
+                return Err(e);
+            }
+        };
+
+    let res = extract_lazy_js_context(&mut vm.boa, &final_val, &deferred, input_ctx);
+    if res.is_err() {
+        vm.tainted = true;
+    }
+    release_warm_vm(vm);
+    res
+}
+
+/// Runs all `onRequest` units in `units`, returning `Err(RejectDirective)` if rejected.
+async fn run_stage_units(
+    vm: &mut WarmBoaVm,
+    units: &[CompiledScriptUnit],
+    mut ctx_val: JsValue,
+    cpu_limit: Duration,
+) -> Result<std::result::Result<JsValue, RejectDirective>> {
+    for unit in units {
+        if !unit.has_on_request {
+            continue;
+        }
+        ctx_val =
+            match invoke_on_request_module(vm, unit.compile_id, &unit.js_code, ctx_val, cpu_limit)
+                .await
+            {
+                Ok(v) => v,
+                Err(e) => {
+                    vm.tainted = true;
+                    return Err(e);
+                }
+            };
+        if let Some(rej) = check_js_reject(&mut vm.boa, &ctx_val)? {
+            return Ok(Err(rej));
+        }
+    }
+    Ok(Ok(ctx_val))
+}
+
+/// Runs Stage ③ ordered route responsibility chain, returning `(ctx_val, matched_rule_id)`.
+async fn run_route_rules(
+    vm: &mut WarmBoaVm,
+    routes: &[crate::models::RouteRuleConfig],
+    mut ctx_val: JsValue,
+    cpu_limit: Duration,
+) -> Result<std::result::Result<(JsValue, Option<String>), RejectDirective>> {
+    if let Some(obj) = ctx_val.as_object() {
+        let _ = obj.set(
+            js_string!("stage"),
+            JsValue::new(js_string!("route")),
+            false,
+            &mut vm.boa,
+        );
+    }
+
+    let mut matched_rule_id: Option<String> = None;
+    for rule in routes {
+        if !rule.enabled {
+            continue;
+        }
+        if let Some(obj) = ctx_val.as_object() {
+            let info_json = serde_json::to_value(rule.to_entity_info())
+                .context("failed to serialize routeInfo")?;
+            let info_val = JsValue::from_json(&info_json, &mut vm.boa)
+                .map_err(|err| anyhow!("failed to convert routeInfo: {err}"))?;
+            let _ = obj.set(js_string!("routeInfo"), info_val, false, &mut vm.boa);
+        }
+
+        ctx_val = match run_stage_units(vm, &rule.compiled.units, ctx_val, cpu_limit).await? {
+            Ok(v) => v,
+            Err(rej) => return Ok(Err(rej)),
+        };
+
+        if let Some(obj) = ctx_val.as_object()
+            && let Ok(route_val) = obj.get(js_string!("route"), &mut vm.boa)
+            && let Some(route_obj) = route_val.as_object()
+            && route_obj
+                .get(js_string!("target"), &mut vm.boa)
+                .is_ok_and(|t| !t.is_null_or_undefined())
+        {
+            matched_rule_id = Some(rule.id.clone());
+            let _ = route_obj.set(
+                js_string!("ruleId"),
+                JsValue::new(js_string!(rule.id.as_str())),
+                false,
+                &mut vm.boa,
+            );
+            let cont = route_obj
+                .get(js_string!("continue"), &mut vm.boa)
+                .is_ok_and(|v| v.as_boolean() == Some(true));
+            if !cont {
+                break;
+            }
+            let _ = route_obj.set(
+                js_string!("continue"),
+                JsValue::new(false),
+                false,
+                &mut vm.boa,
+            );
+        }
+    }
+
+    if let Some(obj) = ctx_val.as_object() {
+        let _ = obj.set(js_string!("routeInfo"), JsValue::null(), false, &mut vm.boa);
+    }
+    Ok(Ok((ctx_val, matched_rule_id)))
+}
+
+/// Executes Stages ①..③ (`project` -> `callModel` -> `routes[]`) inside one warm Boa VM.
+async fn run_routing_batch_local(
+    catalog: &RuntimeCatalog,
+    project_id: &str,
+    call_model_id: &str,
+    mut input_ctx: ScriptContext,
+    http: HttpContext,
+) -> Result<StageOutcome<ScriptContext>> {
+    let Some((project, call_model)) =
+        catalog.resolve_project_and_call_model(project_id, call_model_id)
+    else {
+        return Ok(StageOutcome::Rejected(RejectDirective {
+            status_code: 404,
+            message: format!(
+                "Project '{project_id}' or call model '{call_model_id}' is not configured or disabled"
+            ),
+        }));
+    };
+
+    let cpu_limit = Duration::from_millis(http.config.timeout_ms.max(1));
+    let deferred = Rc::new(RefCell::new(HashMap::new()));
+    let (slot_id, _guard) = register_slot(
+        http.clone(),
+        Rc::new(RefCell::new(DraftBuffer::default())),
+        Rc::clone(&deferred),
+        http.config.max_http_calls_per_stage,
+        http.config.net_timeout_ms.max(100),
+    );
+
+    let mut vm = acquire_warm_vm(&http.config)?;
+    vm.prepare(slot_id, cpu_limit);
+
+    let original_snapshot = input_ctx.clone();
+    let ctx_val = build_lazy_js_context(&mut vm.boa, &mut input_ctx, &deferred, false)?;
+
+    // Stage ①: Project script chain
+    let ctx_val =
+        match run_stage_units(&mut vm, &project.compiled.units, ctx_val, cpu_limit).await? {
+            Ok(v) => v,
+            Err(rej) => {
+                release_warm_vm(vm);
+                return Ok(StageOutcome::Rejected(rej));
+            }
+        };
+
+    // Stage ②: CallModel script chain
+    if let Some(obj) = ctx_val.as_object() {
+        let _ = obj.set(
+            js_string!("stage"),
+            JsValue::new(js_string!("callModel")),
+            false,
+            &mut vm.boa,
+        );
+    }
+    let ctx_val =
+        match run_stage_units(&mut vm, &call_model.compiled.units, ctx_val, cpu_limit).await? {
+            Ok(v) => v,
+            Err(rej) => {
+                release_warm_vm(vm);
+                return Ok(StageOutcome::Rejected(rej));
+            }
+        };
+
+    // Stage ③: Ordered Route responsibility chain
+    let (ctx_val, matched_rule_id) =
+        match run_route_rules(&mut vm, &catalog.routes, ctx_val, cpu_limit).await? {
+            Ok(pair) => pair,
+            Err(rej) => {
+                release_warm_vm(vm);
+                return Ok(StageOutcome::Rejected(rej));
+            }
+        };
+
+    let mut final_original = original_snapshot;
+    final_original.stage = crate::models::ScriptStage::Route;
+    final_original.route_info = None;
+    final_original.route.rule_id = matched_rule_id;
+
+    let res = extract_lazy_js_context(&mut vm.boa, &ctx_val, &deferred, &final_original);
+    if res.is_err() {
+        vm.tainted = true;
+    }
+    release_warm_vm(vm);
+    Ok(StageOutcome::Ready(res?))
+}
+
+/// Executes Stages ④..⑤ (`model` -> `provider`) inside one warm Boa VM.
+async fn run_attempt_batch_local(
+    catalog: &RuntimeCatalog,
+    provider_id: &str,
+    model_id: &str,
+    mut input_ctx: ScriptContext,
+    http: HttpContext,
+) -> Result<StageOutcome<ScriptContext>> {
+    let Some((provider, model)) = catalog.find_model(provider_id, model_id) else {
+        bail!("route selected missing provider/model endpoint {provider_id}/{model_id}");
+    };
+
+    let cpu_limit = Duration::from_millis(http.config.timeout_ms.max(1));
+    let deferred = Rc::new(RefCell::new(HashMap::new()));
+    let (slot_id, _guard) = register_slot(
+        http.clone(),
+        Rc::new(RefCell::new(DraftBuffer::default())),
+        Rc::clone(&deferred),
+        http.config.max_http_calls_per_stage,
+        http.config.net_timeout_ms.max(100),
+    );
+
+    let mut vm = acquire_warm_vm(&http.config)?;
+    vm.prepare(slot_id, cpu_limit);
+
+    let mut original_snapshot = input_ctx.clone();
+    let mut ctx_val = build_lazy_js_context(&mut vm.boa, &mut input_ctx, &deferred, true)?;
+
+    // Stage ④: Model script chain
+    for unit in &model.compiled.units {
+        if !unit.has_on_request {
+            continue;
+        }
+        ctx_val = match invoke_on_request_module(
+            &mut vm,
+            unit.compile_id,
+            &unit.js_code,
+            ctx_val,
+            cpu_limit,
+        )
+        .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                vm.tainted = true;
+                return Err(e);
+            }
+        };
+        if let Some(rej) = check_js_reject(&mut vm.boa, &ctx_val)? {
+            release_warm_vm(vm);
+            return Ok(StageOutcome::Rejected(rej));
+        }
+    }
+
+    // Stage ⑤: Provider script chain
+    original_snapshot.stage = crate::models::ScriptStage::Provider;
+    if let Some(obj) = ctx_val.as_object() {
+        let _ = obj.set(
+            js_string!("stage"),
+            JsValue::new(js_string!("provider")),
+            false,
+            &mut vm.boa,
+        );
+    }
+    for unit in &provider.compiled.units {
+        if !unit.has_on_request {
+            continue;
+        }
+        ctx_val = match invoke_on_request_module(
+            &mut vm,
+            unit.compile_id,
+            &unit.js_code,
+            ctx_val,
+            cpu_limit,
+        )
+        .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                vm.tainted = true;
+                return Err(e);
+            }
+        };
+        if let Some(rej) = check_js_reject(&mut vm.boa, &ctx_val)? {
+            release_warm_vm(vm);
+            return Ok(StageOutcome::Rejected(rej));
+        }
+    }
+
+    let res = extract_lazy_js_context(&mut vm.boa, &ctx_val, &deferred, &original_snapshot);
+    if res.is_err() {
+        vm.tainted = true;
+    }
+    release_warm_vm(vm);
+    Ok(StageOutcome::Ready(res?))
+}
+
+/// Runs an ordered chain of `onBilling` modules (`Provider` -> `Model`) sharing one `b.draft`
+/// on a warm Boa VM.
 async fn run_billing_chain_local(
     units: &[CompiledScriptUnit],
     input: &BillingInput,
@@ -741,20 +1662,27 @@ async fn run_billing_chain_local(
 ) -> Result<BillingExecutionOutput> {
     let cpu_limit = Duration::from_millis(http.config.timeout_ms.max(1));
     let draft_rc = Rc::new(RefCell::new(DraftBuffer::default()));
+    let deferred = Rc::new(RefCell::new(HashMap::new()));
 
-    let slot_id = NEXT_SLOT_ID.fetch_add(1, Ordering::Relaxed);
-    let _guard = SlotGuard(slot_id);
-    let slot = HostInvocationSlot {
-        draft: Rc::clone(&draft_rc),
-        http: http.clone(),
-        http_calls_used: Rc::new(AtomicUsize::new(0)),
-        max_http_calls: http.config.max_http_calls_billing,
-        default_net_timeout_ms: http.config.billing_net_timeout_ms.max(100),
-        allow_network: true,
-    };
-    HOST_SLOTS.with(|map| {
-        map.borrow_mut().insert(slot_id, slot);
-    });
+    let (slot_id, _guard) = register_slot(
+        http.clone(),
+        Rc::clone(&draft_rc),
+        deferred,
+        http.config.max_http_calls_billing,
+        http.config.billing_net_timeout_ms.max(100),
+    );
+
+    let mut vm = acquire_warm_vm(&http.config)?;
+    vm.prepare(slot_id, cpu_limit);
+
+    let input_json = serde_json::to_value(input).context("failed to serialize BillingInput")?;
+    let b_val = JsValue::from_json(&input_json, &mut vm.boa)
+        .map_err(|err| anyhow!("failed to convert BillingInput into JS VM: {err}"))?;
+    if let Some(obj) = b_val.as_object() {
+        let draft_obj = build_draft_js_object(&mut vm.boa, slot_id);
+        obj.set(js_string!("draft"), draft_obj, false, &mut vm.boa)
+            .map_err(|err| anyhow!("failed to attach b.draft: {err}"))?;
+    }
 
     for unit in units {
         if !unit.has_on_billing {
@@ -764,56 +1692,36 @@ async fn run_billing_chain_local(
             break;
         }
 
-        let job_queue = Rc::new(TokioJobQueue::new(cpu_limit));
-        let mut boa = boa_engine::context::ContextBuilder::new()
-            .host_hooks(host_hooks_for_mb(http.config.memory_limit_mb))
-            .job_queue(Rc::clone(&job_queue))
-            .build()
-            .map_err(|err| anyhow!("failed to initialize Boa billing VM: {err}"))?;
-
-        let limits = boa.runtime_limits_mut();
-        limits.set_loop_iteration_limit(50_000);
-        limits.set_recursion_limit(256);
-        limits.set_stack_size_limit(8_192);
-
-        register_linguist_globals(&mut boa, slot_id)?;
-
-        let input_json = serde_json::to_value(input).context("failed to serialize BillingInput")?;
-        let b_val = JsValue::from_json(&input_json, &mut boa)
-            .map_err(|err| anyhow!("failed to convert BillingInput into JS VM: {err}"))?;
-
-        if let Some(obj) = b_val.as_object() {
-            let draft_obj = build_draft_js_object(&mut boa, slot_id);
-            obj.set(js_string!("draft"), draft_obj, false, &mut boa)
-                .map_err(|err| anyhow!("failed to attach b.draft: {err}"))?;
-        }
-
-        boa.register_global_property(
-            js_string!("__linguist_billing_ctx"),
-            b_val,
-            Attribute::all(),
-        )
-        .map_err(|err| anyhow!("failed to bind billing ctx: {err}"))?;
-
-        let wrapper = format!(
-            "{}\n\
-             const __linguist_mod = __linguist_module();\n\
-             Promise.resolve(\n\
-               typeof __linguist_mod.onBilling === 'function'\n\
-                 ? __linguist_mod.onBilling(__linguist_billing_ctx)\n\
-                 : undefined\n\
-             );",
-            unit.js_code
-        );
-
+        vm.job_queue.reset(cpu_limit);
         let t0 = Instant::now();
-        let script =
-            boa_engine::Script::parse(Source::from_bytes(wrapper.as_bytes()), None, &mut boa)
-                .map_err(|err| anyhow!("billing script '{}' syntax error: {err}", unit.id))?;
-        let promise_val = script
-            .evaluate(&mut boa)
-            .map_err(|err| anyhow!("billing script '{}' runtime error: {err}", unit.id))?;
-        if job_queue.record_cpu(t0.elapsed()) {
+        let module_obj = match vm.instantiate_module(unit.compile_id, &unit.js_code) {
+            Ok(m) => m,
+            Err(e) => {
+                vm.tainted = true;
+                return Err(e);
+            }
+        };
+        let on_bill = module_obj
+            .get(js_string!("onBilling"), &mut vm.boa)
+            .map_err(|err| anyhow!("billing script '{}' error: {err}", unit.id))?;
+        let promise_val = if let Some(callable) = on_bill.as_callable() {
+            match callable.call(
+                &JsValue::undefined(),
+                std::slice::from_ref(&b_val),
+                &mut vm.boa,
+            ) {
+                Ok(v) => v,
+                Err(err) => {
+                    vm.tainted = true;
+                    bail!("billing script '{}' runtime error: {err}", unit.id);
+                }
+            }
+        } else {
+            JsValue::undefined()
+        };
+
+        if vm.job_queue.record_cpu(t0.elapsed()) {
+            vm.tainted = true;
             bail!(
                 "billing script '{}' exceeded {}ms CPU budget",
                 unit.id,
@@ -821,9 +1729,19 @@ async fn run_billing_chain_local(
             );
         }
 
-        let _ = resolve_js_promise(&mut boa, &job_queue, promise_val, cpu_limit).await?;
+        let is_promise = promise_val
+            .as_object()
+            .is_some_and(|obj| JsPromise::from_object(obj.clone()).is_ok());
+        if is_promise
+            && let Err(e) =
+                resolve_js_promise(&mut vm.boa, &vm.job_queue, promise_val, cpu_limit).await
+        {
+            vm.tainted = true;
+            return Err(e);
+        }
     }
 
+    release_warm_vm(vm);
     let draft = draft_rc.borrow().clone();
     finalize_billing_draft(draft, input)
 }
@@ -962,15 +1880,9 @@ fn finalize_billing_draft(
     })
 }
 
-/// Registers the global `linguist` helper object and `__linguist_slot_id` inside Boa.
+/// Registers the global `linguist` helper object inside Boa.
 fn register_linguist_globals(boa: &mut Context, slot_id: u64) -> Result<()> {
-    #[allow(clippy::cast_precision_loss)]
-    boa.register_global_property(
-        js_string!("__linguist_slot_id"),
-        JsValue::new(slot_id as f64),
-        Attribute::READONLY,
-    )
-    .map_err(|err| anyhow!("failed to register slot id: {err}"))?;
+    boa.insert_data(slot_id);
 
     let http_obj = ObjectInitializer::new(boa)
         .function(
@@ -1149,16 +2061,13 @@ fn build_draft_js_object(boa: &mut Context, slot_id: u64) -> JsValue {
         .into()
 }
 
-/// Reads `__linguist_slot_id` from the active Boa context.
+/// Reads the active slot ID from the active Boa context.
 fn active_slot_id(ctx: &mut Context) -> JsResult<u64> {
-    let val = ctx
-        .global_object()
-        .get(js_string!("__linguist_slot_id"), ctx)?;
-    let f = val
-        .as_number()
-        .ok_or_else(|| JsNativeError::typ().with_message("missing host slot id"))?;
-    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-    Ok(f as u64)
+    ctx.get_data::<u64>().copied().ok_or_else(|| {
+        JsNativeError::typ()
+            .with_message("missing host slot id")
+            .into()
+    })
 }
 
 /// Mutates the active `DraftBuffer` unless frozen.

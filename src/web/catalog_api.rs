@@ -465,8 +465,15 @@ async fn dry_run(
                     continue;
                 };
                 let attempt = u16::try_from(idx + 1).unwrap_or(u16::MAX);
-                match prepare_attempt_context(&plan.snapshot_ctx, attempt, prov, pm, &state.engine)
-                    .await
+                match prepare_attempt_context(
+                    &catalog,
+                    &plan.snapshot_ctx,
+                    attempt,
+                    prov,
+                    pm,
+                    &state.engine,
+                )
+                .await
                 {
                     Ok(StageOutcome::Ready(ctx)) => candidates.push(json!({
                         "providerId": ep.provider_id,
