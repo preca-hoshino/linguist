@@ -741,6 +741,10 @@ pub struct TrafficBucket {
     pub success_requests: i64,
     /// Failed requests (`>= 400`).
     pub error_requests: i64,
+    /// Requests per minute during this bucket.
+    pub rpm: f64,
+    /// Error percentage (`0.0..=100.0`).
+    pub error_rate: f64,
     /// Input tokens consumed.
     pub input_tokens: i64,
     /// Output tokens generated.
@@ -751,7 +755,61 @@ pub struct TrafficBucket {
     pub cache_creation_tokens: i64,
     /// Reasoning tokens.
     pub reasoning_tokens: i64,
+    /// Sum of extra token counters.
+    pub extra_tokens_total: i64,
     /// Cache hit rate percentage (`0.0..=100.0`).
+    pub cache_hit_rate: f64,
+    /// Average input tokens per request.
+    pub avg_input_tokens: f64,
+    /// P90 input tokens per request.
+    pub p90_input_tokens: f64,
+    /// Average output tokens per request.
+    pub avg_output_tokens: f64,
+    /// P90 output tokens per request.
+    pub p90_output_tokens: f64,
+    /// Input tokens per minute.
+    pub tpm_in: f64,
+    /// Output tokens per minute.
+    pub tpm_out: f64,
+    /// Total tokens per minute.
+    pub tpm_total: f64,
+    /// RPM for requests with `0..32K` input tokens.
+    pub rpm_0_32k: f64,
+    /// RPM for requests with `32K..128K` input tokens.
+    pub rpm_32k_128k: f64,
+    /// RPM for requests with `>= 128K` input tokens.
+    pub rpm_128k_plus: f64,
+    /// TPM for requests with `0..32K` input tokens.
+    pub tpm_0_32k: f64,
+    /// TPM for requests with `32K..128K` input tokens.
+    pub tpm_32k_128k: f64,
+    /// TPM for requests with `>= 128K` input tokens.
+    pub tpm_128k_plus: f64,
+}
+
+/// Summary totals for the `traffic` (用量) tab KPI strip.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrafficSummaryTotals {
+    /// Total requests across the active window.
+    pub total_requests: i64,
+    /// Average RPM across the active window.
+    pub avg_rpm: f64,
+    /// Total tokens consumed.
+    pub total_tokens: i64,
+    /// Total input tokens.
+    pub input_tokens: i64,
+    /// Total output tokens.
+    pub output_tokens: i64,
+    /// Total cache read tokens.
+    pub cache_read_tokens: i64,
+    /// Total cache creation tokens.
+    pub cache_creation_tokens: i64,
+    /// Total reasoning tokens.
+    pub reasoning_tokens: i64,
+    /// Total extra tokens.
+    pub extra_tokens: i64,
+    /// Overall cache hit rate percentage.
     pub cache_hit_rate: f64,
 }
 
@@ -775,12 +833,18 @@ pub struct UsageSlice {
 pub struct TrafficMonitoringResponse {
     /// Shared metadata and filters.
     pub meta: MonitoringMeta,
+    /// Window summary KPI totals.
+    pub totals: TrafficSummaryTotals,
     /// Time-series traffic and token buckets.
     pub buckets: Vec<TrafficBucket>,
     /// Top models + "其他" distribution.
     pub distribution_by_model: Vec<UsageSlice>,
     /// Top projects + "其他" distribution.
     pub distribution_by_project: Vec<UsageSlice>,
+    /// Top providers + "其他" distribution.
+    pub distribution_by_provider: Vec<UsageSlice>,
+    /// Top call models + "其他" distribution.
+    pub distribution_by_call_model: Vec<UsageSlice>,
 }
 
 /// One time-bucketed point for the `performance` monitoring dimension.
@@ -807,8 +871,92 @@ pub struct PerformanceBucket {
     pub avg_generation_ms: f64,
     /// Mean total request duration in milliseconds.
     pub avg_total_duration_ms: f64,
+    /// Median total request duration in milliseconds.
+    pub duration_p50: f64,
+    /// P90 total request duration in milliseconds.
+    pub duration_p90: f64,
+    /// P99 total request duration in milliseconds.
+    pub duration_p99: f64,
     /// Mean end-to-end throughput (tokens/sec).
     pub avg_e2e_tps: f64,
+    /// Mean inter-token latency (TPOT, ms/token).
+    pub tpot_avg: f64,
+    /// Median TPOT (ms/token).
+    pub tpot_p50: f64,
+    /// P90 TPOT (ms/token).
+    pub tpot_p90: f64,
+    /// P99 TPOT (ms/token).
+    pub tpot_p99: f64,
+    /// Mean gateway internal pre-send overhead in milliseconds.
+    pub avg_gateway_overhead_ms: f64,
+    /// P50 gateway internal overhead in milliseconds.
+    pub p50_gateway_overhead_ms: f64,
+    /// P90 gateway internal overhead in milliseconds.
+    pub p90_gateway_overhead_ms: f64,
+    /// P99 gateway internal overhead in milliseconds.
+    pub p99_gateway_overhead_ms: f64,
+    /// Mean routing stage duration in milliseconds.
+    pub avg_routing_ms: f64,
+    /// Mean attempt preparation duration in milliseconds.
+    pub avg_attempt_prep_ms: f64,
+    /// Mean upstream HTTP response header latency in milliseconds.
+    pub avg_upstream_header_ms: f64,
+}
+
+/// Summary KPIs for the `performance` tab.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PerformanceSummary {
+    /// Mean gateway overhead in milliseconds.
+    pub avg_gateway_overhead_ms: f64,
+    /// Median TTFT in milliseconds.
+    pub ttft_p50: f64,
+    /// P90 TTFT in milliseconds.
+    pub ttft_p90: f64,
+    /// Median TPOT in ms/token.
+    pub tpot_p50: f64,
+    /// Mean decode TPS.
+    pub decode_tps_avg: f64,
+    /// Median decode TPS.
+    pub decode_tps_p50: f64,
+    /// Median total duration in milliseconds.
+    pub duration_p50: f64,
+    /// P90 total duration in milliseconds.
+    pub duration_p90: f64,
+}
+
+/// Per-provider latency & speed benchmark item.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderPerfItem {
+    /// Provider ID.
+    pub provider_id: String,
+    /// Provider display name.
+    pub provider_name: String,
+    /// Mean TTFT in milliseconds.
+    pub avg_ttft_ms: f64,
+    /// Mean decode TPS.
+    pub avg_decode_tps: f64,
+    /// Mean TPOT in ms/token.
+    pub avg_tpot_ms: f64,
+    /// Request count.
+    pub request_count: i64,
+}
+
+/// Stream vs non-stream performance comparison item.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StreamComparisonItem {
+    /// `"stream"` or `"non_stream"`.
+    pub mode: String,
+    /// Request count.
+    pub request_count: i64,
+    /// Mean TTFT in milliseconds.
+    pub avg_ttft_ms: f64,
+    /// Mean total duration in milliseconds.
+    pub avg_total_duration_ms: f64,
+    /// Mean decode TPS.
+    pub avg_decode_tps: f64,
 }
 
 /// Scatter point comparing latency vs throughput for one provider/model pair.
@@ -839,10 +987,18 @@ pub struct ModelPerformancePoint {
 pub struct PerformanceMonitoringResponse {
     /// Shared metadata and filters.
     pub meta: MonitoringMeta,
+    /// Window performance summary KPIs.
+    pub summary: PerformanceSummary,
     /// Time-series latency and throughput buckets.
     pub buckets: Vec<PerformanceBucket>,
     /// Top-10 provider/model performance scatter points.
     pub model_quadrant: Vec<ModelPerformancePoint>,
+    /// TTFT latency distribution histogram buckets.
+    pub ttft_histogram: Vec<NamedCount>,
+    /// Per-provider latency & speed benchmarks.
+    pub provider_benchmarks: Vec<ProviderPerfItem>,
+    /// Stream vs non-stream performance comparison.
+    pub stream_comparison: Vec<StreamComparisonItem>,
 }
 
 /// One time-bucketed point for the `routing` monitoring dimension.
@@ -905,22 +1061,200 @@ pub struct StreamSplit {
     pub non_stream_count: i64,
 }
 
+/// Summary KPIs for the `routing` tab.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RoutingSummary {
+    /// Distinct matched route rule count.
+    pub active_rules: i64,
+    /// Percentage of requests succeeding on first attempt.
+    pub first_try_success_rate: f64,
+    /// Count of requests recovered via retry/fallback.
+    pub retry_success_count: i64,
+    /// Percentage of retried requests that succeeded.
+    pub retry_recovery_rate: f64,
+    /// Streaming request share percentage.
+    pub stream_rate: f64,
+}
+
+/// Per-rule scheduling statistics for the `routing` main table.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RouteRuleStat {
+    /// Route rule identifier.
+    pub rule_id: String,
+    /// Total matched attempts.
+    pub request_count: i64,
+    /// Traffic share percentage (`0.0..=100.0`).
+    pub share_percent: f64,
+    /// Distinct `(provider, model)` endpoints targeted by this rule.
+    pub endpoint_count: i64,
+    /// First-try success rate percentage.
+    pub first_try_rate: f64,
+    /// Fallback/retry trigger rate percentage.
+    pub fallback_rate: f64,
+    /// Mean routing script latency in milliseconds.
+    pub avg_routing_ms: f64,
+    /// Mean total request duration in milliseconds.
+    pub avg_duration_ms: f64,
+}
+
+/// Call-model to target-model mapping frequency item.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CallModelMappingStat {
+    /// Consume-side call model ID.
+    pub call_model_id: String,
+    /// Target provider ID.
+    pub provider_id: String,
+    /// Target model ID.
+    pub model_id: String,
+    /// Target model display name.
+    pub model_name: String,
+    /// Request count.
+    pub request_count: i64,
+}
+
 /// Response payload for `GET /api/v1/stats/monitoring/routing`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RoutingMonitoringResponse {
     /// Shared metadata and filters.
     pub meta: MonitoringMeta,
+    /// Window summary KPIs.
+    pub summary: RoutingSummary,
     /// Ordered rule keys matching `RoutingBucket::rule_counts`.
     pub rule_series_keys: Vec<String>,
     /// Time-series routing, retry, and status buckets.
     pub buckets: Vec<RoutingBucket>,
+    /// Per-rule scheduling statistics table.
+    pub rule_stats: Vec<RouteRuleStat>,
     /// Per-provider volume and success rate comparison.
     pub provider_stats: Vec<ProviderRoutingStat>,
     /// Categorical `finish_reason` counts.
     pub finish_reasons: Vec<NamedCount>,
     /// Streaming vs non-streaming split.
     pub stream_split: StreamSplit,
+    /// Attempt count distribution (`1次`, `2次`, `3次+`).
+    pub attempt_distribution: Vec<NamedCount>,
+    /// Call-model to target-model mapping top list.
+    pub call_model_mappings: Vec<CallModelMappingStat>,
+    /// Token accounting source distribution.
+    pub token_sources: Vec<NamedCount>,
+}
+
+/// Summary KPIs for the `errors` (异常) tab.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ErrorsSummary {
+    /// Total requests in window.
+    pub total_requests: i64,
+    /// Total error requests (`status >= 400` or `< 200`).
+    pub total_errors: i64,
+    /// Overall error rate percentage.
+    pub error_rate: f64,
+    /// HTTP 429 rate-limit count.
+    pub rate_limit_count: i64,
+    /// HTTP 429 rate-limit percentage.
+    pub rate_limit_rate: f64,
+    /// 5xx / 502 / connection timeout count.
+    pub timeout_or_5xx_count: i64,
+    /// 5xx / timeout percentage.
+    pub timeout_or_5xx_rate: f64,
+    /// Interrupted SSE stream count.
+    pub sse_interrupted_count: i64,
+}
+
+/// Time-bucketed error telemetry point for `GET /api/v1/stats/monitoring/errors`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ErrorBucket {
+    /// Formatted bucket timestamp label.
+    pub label: String,
+    /// Total requests in bucket.
+    pub total_requests: i64,
+    /// Total failed requests.
+    pub error_count: i64,
+    /// Error rate percentage.
+    pub error_rate: f64,
+    /// HTTP 429 count.
+    pub status_429: i64,
+    /// Other 4xx count.
+    pub status_4xx_other: i64,
+    /// HTTP 502 count.
+    pub status_502: i64,
+    /// Other 5xx count.
+    pub status_5xx_other: i64,
+    /// Mean duration of failed requests in milliseconds.
+    pub avg_error_duration_ms: f64,
+    /// Fallback/retry recovered successes.
+    pub retry_recovered: i64,
+    /// Final failed requests.
+    pub final_error: i64,
+}
+
+/// Aggregated error detail row joining `request_payloads.error_message`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ErrorDetailRow {
+    /// Provider ID.
+    pub provider_id: String,
+    /// Provider display name.
+    pub provider_name: String,
+    /// Model ID.
+    pub model_id: String,
+    /// Model display name.
+    pub model_name: String,
+    /// Matched route rule ID.
+    pub route_rule_id: String,
+    /// HTTP status code.
+    pub status_code: i32,
+    /// Truncated error message snippet.
+    pub error_snippet: String,
+    /// Occurrence count.
+    pub count: i64,
+    /// Share of total errors percentage.
+    pub share_percent: f64,
+    /// Last occurrence ISO timestamp.
+    pub last_seen: String,
+}
+
+/// Per-entity error count and rate summary.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ErrorEntityStat {
+    /// Entity ID.
+    pub id: String,
+    /// Entity display name.
+    pub name: String,
+    /// Total requests.
+    pub total_requests: i64,
+    /// Error count.
+    pub error_count: i64,
+    /// Error rate percentage.
+    pub error_rate: f64,
+}
+
+/// Response payload for `GET /api/v1/stats/monitoring/errors`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ErrorsMonitoringResponse {
+    /// Shared metadata and filters.
+    pub meta: MonitoringMeta,
+    /// Window error summary KPIs.
+    pub summary: ErrorsSummary,
+    /// Time-series error buckets.
+    pub buckets: Vec<ErrorBucket>,
+    /// Aggregated error details table.
+    pub error_details: Vec<ErrorDetailRow>,
+    /// Error counts by provider.
+    pub by_provider: Vec<ErrorEntityStat>,
+    /// Error counts by model.
+    pub by_model: Vec<ErrorEntityStat>,
+    /// Error counts by project.
+    pub by_project: Vec<ErrorEntityStat>,
+    /// Error status code category distribution.
+    pub status_breakdown: Vec<NamedCount>,
 }
 
 /// Series metadata for stacked cost chart.
@@ -943,8 +1277,12 @@ pub struct CostBucket {
     pub total_amount: f64,
     /// Number of unpriced requests in this bucket.
     pub unpriced_count: i64,
+    /// Number of billing script errors in this bucket.
+    pub script_error_count: i64,
     /// Cost breakdown by top models + `"other"`.
     pub by_model: BTreeMap<String, f64>,
+    /// Cost breakdown by top projects + `"other"`.
+    pub by_project: BTreeMap<String, f64>,
     /// Input token cost component.
     pub input_amount: f64,
     /// Output token cost component.
@@ -961,11 +1299,11 @@ pub struct CostBucket {
     pub avg_cost_per_request: f64,
 }
 
-/// Ranked project or model cost summary item.
+/// Ranked project, provider, or model cost summary item.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CostRankItem {
-    /// Project or model identifier.
+    /// Project, provider, or model identifier.
     pub id: String,
     /// Display name.
     pub name: String,
@@ -977,6 +1315,84 @@ pub struct CostRankItem {
     pub request_count: i64,
 }
 
+/// Detailed cost breakdown row for the `cost` main accounting table.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CostDetailRow {
+    /// Grouping dimension (`"model"`, `"project"`, or `"provider"`).
+    pub group_by: String,
+    /// Entity ID.
+    pub id: String,
+    /// Display name.
+    pub name: String,
+    /// Total converted cost.
+    pub total_amount: f64,
+    /// Share of dimension total percentage.
+    pub share_percent: f64,
+    /// Input cost component.
+    pub input_amount: f64,
+    /// Output cost component.
+    pub output_amount: f64,
+    /// Cache read + write cost component.
+    pub cache_amount: f64,
+    /// Other/storage cost component.
+    pub other_amount: f64,
+    /// Effective cost per 1M total tokens.
+    pub cost_per_1m_tokens: f64,
+    /// Total requests.
+    pub request_count: i64,
+    /// Unpriced requests.
+    pub unpriced_count: i64,
+}
+
+/// Raw currency total item.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CurrencyTotal {
+    /// 3-letter currency code.
+    pub currency: String,
+    /// Sum in original currency.
+    pub amount: f64,
+}
+
+/// Summary KPIs for the `cost` tab.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CostSummary {
+    /// Total converted spend.
+    pub total_amount: f64,
+    /// Overall unit cost per 1M tokens.
+    pub cost_per_1m_tokens: f64,
+    /// Overall average cost per priced request.
+    pub avg_cost_per_request: f64,
+    /// Total priced requests.
+    pub priced_count: i64,
+    /// Total unpriced requests.
+    pub unpriced_count: i64,
+    /// Total billing script error count.
+    pub script_error_count: i64,
+    /// Pricing coverage percentage (`0.0..=100.0`).
+    pub coverage_rate: f64,
+    /// Per-currency raw totals.
+    pub currency_totals: Vec<CurrencyTotal>,
+}
+
+/// Aggregated 5-bucket cost components over the active window.
+#[derive(Debug, Clone, Default, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CostComponentTotals {
+    /// Input cost sum.
+    pub input_amount: f64,
+    /// Output cost sum.
+    pub output_amount: f64,
+    /// Cache read cost sum.
+    pub cache_read_amount: f64,
+    /// Cache write cost sum.
+    pub cache_write_amount: f64,
+    /// Other/storage cost sum.
+    pub other_amount: f64,
+}
+
 /// Response payload for `GET /api/v1/stats/monitoring/cost`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -985,14 +1401,26 @@ pub struct CostMonitoringResponse {
     pub meta: MonitoringMeta,
     /// Target currency code used for chart values (if convertible).
     pub currency: Option<String>,
-    /// Ordered series keys for stacked cost chart.
+    /// Window cost summary KPIs.
+    pub summary: CostSummary,
+    /// Window 5-bucket component totals.
+    pub component_totals: CostComponentTotals,
+    /// Ordered series keys for stacked model cost chart.
     pub series_keys: Vec<CostSeriesMeta>,
+    /// Ordered series keys for stacked project cost chart.
+    pub project_series_keys: Vec<CostSeriesMeta>,
     /// Time-series cost, component breakdown, and unit efficiency buckets.
     pub buckets: Vec<CostBucket>,
     /// Top-10 projects by spend.
     pub rank_by_project: Vec<CostRankItem>,
     /// Top-10 models by spend.
     pub rank_by_model: Vec<CostRankItem>,
+    /// Top-10 providers by spend.
+    pub rank_by_provider: Vec<CostRankItem>,
+    /// Billing status counts (`priced`, `unpriced`, `script_error`, etc.).
+    pub billing_status_counts: Vec<NamedCount>,
+    /// Full accounting breakdown rows across models, projects, and providers.
+    pub detail_rows: Vec<CostDetailRow>,
 }
 
 /// Derives a deterministic slug ID from a provider display name when `id` is omitted.
