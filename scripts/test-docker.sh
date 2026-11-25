@@ -239,8 +239,8 @@ docker run --rm --network "$NET_NAME" \
   -v "$WORKDIR/cfg:/config:ro" \
   "$IMAGE" seed-demo --days 1 >/dev/null
 
-docker exec "$PG_NAME" psql -U linguist -d linguist -v ON_ERROR_STOP=1 <<'SQL'
-TRUNCATE catalog_provider_models, catalog_providers, catalog_project_models, catalog_projects, catalog_route_rules, request_logs, daily_model_stats RESTART IDENTITY;
+docker exec -i "$PG_NAME" psql -U linguist -d linguist -v ON_ERROR_STOP=1 <<'SQL'
+TRUNCATE catalog_provider_models, catalog_providers, catalog_project_models, catalog_projects, catalog_route_rules, request_logs, daily_model_stats RESTART IDENTITY CASCADE;
 INSERT INTO catalog_providers (id, name, icon, enabled, position, scripts, derived_hooks)
 VALUES
   ('mock-tls', 'Mock TLS Provider', 'openai', true, 1,
