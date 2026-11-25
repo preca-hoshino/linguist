@@ -3,6 +3,8 @@ host = "127.0.0.1"
 port = 9527
 # 上游连接和读取空闲超时；非流式请求同时受总时限约束
 upstream_timeout_secs = 600
+# 收到 SIGTERM/SIGINT 后等待流式连接与日志落盘的优雅退出秒数
+graceful_shutdown_secs = 60
 
 [database]
 # PostgreSQL 存储配置目录、日志与统计；启动时自动迁移
@@ -11,17 +13,15 @@ max_connections = 10
 log_error_payload = true
 log_full_payload = false
 
-[configs]
-# json_sync 将 JSON 同步到 PostgreSQL；postgres 只读取已导入的目录
-source = "json_sync"
-providers_path = "./chatLanguageModels.json"
-projects_path = "./projects.json"
-routes_path = "./routes.json"
-watch_reload = true
-
 [script_engine]
 timeout_ms = 50
 memory_limit_mb = 32
+net_timeout_ms = 2000
+billing_net_timeout_ms = 5000
+max_http_calls_per_stage = 3
+max_http_calls_billing = 3
+allow_private_network = false
+allowed_hosts = []
 fallback_status_codes = [429, 500, 502, 503, 504]
 
 [metrics]

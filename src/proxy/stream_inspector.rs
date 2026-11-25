@@ -1,6 +1,7 @@
 //! Zero-hook SSE and JSON response inspector measuring TTFT, `decode_tps`, `e2e_tps`,
 //! token usage extraction, fallback estimation, and optional response `model` rewriting.
 
+use std::collections::BTreeMap;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
@@ -60,8 +61,10 @@ pub struct InspectionMetadata {
     pub request_body: Option<Value>,
     /// Timestamp when upstream HTTP call started.
     pub t_start: Instant,
-    /// Billing context captured before the upstream request.
-    pub billing: crate::billing::AttemptBilling,
+    /// UTC timestamp when upstream HTTP call started.
+    pub started_at: chrono::DateTime<chrono::Utc>,
+    /// Catalog snapshot captured when the request started (used for async billing).
+    pub catalog_snapshot: Option<Arc<crate::catalog::RuntimeCatalog>>,
 }
 
 /// Extracted token counters and timing results computed by the inspector.
@@ -110,8 +113,10 @@ pub struct StreamTelemetryTracker {
     finish_reason: Option<String>,
     /// Extracted upstream usage fields when reported.
     usage: Option<ParsedUsage>,
-    /// Presence-preserving usage from the final upstream response.
-    billing_usage: Option<crate::billing::BillingUsage>,
+    /// Full raw `usage` JSON object from the final upstream chunk/response.
+    raw_usage: Option<Value>,
+    /// Non-standard numeric token counters extracted from `usage.*_details`.
+    extra_tokens: BTreeMap<String, i64>,
     /// Whether telemetry has already been finalized and emitted.
     finalized: bool,
 }
@@ -144,7 +149,8 @@ impl StreamTelemetryTracker {
             output_chars: 0,
             finish_reason: None,
             usage: None,
-            billing_usage: None,
+            raw_usage: None,
+            extra_tokens: BTreeMap::new(),
             finalized: false,
         }
     }
@@ -288,9 +294,11 @@ impl StreamTelemetryTracker {
             request_uid: self.meta.request_uid,
             parent_request_uid: Some(self.meta.parent_request_uid),
             attempt_index: self.meta.attempt_index,
+            started_at: self.meta.started_at,
             created_at: Utc::now(),
-            billing_usage: self.billing_usage.clone(),
-            billing: self.meta.billing.clone(),
+            interrupted: error_message.is_some(),
+            raw_usage: self.raw_usage.clone(),
+            catalog_snapshot: self.meta.catalog_snapshot.clone(),
             project_id: self.meta.project_id.clone(),
             project_name: self.meta.project_name.clone(),
             call_model_id: self.meta.call_model_id.clone(),
@@ -308,6 +316,7 @@ impl StreamTelemetryTracker {
             cache_creation_tokens: cache_creation,
             reasoning_tokens: reasoning,
             total_tokens: total,
+            extra_tokens: self.extra_tokens.clone(),
             ttft_ms,
             total_duration_ms,
             generation_duration_ms,
@@ -452,7 +461,7 @@ impl StreamTelemetryTracker {
                             })
                     })
             {
-                self.billing_usage = crate::billing::BillingUsage::from_response(val);
+                self.raw_usage = Some(Value::Object(usage.clone()));
             }
             let input_tokens = usage
                 .get("prompt_tokens")
@@ -488,6 +497,27 @@ impl StreamTelemetryTracker {
                 .and_then(|d| d.get("reasoning_tokens"))
                 .and_then(Value::as_i64)
                 .unwrap_or(0);
+
+            for detail_key in ["prompt_tokens_details", "completion_tokens_details"] {
+                if let Some(details) = usage.get(detail_key).and_then(Value::as_object) {
+                    for (k, v) in details {
+                        if matches!(
+                            k.as_str(),
+                            "cached_tokens"
+                                | "cache_write_tokens"
+                                | "cache_creation_tokens"
+                                | "reasoning_tokens"
+                        ) {
+                            continue;
+                        }
+                        if let Some(count) = v.as_i64()
+                            && count > 0
+                        {
+                            self.extra_tokens.insert(k.clone(), count);
+                        }
+                    }
+                }
+            }
 
             self.usage = Some(ParsedUsage {
                 prompt: input_tokens,
@@ -659,10 +689,6 @@ mod tests {
 
     fn test_meta(is_stream: bool, rewrite_model: bool) -> InspectionMetadata {
         InspectionMetadata {
-            billing: crate::billing::AttemptBilling {
-                price: crate::billing::PriceSnapshot::Missing,
-                target_matches: true,
-            },
             request_uid: Uuid::new_v4(),
             parent_request_uid: Uuid::new_v4(),
             attempt_index: 1,
@@ -684,6 +710,8 @@ mod tests {
             request_headers: None,
             request_body: None,
             t_start: Instant::now(),
+            started_at: Utc::now(),
+            catalog_snapshot: None,
         }
     }
 
@@ -725,24 +753,22 @@ mod tests {
         let mut tracker = StreamTelemetryTracker::new(test_meta(true, false));
         tracker.process_sse_chunk(b"data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":1,\"prompt_tokens_details\":{\"cached_tokens\":0}}}\n\n");
         let partial = tracker.finalize(None, None);
-        assert!(partial.is_some_and(|(_, record)| record.billing_usage.is_none()));
+        assert!(partial.is_some_and(|(_, record)| record.raw_usage.is_none()));
 
         let mut tracker = StreamTelemetryTracker::new(test_meta(true, false));
         tracker.process_sse_chunk(b"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":1,\"prompt_tokens_details\":{\"cached_tokens\":2,\"cache_write_tokens\":3}}}\n\n");
         let final_record = tracker.finalize(None, None);
         assert!(final_record.is_some_and(|(_, record)| {
-            record
-                .billing_usage
-                .is_some_and(|usage| usage.cache_read == Some(2) && usage.cache_write == Some(3))
+            record.raw_usage.is_some()
+                && record.cache_read_tokens == 2
+                && record.cache_creation_tokens == 3
         }));
 
         let mut tracker = StreamTelemetryTracker::new(test_meta(true, false));
         tracker.process_sse_chunk(b"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":9,\"completion_tokens\":1,\"prompt_tokens_details\":{\"cached_tokens\":2}}}\n\n");
         let final_record = tracker.finalize(None, None);
         assert!(final_record.is_some_and(|(_, record)| {
-            record
-                .billing_usage
-                .is_some_and(|usage| usage.cache_read == Some(2))
+            record.raw_usage.is_some() && record.cache_read_tokens == 2
         }));
     }
 

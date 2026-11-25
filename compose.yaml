@@ -4,22 +4,21 @@
 # 快速准备示范配置目录：
 #   mkdir -p docker/config
 #   cp config.docker.example.toml docker/config/config.toml
-#   cp chatLanguageModels.example.json docker/config/chatLanguageModels.json
-#   cp projects.json docker/config/projects.json
-#   cp routes.json docker/config/routes.json
 #
 # 用法（与本地二进制 CLI 完全一致）：
-#   docker compose run --rm linguist check-config   # 校验配置与脚本编译
+#   docker compose run --rm linguist check-config   # 校验 PostgreSQL 目录与脚本编译
+#   docker compose run --rm linguist seed-demo      # （可选）填充示范目录与多日测试数据
 #   docker compose up -d                            # 后台启动网关与看板
 #   docker compose logs -f linguist                 # 查看实时日志
 # ==============================================================================
 
 services:
   linguist:
-    # 生产环境建议通过 .env 中的 LINGUIST_TAG 固定版本号，例如 v0.1.0-b12-abcdef
+    # 生产环境建议通过 .env 中的 LINGUIST_TAG 固定版本号，例如 v0.2.0
     image: ghcr.io/preca-hoshino/linguist:${LINGUIST_TAG:-latest}
     container_name: linguist
     restart: unless-stopped
+    stop_grace_period: 65s
     # ─── 端口映射（默认仅监听本机回环，供 Nginx / OpenResty / Caddy 反向代理）───
     ports:
       - "127.0.0.1:9527:9527"

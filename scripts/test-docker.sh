@@ -88,118 +88,22 @@ cp "$WORKDIR/cfg/certs/ca.crt" "$WORKDIR/pg-certs/ca.crt"
 chmod 644 "$WORKDIR/cfg/certs/ca.crt" "$WORKDIR/pg-certs/server.crt" "$WORKDIR/pg-certs/ca.crt" "$WORKDIR/mock/server.crt"
 chmod 644 "$WORKDIR/pg-certs/server.key" "$WORKDIR/mock/server.key"
 
-echo "==> 3. Preparing read-only /config fixture (with @file script)"
-cat > "$WORKDIR/cfg/scripts/tag.js" <<'EOF'
-ctx.request.headers['x-ci-script'] = 'ok';
-EOF
-
-cat > "$WORKDIR/cfg/chatLanguageModels.json" <<'EOF'
-[
-  {
-    "id": "mock-tls",
-    "name": "Mock TLS Provider",
-    "apiKey": "sk-ci-mock",
-    "script": "@file:scripts/tag.js",
-    "models": [
-      {
-        "id": "mock-model",
-        "name": "Mock Model",
-        "url": "https://linguist-mock:8443",
-        "toolCalling": true,
-        "vision": false,
-        "thinking": false,
-        "streaming": true,
-        "maxInputTokens": 65536,
-        "maxOutputTokens": 8192
-      }
-    ]
-  },
-  {
-    "id": "public-https",
-    "name": "Public HTTPS Probe",
-    "apiKey": "sk-ci-public",
-    "models": [
-      {
-        "id": "pub-tls-probe",
-        "name": "Public TLS Probe",
-        "url": "https://api.github.com",
-        "streaming": false
-      }
-    ]
-  }
-]
-EOF
-
-cat > "$WORKDIR/cfg/projects.json" <<'EOF'
-[
-  {
-    "id": "coding",
-    "name": "CI Coding Project",
-    "apiKey": "lin-proj-coding-secret",
-    "callModels": [
-      {
-        "id": "smart-coder",
-        "name": "Smart Coder"
-      },
-      {
-        "id": "pub-tls-probe",
-        "name": "Public TLS Probe"
-      }
-    ]
-  }
-]
-EOF
-
-cat > "$WORKDIR/cfg/routes.json" <<'EOF'
-[
-  {
-    "id": "coding-mock",
-    "name": "Route Coding to Mock TLS",
-    "enabled": true,
-    "priority": 100,
-    "match": {
-      "projectIds": ["coding"],
-      "callModelIds": ["smart-coder"]
-    },
-    "rewriteResponseModel": true,
-    "target": { "providerId": "mock-tls", "modelId": "mock-model" }
-  },
-  {
-    "id": "coding-public-tls",
-    "name": "Route Public TLS Probe",
-    "enabled": true,
-    "priority": 90,
-    "match": {
-      "projectIds": ["coding"],
-      "callModelIds": ["pub-tls-probe"]
-    },
-    "rewriteResponseModel": false,
-    "target": { "providerId": "public-https", "modelId": "pub-tls-probe" }
-  }
-]
-EOF
+echo "==> 3. Preparing read-only /config fixture"
 
 write_config_toml() {
   local db_url="$1"
-  local catalog_source="${2:-json_files}"
   cat > "$WORKDIR/cfg/config.toml" <<EOF
 [server]
 host = "0.0.0.0"
 port = 9527
 upstream_timeout_secs = 30
+graceful_shutdown_secs = 15
 
 [database]
 url = "${db_url}"
 max_connections = 5
 log_error_payload = true
 log_full_payload = false
-
-[configs]
-source = "${catalog_source}"
-providers_path = "./chatLanguageModels.json"
-projects_path = "./projects.json"
-routes_path = "./routes.json"
-watch_reload = false
 
 [script_engine]
 timeout_ms = 50
@@ -228,21 +132,9 @@ EOF
   chmod 644 "$WORKDIR/cfg/config.toml" "$WORKDIR/cfg/secrets/oidc-client-secret"
 }
 
-chmod 644 "$WORKDIR/cfg/scripts/tag.js" "$WORKDIR/cfg/chatLanguageModels.json" "$WORKDIR/cfg/projects.json" "$WORKDIR/cfg/routes.json"
 write_config_toml "postgres://linguist:linguistpass@linguist-pg:5432/linguist?sslmode=verify-full&sslrootcert=/config/certs/ca.crt"
 
-echo "==> 4. Verifying unified check-config CLI behavior inside read-only container"
-CHECK_OUT="$(docker run --rm \
-  --read-only \
-  --cap-drop ALL \
-  --security-opt no-new-privileges:true \
-  --tmpfs /tmp:rw,noexec,nosuid,size=16m \
-  -v "$WORKDIR/cfg:/config:ro" \
-  "$IMAGE" check-config)"
-echo "$CHECK_OUT"
-echo "$CHECK_OUT" | grep -q "Config OK"
-
-echo "==> 5. Starting external TLS PostgreSQL and HTTPS mock upstream containers"
+echo "==> 4. Starting external TLS PostgreSQL and HTTPS mock upstream containers"
 docker network create "$NET_NAME" >/dev/null
 
 docker run -d --name "$PG_NAME" --network "$NET_NAME" --network-alias linguist-pg \
@@ -337,6 +229,60 @@ wait_healthz() {
 }
 
 echo "==> 6. Phase A: pure scratch without SSL_CERT_FILE (public HTTPS webpki + PG sslrootcert)"
+docker run --rm --network "$NET_NAME" \
+  --read-only \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+  -e LINGUIST_CATALOG_KEY \
+  -e LINGUIST_OIDC_ADMIN_SUB \
+  -v "$WORKDIR/cfg:/config:ro" \
+  "$IMAGE" seed-demo --days 1 >/dev/null
+
+docker exec "$PG_NAME" psql -U linguist -d linguist -v ON_ERROR_STOP=1 <<'SQL'
+TRUNCATE catalog_provider_models, catalog_providers, catalog_project_models, catalog_projects, catalog_route_rules, request_logs, daily_model_stats RESTART IDENTITY;
+INSERT INTO catalog_providers (id, name, icon, enabled, position, scripts, derived_hooks)
+VALUES
+  ('mock-tls', 'Mock TLS Provider', 'openai', true, 1,
+   '[{"id":"s1","name":"Tag","enabled":true,"code":"export function onRequest(ctx){ ctx.request.headers[\"x-ci-script\"]=\"ok\"; return ctx; }"}]'::jsonb,
+   ARRAY['onRequest']),
+  ('public-https', 'Public HTTPS Probe', 'openai', true, 2, '[]'::jsonb, ARRAY[]::text[]);
+INSERT INTO catalog_provider_models (provider_id, id, name, icon, enabled, position, scripts, derived_meta, derived_hooks)
+VALUES
+  ('mock-tls', 'mock-model', 'Mock Model', 'openai', true, 1,
+   '[{"id":"m1","name":"URL","enabled":true,"code":"export const meta={url:\"https://linguist-mock:8443\"};"}]'::jsonb,
+   '{"url":"https://linguist-mock:8443"}'::jsonb, ARRAY[]::text[]),
+  ('public-https', 'pub-tls-probe', 'Public TLS Probe', 'openai', true, 1,
+   '[{"id":"m2","name":"URL","enabled":true,"code":"export const meta={url:\"https://api.github.com\"};"}]'::jsonb,
+   '{"url":"https://api.github.com"}'::jsonb, ARRAY[]::text[]);
+INSERT INTO catalog_projects (id, name, icon, enabled, position, api_key)
+VALUES ('coding', 'CI Coding Project', 'openai', true, 1, 'lin-proj-coding-secret');
+INSERT INTO catalog_project_models (project_id, id, name, icon, enabled, position)
+VALUES
+  ('coding', 'smart-coder', 'Smart Coder', 'openai', true, 1),
+  ('coding', 'pub-tls-probe', 'Public TLS Probe', 'openai', true, 2);
+INSERT INTO catalog_route_rules (id, name, icon, enabled, position, scripts, derived_hooks)
+VALUES
+  ('coding-mock', 'Route Coding to Mock TLS', 'route', true, 1,
+   '[{"id":"r1","name":"Route","enabled":true,"code":"export function onRequest(ctx){ if(ctx.project.id===\"coding\" && ctx.callModel.id===\"smart-coder\"){ ctx.route.target={providerId:\"mock-tls\",modelId:\"mock-model\"}; ctx.route.rewriteResponseModel=true; } return ctx; }"}]'::jsonb,
+   ARRAY['onRequest']),
+  ('coding-public-tls', 'Route Public TLS Probe', 'route', true, 2,
+   '[{"id":"r2","name":"Route","enabled":true,"code":"export function onRequest(ctx){ if(ctx.project.id===\"coding\" && ctx.callModel.id===\"pub-tls-probe\"){ ctx.route.target={providerId:\"public-https\",modelId:\"pub-tls-probe\"}; ctx.route.rewriteResponseModel=false; } return ctx; }"}]'::jsonb,
+   ARRAY['onRequest']);
+UPDATE catalog_state SET revision = revision + 1 WHERE singleton;
+SQL
+
+CHECK_OUT="$(docker run --rm --network "$NET_NAME" \
+  --read-only \
+  --cap-drop ALL \
+  --security-opt no-new-privileges:true \
+  --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+  -e LINGUIST_CATALOG_KEY \
+  -v "$WORKDIR/cfg:/config:ro" \
+  "$IMAGE" check-config)"
+echo "$CHECK_OUT"
+echo "$CHECK_OUT" | grep -q "Config OK"
+
 docker run -d --name "$APP_NAME" --network "$NET_NAME" \
   --read-only \
   --cap-drop ALL \
@@ -426,8 +372,7 @@ sleep 1
 docker rm -f "$APP_NAME" >/dev/null
 
 echo "==> 8. Phase C: verifying the persisted catalog and telemetry in PostgreSQL-only mode"
-write_config_toml "postgres://linguist:linguistpass@linguist-pg:5432/linguist?sslmode=verify-full" postgres
-rm "$WORKDIR/cfg/chatLanguageModels.json" "$WORKDIR/cfg/projects.json" "$WORKDIR/cfg/routes.json"
+write_config_toml "postgres://linguist:linguistpass@linguist-pg:5432/linguist?sslmode=verify-full"
 
 docker run -d --name "$APP_NAME" --network "$NET_NAME" \
   --read-only \

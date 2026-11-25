@@ -45,14 +45,14 @@ echo "===> 4. Creating ${TARGET_DIR} layout..."
 $SUDO mkdir -p "${TARGET_DIR}/config" "${TARGET_DIR}/examples"
 $SUDO chmod 755 "${TARGET_DIR}" "${TARGET_DIR}/config" "${TARGET_DIR}/examples"
 
-for f in config.toml chatLanguageModels.json projects.json routes.json linguist.d.ts; do
+for f in config.toml linguist.d.ts; do
   if [ -f "${SOURCE_DIR}/${f}" ]; then
     echo "Copying ${SOURCE_DIR}/${f} -> ${TARGET_DIR}/config/${f}"
     $SUDO cp -a "${SOURCE_DIR}/${f}" "${TARGET_DIR}/config/${f}"
   fi
 done
 
-for ex in config.example.toml chatLanguageModels.example.json projects.example.json routes.example.json linguist.d.ts; do
+for ex in config.example.toml config.docker.example.toml linguist.d.ts; do
   if [ -f "${SOURCE_DIR}/${ex}" ]; then
     $SUDO cp -a "${SOURCE_DIR}/${ex}" "${TARGET_DIR}/examples/${ex}"
   fi

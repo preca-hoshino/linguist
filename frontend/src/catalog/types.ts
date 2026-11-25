@@ -1,56 +1,52 @@
-export type CatalogResource = "providers" | "provider-models" | "projects" | "project-models" | "routes";
+export type CatalogResource =
+  | "providers"
+  | "provider-models"
+  | "projects"
+  | "project-models"
+  | "routes";
 
 type JsonValue = null | boolean | number | string | JsonValue[] | JsonObject;
-export interface JsonObject { [key: string]: JsonValue }
+export interface JsonObject {
+  [key: string]: JsonValue;
+}
 
 export interface NamedItem {
   id: string;
   name: string;
 }
 
-interface IconItem extends NamedItem {
-  icon: string;
+export interface ScriptItem {
+  id: string;
+  name: string;
+  enabled: boolean;
+  code: string;
 }
 
-export interface ParentItem extends IconItem {
+interface CatalogBaseItem extends NamedItem {
+  icon: string;
+  enabled: boolean;
+  position: number;
+  scriptCount: number;
+  derivedTags: string[];
+  derivedMeta: JsonObject;
+  derivedHooks: string[];
+}
+
+export interface ParentItem extends CatalogBaseItem {
   modelCount: number;
 }
 
-export interface ProviderModel extends IconItem {
+export interface ProviderModel extends CatalogBaseItem {
   providerId: string;
   providerName: string;
-  hasPrice: boolean;
-  toolCalling: boolean | null;
-  vision: boolean | null;
-  thinking: boolean | null;
-  streaming: boolean | null;
-  supportsReasoningEffort: string[] | null;
-  maxInputTokens: number | null;
-  maxOutputTokens: number | null;
 }
 
-export interface ProjectModel extends IconItem {
+export interface ProjectModel extends CatalogBaseItem {
   projectId: string;
   projectName: string;
 }
 
-export interface RouteTarget {
-  providerId: string;
-  modelId: string;
-  maxAttempts: number;
-}
-
-export interface CatalogRoute extends NamedItem {
-  enabled: boolean;
-  priority: number;
-  match: { projectIds: string[]; callModelIds: string[] };
-  candidates: { allow: string[]; deny: string[] };
-  target: RouteTarget | null;
-  fallbacks: RouteTarget[];
-  rewriteResponseModel: boolean;
-  hasScript: boolean;
-  firstMatch: boolean;
-}
+export type CatalogRoute = CatalogBaseItem;
 
 export interface ListItems {
   providers: ParentItem;
@@ -62,20 +58,29 @@ export interface ListItems {
 
 export interface DetailItems {
   providers: ParentItem & {
-    vendor: string | null;
-    apiType: string | null;
     hasApiKey: boolean;
     models: NamedItem[];
+    scripts: ScriptItem[];
   };
-  "provider-models": ProviderModel & { url: string | null };
-  projects: ParentItem & { hasApiKey: boolean; meta: JsonObject; callModels: NamedItem[] };
-  "project-models": ProjectModel & { meta: JsonObject };
-  routes: CatalogRoute;
+  "provider-models": ProviderModel & {
+    scripts: ScriptItem[];
+  };
+  projects: ParentItem & {
+    apiKey: string;
+    callModels: NamedItem[];
+    scripts: ScriptItem[];
+  };
+  "project-models": ProjectModel & {
+    scripts: ScriptItem[];
+  };
+  routes: CatalogRoute & {
+    scripts: ScriptItem[];
+  };
 }
 
 export interface CatalogDetails<T extends CatalogResource> {
   revision: number;
-  item: DetailItems[T] & { script: string | null };
+  item: DetailItems[T];
 }
 
 export interface CatalogPageData<T extends CatalogResource> {
@@ -90,6 +95,35 @@ export interface CatalogStatus {
   revision: number;
   loadedRevision: number;
   updatedAt: string | null;
-  writeMode: "json_sync" | "postgres";
+  writeMode: "postgres";
   syncError: string | null;
+}
+
+export interface ValidateScriptsResult {
+  ok: boolean;
+  tags?: string[];
+  meta?: JsonObject;
+  hooks?: string[];
+  error?: string;
+  message?: string;
+}
+
+export interface DryRunCandidate {
+  providerId: string;
+  modelId: string;
+  status: string;
+  url?: string;
+  body?: JsonObject;
+  state?: JsonObject;
+  statusCode?: number;
+  message?: string;
+  error?: string;
+}
+
+export interface DryRunResult {
+  status: "ready" | "rejected";
+  routeRuleId?: string | null;
+  statusCode?: number;
+  message?: string;
+  candidates?: DryRunCandidate[];
 }

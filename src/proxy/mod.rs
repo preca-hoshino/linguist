@@ -20,7 +20,7 @@ use serde_json::{Map, Value, json};
 use tracing::{info, warn};
 use uuid::Uuid;
 
-use crate::billing::{AttemptBilling, PriceSnapshot};
+use crate::catalog::RuntimeCatalog;
 use crate::metrics_cache::MetricSample;
 use crate::models::{RequestLogRecord, ScriptContext};
 use crate::proxy::stream_inspector::{
@@ -79,7 +79,7 @@ async fn project_list_models(
     Path(project_id): Path<String>,
     headers: HeaderMap,
 ) -> Response {
-    let catalog = state.catalog.load();
+    let catalog = state.catalog.load_full();
     if let Some(err_resp) = verify_project_auth(&catalog, &project_id, &headers) {
         return err_resp;
     }
@@ -94,17 +94,17 @@ async fn project_chat_completions(
     headers: HeaderMap,
     Json(body): Json<Value>,
 ) -> Response {
-    let catalog = state.catalog.load();
+    let catalog = state.catalog.load_full();
     if let Some(err_resp) = verify_project_auth(&catalog, &project_id, &headers) {
         return err_resp;
     }
-    handle_routed_chat(state, &catalog, &project_id, body).await
+    handle_routed_chat(state, catalog, &project_id, body).await
 }
 
 /// Shared Stages ①..③ + upstream dispatch pipeline for `/model/{project_id}/v1/...`.
 async fn handle_routed_chat(
     state: AppState,
-    catalog: &crate::catalog::RuntimeCatalog,
+    catalog: Arc<RuntimeCatalog>,
     project_id: &str,
     body: Value,
 ) -> Response {
@@ -131,7 +131,7 @@ async fn handle_routed_chat(
 
     let parent_uid = Uuid::new_v4();
     match run_routing_stages(
-        catalog,
+        &catalog,
         &state.metrics,
         &state.engine,
         parent_uid,
@@ -141,7 +141,7 @@ async fn handle_routed_chat(
     )
     .await
     {
-        Ok(StageOutcome::Ready(plan)) => dispatch_plan(&state, catalog, parent_uid, plan).await,
+        Ok(StageOutcome::Ready(plan)) => dispatch_plan(&state, &catalog, parent_uid, plan).await,
         Ok(StageOutcome::Rejected(reject)) => {
             let status =
                 StatusCode::from_u16(reject.status_code).unwrap_or(StatusCode::BAD_REQUEST);
@@ -170,7 +170,7 @@ enum AttemptOutcome {
 /// fallback on transport error or configured HTTP fallback status codes.
 async fn dispatch_plan(
     state: &AppState,
-    catalog: &crate::catalog::RuntimeCatalog,
+    catalog: &Arc<RuntimeCatalog>,
     parent_uid: Uuid,
     plan: RoutingPlan,
 ) -> Response {
@@ -210,7 +210,7 @@ async fn dispatch_plan(
 /// Attempts Stages ④ & ⑤ preparation and upstream HTTP execution for one endpoint.
 async fn try_single_endpoint(
     state: &AppState,
-    catalog: &crate::catalog::RuntimeCatalog,
+    catalog: &Arc<RuntimeCatalog>,
     parent_uid: Uuid,
     plan: &RoutingPlan,
     idx: usize,
@@ -276,13 +276,13 @@ async fn try_single_endpoint(
 
     send_upstream_attempt(
         state,
+        catalog,
         plan,
         &attempt_ctx,
         &provider.id,
         &provider.name,
         &model.id,
         &model.name,
-        &crate::models::normalize_chat_completions_url(&model.url),
         attempt_uid,
         parent_uid,
         attempt_num,
@@ -297,13 +297,13 @@ async fn try_single_endpoint(
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 async fn send_upstream_attempt(
     state: &AppState,
+    catalog: &Arc<RuntimeCatalog>,
     plan: &RoutingPlan,
     attempt_ctx: &ScriptContext,
     provider_id: &str,
     provider_name: &str,
     model_id: &str,
     model_name: &str,
-    expected_url: &str,
     attempt_uid: Uuid,
     parent_uid: Uuid,
     attempt_num: u16,
@@ -311,43 +311,19 @@ async fn send_upstream_attempt(
     outbound_body: Map<String, Value>,
     has_more: bool,
 ) -> AttemptOutcome {
-    let price = if state.log_writer.is_none() {
-        PriceSnapshot::Missing
-    } else if let Some(pool) = &state.db_pool {
-        match tokio::time::timeout(
-            Duration::from_secs(2),
-            crate::billing::load_price(pool, provider_id, model_id),
-        )
-        .await
-        {
-            Ok(Ok(Some(price))) => PriceSnapshot::Available(price),
-            Ok(Ok(None)) => PriceSnapshot::Missing,
-            Ok(Err(error)) => {
-                warn!(%error, "failed to load model price");
-                PriceSnapshot::Unavailable
-            }
-            Err(error) => {
-                warn!(%error, "timed out loading model price");
-                PriceSnapshot::Unavailable
-            }
-        }
-    } else {
-        PriceSnapshot::Missing
-    };
-    let billing = AttemptBilling {
-        price,
-        target_matches: outbound_body.get("model").and_then(Value::as_str) == Some(model_id)
-            && attempt_ctx.request.url == expected_url,
-    };
     let t_start = Instant::now();
+    let started_at = Utc::now();
     let mut req_builder = state.http_client.post(&attempt_ctx.request.url);
     for (k, v) in &outbound_headers {
         req_builder = req_builder.header(k, v);
     }
     if outbound_body.get("stream").and_then(Value::as_bool) != Some(true) {
-        req_builder = req_builder.timeout(Duration::from_secs(
-            state.config.server.upstream_timeout_secs.max(5),
-        ));
+        let timeout_secs = attempt_ctx
+            .request
+            .timeout_secs
+            .unwrap_or(state.config.server.upstream_timeout_secs)
+            .max(5);
+        req_builder = req_builder.timeout(Duration::from_secs(timeout_secs));
     }
 
     let upstream_res = match req_builder.json(&outbound_body).send().await {
@@ -356,6 +332,7 @@ async fn send_upstream_attempt(
             let elapsed_ms = t_start.elapsed().as_secs_f64() * 1000.0;
             record_failed_attempt(
                 state,
+                catalog,
                 attempt_ctx,
                 plan,
                 provider_name.to_string(),
@@ -367,7 +344,7 @@ async fn send_upstream_attempt(
                 elapsed_ms,
                 format!("upstream request error: {err}"),
                 None,
-                billing,
+                started_at,
             );
             if has_more {
                 warn!(attempt = attempt_num, provider = %provider_id, model = %model_id, error = %err, "upstream connection failed; falling back");
@@ -389,14 +366,15 @@ async fn send_upstream_attempt(
         .and_then(|v| v.to_str().ok())
         .map(str::to_string);
 
-    if state
-        .config
-        .script_engine
-        .fallback_status_codes
-        .contains(&status_u16)
-    {
+    let fallback_codes = attempt_ctx
+        .request
+        .retry_status_codes
+        .as_deref()
+        .unwrap_or(&state.config.script_engine.fallback_status_codes);
+    if fallback_codes.contains(&status_u16) {
         return handle_fallback_status(
             state,
+            catalog,
             plan,
             attempt_ctx,
             provider_id,
@@ -410,8 +388,8 @@ async fn send_upstream_attempt(
             status,
             content_type,
             t_start,
+            started_at,
             has_more,
-            billing,
         )
         .await;
     }
@@ -423,6 +401,7 @@ async fn send_upstream_attempt(
 
     let meta = build_inspection_metadata(
         state,
+        catalog,
         attempt_ctx,
         plan,
         &outbound_headers,
@@ -435,7 +414,7 @@ async fn send_upstream_attempt(
         i32::from(status_u16),
         is_sse,
         t_start,
-        billing,
+        started_at,
     );
 
     if is_sse {
@@ -451,6 +430,7 @@ async fn send_upstream_attempt(
 #[allow(clippy::too_many_arguments)]
 async fn handle_fallback_status(
     state: &AppState,
+    catalog: &Arc<RuntimeCatalog>,
     plan: &RoutingPlan,
     attempt_ctx: &ScriptContext,
     provider_id: &str,
@@ -464,8 +444,8 @@ async fn handle_fallback_status(
     status: StatusCode,
     content_type: Option<String>,
     t_start: Instant,
+    started_at: chrono::DateTime<Utc>,
     has_more: bool,
-    billing: AttemptBilling,
 ) -> AttemptOutcome {
     let status_u16 = status.as_u16();
     let err_bytes = upstream_res.bytes().await.unwrap_or_default();
@@ -474,6 +454,7 @@ async fn handle_fallback_status(
     let resp_json: Option<Value> = serde_json::from_slice(&err_bytes).ok();
     record_failed_attempt(
         state,
+        catalog,
         attempt_ctx,
         plan,
         provider_name.to_string(),
@@ -485,7 +466,7 @@ async fn handle_fallback_status(
         elapsed_ms,
         format!("HTTP {status_u16}: {err_text}"),
         resp_json,
-        billing,
+        started_at,
     );
     if has_more {
         warn!(
@@ -505,7 +486,10 @@ fn prepare_outbound_payload(
     api_key: &str,
 ) -> (BTreeMap<String, String>, Map<String, Value>) {
     let mut outbound_body = attempt_ctx.request.body.clone();
-    if attempt_ctx.request.signals.is_stream && !outbound_body.contains_key("stream_options") {
+    if attempt_ctx.request.signals.is_stream
+        && attempt_ctx.request.inject_stream_options
+        && !outbound_body.contains_key("stream_options")
+    {
         outbound_body.insert(
             "stream_options".to_string(),
             json!({ "include_usage": true }),
@@ -701,6 +685,7 @@ fn redact_headers_json(headers: &BTreeMap<String, String>) -> Value {
 #[allow(clippy::too_many_arguments)]
 fn build_inspection_metadata(
     state: &AppState,
+    catalog: &Arc<RuntimeCatalog>,
     ctx: &ScriptContext,
     plan: &RoutingPlan,
     headers: &BTreeMap<String, String>,
@@ -713,7 +698,7 @@ fn build_inspection_metadata(
     status_code: i32,
     is_stream: bool,
     t_start: Instant,
-    billing: AttemptBilling,
+    started_at: chrono::DateTime<Utc>,
 ) -> InspectionMetadata {
     let keep_req_payload = state.config.database.log_full_payload
         || (state.config.database.log_error_payload && status_code >= 400);
@@ -739,7 +724,7 @@ fn build_inspection_metadata(
         provider_name,
         model_id,
         model_name,
-        route_rule_id: ctx.route.rule_id.clone(),
+        route_rule_id: ctx.route.rule_id.clone().unwrap_or_default(),
         status_code,
         is_stream,
         rewrite_response_model: ctx.route.rewrite_response_model,
@@ -752,7 +737,8 @@ fn build_inspection_metadata(
         request_headers: keep_req_payload.then(|| redact_headers_json(headers)),
         request_body: keep_req_payload.then(|| Value::Object(body.clone())),
         t_start,
-        billing,
+        started_at,
+        catalog_snapshot: Some(Arc::clone(catalog)),
     }
 }
 
@@ -760,6 +746,7 @@ fn build_inspection_metadata(
 #[allow(clippy::too_many_arguments)]
 fn record_failed_attempt(
     state: &AppState,
+    catalog: &Arc<RuntimeCatalog>,
     ctx: &ScriptContext,
     plan: &RoutingPlan,
     provider_name: String,
@@ -771,7 +758,7 @@ fn record_failed_attempt(
     elapsed_ms: f64,
     error_message: String,
     response_body: Option<Value>,
-    billing: AttemptBilling,
+    started_at: chrono::DateTime<Utc>,
 ) {
     let provider_id = ctx
         .provider
@@ -801,10 +788,10 @@ fn record_failed_attempt(
         parent_request_uid: Some(parent_request_uid),
         attempt_index: i16::try_from(attempt_num).unwrap_or(i16::MAX),
         created_at: now,
-        billing_usage: response_body
-            .as_ref()
-            .and_then(crate::billing::BillingUsage::from_response),
-        billing,
+        started_at,
+        interrupted: false,
+        raw_usage: response_body.as_ref().and_then(|v| v.get("usage")).cloned(),
+        catalog_snapshot: Some(Arc::clone(catalog)),
         project_id: ctx.project.id.clone(),
         project_name: plan.project_name.clone(),
         call_model_id: ctx.call_model.id.clone(),
@@ -813,7 +800,7 @@ fn record_failed_attempt(
         provider_name,
         model_id,
         model_name,
-        route_rule_id: ctx.route.rule_id.clone(),
+        route_rule_id: ctx.route.rule_id.clone().unwrap_or_default(),
         is_stream: ctx.request.signals.is_stream,
         status_code,
         input_tokens: 0,
@@ -821,6 +808,7 @@ fn record_failed_attempt(
         cache_read_tokens: 0,
         cache_creation_tokens: 0,
         reasoning_tokens: 0,
+        extra_tokens: BTreeMap::new(),
         total_tokens: 0,
         ttft_ms: elapsed_ms,
         total_duration_ms: elapsed_ms,

@@ -27,31 +27,61 @@ use crate::models::{
 /// Embedded `SQLx` migrations from `./migrations`.
 static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("./migrations");
 
+/// Message sent to the background telemetry log writer task.
+#[derive(Debug)]
+enum LogWriterMsg {
+    /// Persist one completed request telemetry record.
+    Record(Box<RequestLogRecord>),
+    /// Flush all prior records and acknowledge completion.
+    Flush(tokio::sync::oneshot::Sender<()>),
+}
+
 /// Async handle used by the proxy gateway to enqueue completed request telemetry
 /// without blocking HTTP response delivery.
 #[derive(Debug, Clone)]
 pub struct LogWriterHandle {
     /// Bounded MPSC sender feeding the background DB writer task.
-    tx: mpsc::Sender<RequestLogRecord>,
+    tx: mpsc::Sender<LogWriterMsg>,
 }
 
 impl LogWriterHandle {
     /// Spawns the background log writer task and returns a cloneable handle.
     #[must_use]
-    pub fn spawn(pool: PgPool, config: DatabaseConfig, tz_offset_secs: i32) -> Self {
-        let (tx, mut rx) = mpsc::channel::<RequestLogRecord>(1024);
+    pub fn spawn(
+        pool: PgPool,
+        config: DatabaseConfig,
+        tz_offset_secs: i32,
+        engine: crate::script_engine::ScriptEngine,
+    ) -> Self {
+        let (tx, mut rx) = mpsc::channel::<LogWriterMsg>(1024);
         tokio::spawn(async move {
-            while let Some(record) = rx.recv().await {
-                for attempt in 1..=3 {
-                    match persist_request_log(&pool, &config, tz_offset_secs, &record).await {
-                        Ok(()) => break,
-                        Err(err) => {
-                            error!(request_uid = %record.request_uid, attempt, error = %err,
-                                "failed to persist request telemetry to PostgreSQL");
-                            if attempt < 3 {
-                                tokio::time::sleep(std::time::Duration::from_secs(attempt)).await;
+            while let Some(msg) = rx.recv().await {
+                match msg {
+                    LogWriterMsg::Record(mut record) => {
+                        for attempt in 1..=3 {
+                            match persist_request_log(
+                                &pool,
+                                &config,
+                                tz_offset_secs,
+                                &engine,
+                                &mut record,
+                            )
+                            .await
+                            {
+                                Ok(()) => break,
+                                Err(err) => {
+                                    error!(request_uid = %record.request_uid, attempt, error = %err,
+                                        "failed to persist request telemetry to PostgreSQL");
+                                    if attempt < 3 {
+                                        tokio::time::sleep(std::time::Duration::from_secs(attempt))
+                                            .await;
+                                    }
+                                }
                             }
                         }
+                    }
+                    LogWriterMsg::Flush(ack) => {
+                        let _ = ack.send(());
                     }
                 }
             }
@@ -61,8 +91,16 @@ impl LogWriterHandle {
 
     /// Enqueues a request log record for asynchronous database insertion.
     pub fn send(&self, record: RequestLogRecord) {
-        if let Err(err) = self.tx.try_send(record) {
+        if let Err(err) = self.tx.try_send(LogWriterMsg::Record(Box::new(record))) {
             warn!(error = %err, "telemetry log channel full or closed; dropping record");
+        }
+    }
+
+    /// Waits for all previously enqueued telemetry records to flush to PostgreSQL.
+    pub async fn flush_and_shutdown(&self, timeout: std::time::Duration) {
+        let (ack_tx, ack_rx) = tokio::sync::oneshot::channel();
+        if self.tx.send(LogWriterMsg::Flush(ack_tx)).await.is_ok() {
+            let _ = tokio::time::timeout(timeout, ack_rx).await;
         }
     }
 }
@@ -334,10 +372,11 @@ async fn persist_request_log(
     pool: &PgPool,
     config: &DatabaseConfig,
     tz_offset_secs: i32,
-    rec: &RequestLogRecord,
+    engine: &crate::script_engine::ScriptEngine,
+    rec: &mut RequestLogRecord,
 ) -> Result<()> {
+    let billing = crate::billing::evaluate_record_billing(engine, rec).await;
     let mut tx = pool.begin().await?;
-    let billing = crate::billing::calculate_for_record(rec);
     let Some(log_id) = insert_request_log_row(&mut tx, rec, &billing).await? else {
         tx.commit().await?;
         return Ok(());
@@ -377,7 +416,7 @@ async fn insert_request_log_row(
             cache_read_tokens, cache_creation_tokens, reasoning_tokens, total_tokens,
             ttft_ms, total_duration_ms, generation_duration_ms, decode_tps, e2e_tps,
             finish_reason, reasoning_effort, token_source, script_state,
-            billing_amount, billing_currency, billing_status, billing_details
+            billing_amount, billing_currency, billing_status, billing_details, extra_tokens
         )
         VALUES (
             $1, $2, $3, $4,
@@ -386,7 +425,7 @@ async fn insert_request_log_row(
             $14, $15, $16, $17,
             $18, $19, $20, $21,
             $22, $23, $24, $25, $26,
-            $27, $28, $29, $30, $31, $32, $33, $34
+            $27, $28, $29, $30, $31, $32, $33, $34, $35
         )
         ON CONFLICT (request_uid) DO NOTHING
         RETURNING id
@@ -424,8 +463,9 @@ async fn insert_request_log_row(
     .bind(&rec.script_state)
     .bind(billing.amount)
     .bind(&billing.currency)
-    .bind(billing.status)
+    .bind(&billing.status)
     .bind(&billing.details)
+    .bind(serde_json::to_value(&rec.extra_tokens)?)
     .fetch_optional(&mut **tx)
     .await?;
 
@@ -697,11 +737,10 @@ fn build_demo_record(
         parent_request_uid: Some(uid),
         attempt_index,
         created_at: ts,
-        billing_usage: None,
-        billing: crate::billing::AttemptBilling {
-            price: crate::billing::PriceSnapshot::Missing,
-            target_matches: true,
-        },
+        started_at: ts,
+        interrupted: false,
+        raw_usage: None,
+        catalog_snapshot: None,
         project_id: project_id.to_string(),
         project_name: project_name.to_string(),
         call_model_id: call_model_id.to_string(),
@@ -718,6 +757,7 @@ fn build_demo_record(
         cache_read_tokens,
         cache_creation_tokens: 0,
         reasoning_tokens,
+        extra_tokens: BTreeMap::new(),
         total_tokens,
         ttft_ms,
         total_duration_ms,
@@ -743,6 +783,7 @@ fn build_demo_record(
 pub async fn seed_demo(
     pool: &PgPool,
     catalog: &RuntimeCatalog,
+    engine: &crate::script_engine::ScriptEngine,
     tz_offset_secs: i32,
     days: u32,
 ) -> Result<usize> {
@@ -768,9 +809,9 @@ pub async fn seed_demo(
 
         for idx in 0..reqs_today {
             let pick = usize::try_from(next_demo_rand(&mut rng_state)).unwrap_or(0) % entries.len();
-            let rec = build_demo_record(entries[pick], day_base, idx, &mut rng_state);
+            let mut rec = build_demo_record(entries[pick], day_base, idx, &mut rng_state);
             let stat_date = local_stat_date(rec.created_at, tz_offset_secs);
-            let billing = crate::billing::calculate_for_record(&rec);
+            let billing = crate::billing::evaluate_record_billing(engine, &mut rec).await;
             insert_request_log_row(&mut tx, &rec, &billing).await?;
             upsert_daily_stats(&mut tx, stat_date, &rec).await?;
             inserted += 1;
@@ -1156,7 +1197,8 @@ pub async fn query_recent_requests(
             project_id, project_name, call_model_id, call_model_name,
             provider_id, provider_name, model_id, model_name,
             route_rule_id, attempt_index, status_code, is_stream,
-            input_tokens, output_tokens, cache_read_tokens, reasoning_tokens, total_tokens,
+            input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+            reasoning_tokens, extra_tokens, total_tokens,
             ttft_ms, total_duration_ms, decode_tps, e2e_tps
         FROM request_logs
         WHERE ($1::TEXT IS NULL OR project_id = $1)
@@ -1216,7 +1258,13 @@ pub async fn query_recent_requests(
             input_tokens: row.try_get("input_tokens")?,
             output_tokens: row.try_get("output_tokens")?,
             cache_read_tokens: row.try_get("cache_read_tokens")?,
+            cache_creation_tokens: row.try_get("cache_creation_tokens")?,
             reasoning_tokens: row.try_get("reasoning_tokens")?,
+            extra_tokens: row
+                .try_get::<Value, _>("extra_tokens")
+                .ok()
+                .and_then(|v| serde_json::from_value(v).ok())
+                .unwrap_or_default(),
             total_tokens: row.try_get("total_tokens")?,
             ttft_ms: row.try_get("ttft_ms")?,
             total_duration_ms: row.try_get("total_duration_ms")?,
@@ -1264,30 +1312,8 @@ mod tests {
 
     #[sqlx::test(migrations = "./migrations")]
     #[ignore = "requires a disposable PostgreSQL server via DATABASE_URL"]
-    async fn billing_persists_captured_price_once_after_update(pool: PgPool) -> Result<()> {
-        use crate::billing::{
-            AttemptBilling, BillingUsage, CacheWriteMode, PriceSchedule, PriceSnapshot, PriceTier,
-        };
+    async fn billing_persists_unpriced_and_deduplicates_request_uid(pool: PgPool) -> Result<()> {
         let now = Utc::now();
-        let schedule = PriceSchedule {
-            provider_id: "provider".into(),
-            model_id: "model".into(),
-            currency: "USD".into(),
-            source: String::new(),
-            max_input_tokens: None,
-            tiers: vec![PriceTier {
-                min_input_tokens: 0,
-                input_price: "2".into(),
-                output_price: "8".into(),
-                cache_read_price: Some("0.5".into()),
-                cache_write_mode: CacheWriteMode::Separate,
-                cache_write_price: Some("2.5".into()),
-            }],
-        };
-        sqlx::query("UPDATE catalog_state SET billing_prices=$1 WHERE singleton")
-            .bind(serde_json::to_value(vec![schedule.clone()])?)
-            .execute(&pool)
-            .await?;
         let mut rng = 5;
         let mut record = build_demo_record(
             ("provider", "Provider", "model", "Model", 10.0, 20.0),
@@ -1295,44 +1321,17 @@ mod tests {
             0,
             &mut rng,
         );
-        let captured = crate::billing::load_price(&pool, "provider", "model").await?;
-        assert!(captured.is_some());
-        record.billing = AttemptBilling {
-            price: PriceSnapshot::Available(
-                captured.ok_or_else(|| anyhow::anyhow!("price missing"))?,
-            ),
-            target_matches: true,
-        };
-        record.billing_usage = Some(BillingUsage {
-            prompt: Some(40_000),
-            completion: Some(2_000),
-            cache_read: Some(30_000),
-            cache_write: Some(2_000),
-            ..BillingUsage::default()
-        });
-        let mut updated = schedule;
-        updated.tiers[0].input_price = "100".into();
-        sqlx::query("UPDATE catalog_state SET billing_prices=$1 WHERE singleton")
-            .bind(serde_json::to_value(vec![updated])?)
-            .execute(&pool)
-            .await?;
         let config = DatabaseConfig::default();
-        persist_request_log(&pool, &config, 0, &record).await?;
-        persist_request_log(&pool, &config, 0, &record).await?;
-        let (amount, status): (String, String) = sqlx::query_as(
-            "SELECT billing_amount::text, billing_status FROM request_logs WHERE request_uid=$1",
-        )
-        .bind(record.request_uid)
-        .fetch_one(&pool)
-        .await?;
-        assert_eq!(amount.parse::<rust_decimal::Decimal>()?, "0.052".parse()?);
-        assert_eq!(status, "priced");
-        let details: Value =
-            sqlx::query_scalar("SELECT billing_details FROM request_logs WHERE request_uid=$1")
+        let engine =
+            crate::script_engine::ScriptEngine::new(crate::config::ScriptEngineConfig::default());
+        persist_request_log(&pool, &config, 0, &engine, &mut record).await?;
+        persist_request_log(&pool, &config, 0, &engine, &mut record).await?;
+        let status: String =
+            sqlx::query_scalar("SELECT billing_status FROM request_logs WHERE request_uid=$1")
                 .bind(record.request_uid)
                 .fetch_one(&pool)
                 .await?;
-        assert_eq!(details["tier"]["inputPrice"], "2");
+        assert_eq!(status, "unpriced");
         let count: i64 = sqlx::query_scalar(
             "SELECT request_count FROM daily_model_stats WHERE provider_id='provider'",
         )

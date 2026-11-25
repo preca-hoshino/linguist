@@ -1,85 +1,14 @@
-export default function handle(ctx: ScriptContext): ScriptContext | void;
-
-export interface ScriptContext {
-  /** 1. 当前执行阶段（只读，统一 camelCase） */
-  readonly stage: "project" | "callModel" | "route" | "model" | "provider";
-
-  /** 2. 消费侧项目（1:1 映射 projects.json[]，已脱敏 apiKey 与 script） */
-  readonly project: ProjectMeta;
-
-  /** 3. 消费侧调用模型（1:1 映射 projects.json[].callModels[]） */
-  readonly callModel: CallModelMeta;
-
-  /** 4. 供给侧提供商（1:1 映射 chatLanguageModels.json[]；③ 选路前为 null，④⑤ 填充） */
-  readonly provider: ProviderMeta | null;
-
-  /** 5. 供给侧模型（1:1 映射 chatLanguageModels.json[].models[] 原字段，零重命名；③ 前为 null） */
-  readonly model: ModelMeta | null;
-
-  /** 6. 路由控制状态（1:1 映射 routes.json 字段） */
-  route: {
-    readonly ruleId: string;
-    candidates: CandidateItem[];
-    target: RouteEndpoint | null;
-    fallbacks: RouteEndpoint[];
-    rewriteResponseModel: boolean;
-  };
-
-  /** 7. 出站 HTTP 请求（全 5 层均可直接修改 url / headers / body） */
-  request: {
-    readonly uid: string;
-    readonly attempt: number;
-    url: string;
-    headers: Record<string, string>;
-    body: Record<string, unknown>;
-    readonly signals: {
-      isStream: boolean;
-      hasVisionImages: boolean;
-      hasTools: boolean;
-      messageCount: number;
-      estimatedInputChars: number;
-    };
-  };
-
-  /** 8. 跨 ① -> ⑤ 自由传递的状态袋 */
-  state: Record<string, unknown>;
-
-  /** 9. 中断控制（任一层置非 null 即立刻中止请求并响应 HTTP 错误） */
-  reject: { statusCode: number; message: string } | null;
+export interface EntityInfo {
+  readonly id: string;
+  readonly name: string;
+  readonly icon: string;
+  readonly tags: readonly string[];
+  readonly meta: Readonly<Record<string, unknown>>;
 }
 
-export interface ProjectMeta {
-  id: string;
-  name: string;
-  icon?: string;
-  meta: Record<string, unknown>;
-}
-
-export interface CallModelMeta {
-  id: string;
-  name: string;
-  icon?: string;
-  meta: Record<string, unknown>;
-}
-
-export interface ProviderMeta {
-  id: string;
-  name: string;
-  icon?: string;
-}
-
-export interface ModelMeta {
-  id: string;
-  name: string;
-  icon?: string;
-  url: string;
-  supportsReasoningEffort?: string[];
-  toolCalling?: boolean;
-  vision?: boolean;
-  thinking?: boolean;
-  streaming?: boolean;
-  maxInputTokens?: number;
-  maxOutputTokens?: number;
+export interface ProviderInfo extends EntityInfo {
+  /** Only populated in stage ④ Model / ⑤ Provider / onBilling; scrubbed from persisted logs. */
+  readonly apiKey: string;
 }
 
 export interface RouteEndpoint {
@@ -90,12 +19,151 @@ export interface RouteEndpoint {
 }
 
 export interface CandidateItem {
-  provider: ProviderMeta;
-  model: ModelMeta;
-  metrics: {
-    avgDecodeTps?: number;
-    p50DecodeTps?: number;
-    avgTtftMs?: number;
-    errorRate?: number;
+  readonly provider: EntityInfo;
+  readonly model: EntityInfo;
+  readonly metrics: {
+    readonly avgDecodeTps?: number;
+    readonly p50DecodeTps?: number;
+    readonly avgTtftMs?: number;
+    readonly errorRate?: number;
   };
 }
+
+export interface ScriptContext {
+  readonly stage: "project" | "callModel" | "route" | "model" | "provider";
+  readonly project: EntityInfo;
+  readonly callModel: EntityInfo;
+  readonly routeInfo: EntityInfo | null;
+  readonly provider: ProviderInfo | null;
+  readonly model: EntityInfo | null;
+
+  route: {
+    readonly ruleId: string | null;
+    candidates: CandidateItem[];
+    target: RouteEndpoint | null;
+    fallbacks: RouteEndpoint[];
+    continue?: boolean;
+    rewriteResponseModel: boolean;
+  };
+
+  request: {
+    readonly uid: string;
+    readonly attempt: number;
+    url: string;
+    headers: Record<string, string>;
+    body: Record<string, unknown>;
+    injectStreamOptions: boolean;
+    timeoutSecs?: number;
+    retryStatusCodes?: number[];
+    readonly signals: {
+      readonly isStream: boolean;
+      readonly hasVisionImages: boolean;
+      readonly hasTools: boolean;
+      readonly messageCount: number;
+      readonly estimatedInputChars: number;
+    };
+  };
+
+  state: Record<string, unknown>;
+  reject: { statusCode: number; message: string } | null;
+}
+
+export type CostItemKind = "input" | "output" | "cache_read" | "cache_write" | "other";
+
+export interface BillingDraft {
+  setCurrency(currency: string): void;
+  setStatus(status: "priced" | "estimated" | "free" | "unpriced"): void;
+  addItem(item: {
+    label: string;
+    amount: string | number;
+    kind?: CostItemKind;
+    quantity?: string;
+    unitPrice?: string;
+  }): void;
+  addInput(label: string, amount: string | number, quantity?: string, unitPrice?: string): void;
+  addOutput(label: string, amount: string | number, quantity?: string, unitPrice?: string): void;
+  addCacheRead(label: string, amount: string | number, quantity?: string, unitPrice?: string): void;
+  addCacheWrite(label: string, amount: string | number, quantity?: string, unitPrice?: string): void;
+  addOther(label: string, amount: string | number, quantity?: string, unitPrice?: string): void;
+  setTotal(currency: string, amount: string | number, label?: string): void;
+  reset(): void;
+  freeze(): void;
+  setMeta(key: string, value: unknown): void;
+  overrideUsage(patch: {
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+    reasoningTokens?: number;
+    extraTokens?: Record<string, number>;
+  }): void;
+}
+
+export interface BillingContext {
+  readonly requestStartedAtUtc: string;
+  readonly completedAtUtc: string;
+  readonly attempt: number;
+  readonly statusCode: number;
+  readonly isStream: boolean;
+  readonly interrupted: boolean;
+  readonly project: EntityInfo;
+  readonly callModel: EntityInfo;
+  readonly provider: ProviderInfo;
+  readonly model: EntityInfo;
+  readonly state: Readonly<Record<string, unknown>>;
+  readonly timings: {
+    readonly ttftMs: number;
+    readonly totalDurationMs: number;
+    readonly generationDurationMs: number;
+    readonly decodeTps: number;
+  };
+  readonly tokens: {
+    readonly input: number;
+    readonly output: number;
+    readonly cacheRead: number;
+    readonly cacheCreation: number;
+    readonly reasoning: number;
+    readonly total: number;
+    readonly extra: Readonly<Record<string, number>>;
+    readonly source: "upstream_usage" | "fallback_estimated";
+  };
+  readonly rawUsage: Readonly<Record<string, unknown>> | null;
+  readonly draft: BillingDraft;
+}
+
+export interface StandardPriceTier {
+  minInputTokens: number;
+  inputPrice: string;
+  outputPrice: string;
+  cacheReadPrice?: string | null;
+  cacheWriteMode: "input" | "separate" | "unsupported";
+  cacheWritePrice?: string | null;
+}
+
+export interface StandardPricingSpec {
+  currency: string;
+  source?: string;
+  maxInputTokens?: number | null;
+  tiers: StandardPriceTier[];
+}
+
+export interface HttpFetchOptions {
+  method?: "GET" | "POST" | "PUT" | "DELETE";
+  headers?: Record<string, string>;
+  body?: string | Record<string, unknown>;
+  timeoutMs?: number;
+  cacheKey?: string;
+  cacheTtlSecs?: number;
+}
+
+declare const linguist: {
+  costPerMillion(tokens: number, ratePerMillion: string | number): string;
+  decAdd(...values: Array<string | number>): string;
+  decSub(a: string | number, b: string | number): string;
+  decMul(a: string | number, b: string | number): string;
+  tierBilling(ctx: BillingContext, spec: StandardPricingSpec): void;
+  http: {
+    fetchJson<T = unknown>(url: string, options?: HttpFetchOptions): Promise<T>;
+    fetchText(url: string, options?: HttpFetchOptions): Promise<{ status: number; body: string }>;
+  };
+};

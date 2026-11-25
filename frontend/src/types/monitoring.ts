@@ -124,6 +124,7 @@ export interface CostBucket {
   outputAmount: number;
   cacheReadAmount: number;
   cacheWriteAmount: number;
+  otherAmount: number;
   costPer1mTokens: number;
   avgCostPerRequest: number;
 }

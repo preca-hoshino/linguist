@@ -91,7 +91,9 @@ export interface RecentRequestItem {
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
+  cacheCreationTokens: number;
   reasoningTokens: number;
+  extraTokens: Record<string, number>;
   totalTokens: number;
   ttftMs: number;
   totalDurationMs: number;

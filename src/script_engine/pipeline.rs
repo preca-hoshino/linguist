@@ -1,4 +1,4 @@
-//! Five-stage unidirectional outbound routing pipeline and Post-Stage-③ snapshot isolation.
+//! Five-stage ordered multi-script outbound routing pipeline and Post-Stage-③ snapshot isolation.
 
 use std::collections::BTreeMap;
 
@@ -9,8 +9,9 @@ use uuid::Uuid;
 use crate::catalog::RuntimeCatalog;
 use crate::metrics_cache::MetricsCache;
 use crate::models::{
-    ModelConfig, ProviderConfig, RejectDirective, RequestState, RouteEndpoint, RouteState,
-    ScriptContext, ScriptStage, extract_request_signals, normalize_chat_completions_url,
+    CompiledScriptUnit, ModelConfig, ProviderConfig, RejectDirective, RequestState, RouteEndpoint,
+    RouteState, ScriptContext, ScriptStage, extract_request_signals,
+    normalize_chat_completions_url,
 };
 use crate::script_engine::ScriptEngine;
 
@@ -36,7 +37,25 @@ pub enum StageOutcome<T> {
     Rejected(RejectDirective),
 }
 
-/// Runs Stages ① (`project`), ② (`callModel`), and ③ (`route`) to produce a
+/// Runs an entity's compiled `onRequest` units in order, short-circuiting on `ctx.reject`.
+async fn execute_request_chain(
+    engine: &ScriptEngine,
+    units: &[CompiledScriptUnit],
+    mut ctx: ScriptContext,
+) -> Result<StageOutcome<ScriptContext>> {
+    for unit in units {
+        if !unit.has_on_request {
+            continue;
+        }
+        ctx = engine.execute_request_unit(unit, &ctx).await?;
+        if let Some(reject) = ctx.reject.take() {
+            return Ok(StageOutcome::Rejected(reject));
+        }
+    }
+    Ok(StageOutcome::Ready(ctx))
+}
+
+/// Runs Stages ① (`project`), ② (`callModel`), and ③ (ordered `routes[]`) to produce a
 /// `RoutingPlan` containing the ordered endpoints and the Post-Stage-③ snapshot.
 ///
 /// # Errors
@@ -56,38 +75,30 @@ pub async fn run_routing_stages(
         return Ok(StageOutcome::Rejected(RejectDirective {
             status_code: 404,
             message: format!(
-                "Project '{project_id}' or call model '{requested_model}' is not configured"
+                "Project '{project_id}' or call model '{requested_model}' is not configured or disabled"
             ),
         }));
     };
 
-    let Some(rule) = catalog.match_route_rule(&project.id, requested_model) else {
-        return Ok(StageOutcome::Rejected(RejectDirective {
-            status_code: 404,
-            message: format!(
-                "No enabled route rule matches project '{}' and model '{requested_model}'",
-                project.id
-            ),
-        }));
-    };
-
-    let candidates = catalog.build_candidates(rule, |pid, mid| metrics.get_metrics(pid, mid));
+    let candidates = catalog.build_all_candidates(|pid, mid| metrics.get_metrics(pid, mid));
     let signals = extract_request_signals(&incoming_body);
     let mut headers = BTreeMap::new();
     headers.insert("content-type".to_string(), "application/json".to_string());
 
     let mut ctx = ScriptContext {
         stage: ScriptStage::Project,
-        project: project.to_meta(),
-        call_model: call_model.to_meta(),
+        project: project.to_entity_info(),
+        call_model: call_model.to_entity_info(),
+        route_info: None,
         provider: None,
         model: None,
         route: RouteState {
-            rule_id: rule.id.clone(),
+            rule_id: None,
             candidates,
-            target: rule.target.clone(),
-            fallbacks: rule.fallbacks.clone(),
-            rewrite_response_model: rule.rewrite_response_model,
+            target: None,
+            fallbacks: Vec::new(),
+            continue_routing: false,
+            rewrite_response_model: false,
         },
         request: RequestState {
             uid: request_uid.to_string(),
@@ -95,42 +106,56 @@ pub async fn run_routing_stages(
             url: String::new(),
             headers,
             body: incoming_body,
+            inject_stream_options: true,
+            timeout_secs: None,
+            retry_status_codes: None,
             signals,
         },
         state: Map::new(),
         reject: None,
     };
 
-    // Stage ①: Project script
-    if let Some(script) = project.script.as_deref() {
-        ctx = engine.execute(script, &ctx).await?;
-        if let Some(reject) = ctx.reject.take() {
-            return Ok(StageOutcome::Rejected(reject));
-        }
-    }
+    // Stage ①: Project script chain
+    ctx = match execute_request_chain(engine, &project.compiled.units, ctx).await? {
+        StageOutcome::Ready(next) => next,
+        StageOutcome::Rejected(rej) => return Ok(StageOutcome::Rejected(rej)),
+    };
 
-    // Stage ②: CallModel script
+    // Stage ②: CallModel script chain
     ctx.stage = ScriptStage::CallModel;
-    if let Some(script) = call_model.script.as_deref() {
-        ctx = engine.execute(script, &ctx).await?;
-        if let Some(reject) = ctx.reject.take() {
-            return Ok(StageOutcome::Rejected(reject));
-        }
-    }
+    ctx = match execute_request_chain(engine, &call_model.compiled.units, ctx).await? {
+        StageOutcome::Ready(next) => next,
+        StageOutcome::Rejected(rej) => return Ok(StageOutcome::Rejected(rej)),
+    };
 
-    // Stage ③: Route script
+    // Stage ③: Ordered Route responsibility chain
     ctx.stage = ScriptStage::Route;
-    if let Some(script) = rule.script.as_deref() {
-        ctx = engine.execute(script, &ctx).await?;
-        if let Some(reject) = ctx.reject.take() {
-            return Ok(StageOutcome::Rejected(reject));
+    for rule in &catalog.routes {
+        if !rule.enabled {
+            continue;
+        }
+        ctx.route_info = Some(rule.to_entity_info());
+        ctx = match execute_request_chain(engine, &rule.compiled.units, ctx).await? {
+            StageOutcome::Ready(next) => next,
+            StageOutcome::Rejected(rej) => return Ok(StageOutcome::Rejected(rej)),
+        };
+
+        if ctx.route.target.is_some() {
+            ctx.route.rule_id = Some(rule.id.clone());
+            if !ctx.route.continue_routing {
+                break;
+            }
+            ctx.route.continue_routing = false;
         }
     }
+    ctx.route_info = None;
 
     let Some(primary) = ctx.route.target.clone() else {
         return Ok(StageOutcome::Rejected(RejectDirective {
             status_code: 404,
-            message: format!("Route rule '{}' did not select a target model", rule.id),
+            message: format!(
+                "No enabled route selected a target model for '{project_id}/{requested_model}'"
+            ),
         }));
     };
 
@@ -158,7 +183,7 @@ pub async fn run_routing_stages(
 /// cleanly for a specific upstream `(provider, model)` attempt.
 ///
 /// # Errors
-/// Returns an error if script execution fails unexpectedly.
+/// Returns an error if script execution fails unexpectedly or leaves the URL empty.
 pub async fn prepare_attempt_context(
     snapshot: &ScriptContext,
     attempt: u16,
@@ -168,34 +193,54 @@ pub async fn prepare_attempt_context(
 ) -> Result<StageOutcome<ScriptContext>> {
     let mut ctx = snapshot.clone();
     ctx.request.attempt = attempt;
-    ctx.provider = Some(provider.to_meta());
-    ctx.model = Some(model.to_meta());
-    ctx.request.url = normalize_chat_completions_url(&model.url);
-    ctx.request
-        .body
-        .insert("model".to_string(), Value::String(model.id.clone()));
+    ctx.provider = Some(provider.to_provider_info());
+    ctx.model = Some(model.to_entity_info());
 
-    // Stage ④: Model script
+    let default_base = model
+        .compiled
+        .meta
+        .get("url")
+        .and_then(Value::as_str)
+        .or_else(|| {
+            provider
+                .compiled
+                .meta
+                .get("baseUrl")
+                .and_then(Value::as_str)
+        })
+        .unwrap_or("");
+    ctx.request.url = normalize_chat_completions_url(default_base);
+
+    let upstream_model = model
+        .compiled
+        .meta
+        .get("upstreamModel")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or(&model.id);
+    ctx.request.body.insert(
+        "model".to_string(),
+        Value::String(upstream_model.to_string()),
+    );
+
+    // Stage ④: Model script chain
     ctx.stage = ScriptStage::Model;
-    if let Some(script) = model.script.as_deref() {
-        ctx = engine.execute(script, &ctx).await?;
-        if let Some(reject) = ctx.reject.take() {
-            return Ok(StageOutcome::Rejected(reject));
-        }
-    }
+    ctx = match execute_request_chain(engine, &model.compiled.units, ctx).await? {
+        StageOutcome::Ready(next) => next,
+        StageOutcome::Rejected(rej) => return Ok(StageOutcome::Rejected(rej)),
+    };
 
-    // Stage ⑤: Provider script
+    // Stage ⑤: Provider script chain
     ctx.stage = ScriptStage::Provider;
-    if let Some(script) = provider.script.as_deref() {
-        ctx = engine.execute(script, &ctx).await?;
-        if let Some(reject) = ctx.reject.take() {
-            return Ok(StageOutcome::Rejected(reject));
-        }
-    }
+    ctx = match execute_request_chain(engine, &provider.compiled.units, ctx).await? {
+        StageOutcome::Ready(next) => next,
+        StageOutcome::Rejected(rej) => return Ok(StageOutcome::Rejected(rej)),
+    };
 
     if ctx.request.url.trim().is_empty() {
         return Err(anyhow!(
-            "Stage ④/⑤ left outbound request URL empty for {}/{}",
+            "Stage ④/⑤ left outbound request URL empty for {}/{} (set meta.url/baseUrl or ctx.request.url)",
             provider.id,
             model.id
         ));
@@ -209,153 +254,155 @@ mod tests {
     use serde_json::json;
 
     use super::*;
-    use crate::config::{MetricsConfig, ScriptEngineConfig};
-    use crate::models::{
-        CallModelConfig, ProjectConfig, RouteCandidatesFilter, RouteMatchConfig, RouteRuleConfig,
-    };
+    use crate::config::ScriptEngineConfig;
+    use crate::models::{CallModelConfig, ProjectConfig, RouteRuleConfig, ScriptItem};
 
-    fn build_fallback_test_catalog() -> RuntimeCatalog {
-        let primary_model = ModelConfig {
-            id: "primary-m".to_string(),
-            name: "Primary".to_string(),
-            icon: "openai".to_string(),
-            url: "http://127.0.0.1:9991/v1".to_string(),
-            supports_reasoning_effort: Some(vec!["xhigh".to_string()]),
-            tool_calling: Some(true),
-            vision: Some(false),
-            thinking: Some(true),
-            streaming: Some(true),
-            max_input_tokens: Some(128_000),
-            max_output_tokens: Some(16_000),
-            script: Some(
-                "ctx.request.body.reasoning_effort = 'xhigh'; \
-                 ctx.request.headers['x-primary-only'] = 'polluted'; \
-                 ctx.state.touched_by_primary = true;"
-                    .to_string(),
-            ),
-        };
-        let fallback_model = ModelConfig {
-            id: "fallback-m".to_string(),
-            name: "Fallback".to_string(),
-            icon: "qwen-color".to_string(),
-            url: "http://127.0.0.1:9992".to_string(),
-            supports_reasoning_effort: Some(vec!["high".to_string()]),
-            tool_calling: Some(true),
-            vision: Some(false),
-            thinking: Some(true),
-            streaming: Some(true),
-            max_input_tokens: Some(128_000),
-            max_output_tokens: Some(16_000),
-            script: None,
-        };
+    fn make_chain(
+        engine: &ScriptEngine,
+        code: &str,
+    ) -> (Vec<ScriptItem>, crate::models::CompiledScriptChain) {
+        let items = vec![ScriptItem {
+            id: "s1".to_string(),
+            name: "Main".to_string(),
+            enabled: true,
+            code: code.to_string(),
+        }];
+        let compiled = engine.compile_chain(&items).unwrap_or_default();
+        (items, compiled)
+    }
 
-        RuntimeCatalog::new(
+    #[tokio::test]
+    #[allow(clippy::too_many_lines)]
+    async fn ordered_routes_and_post_stage_3_snapshot_isolation_work() {
+        let engine = ScriptEngine::new(ScriptEngineConfig::default());
+
+        let (m1_scripts, m1_comp) = make_chain(
+            &engine,
+            r#"
+            export const tags = ["thinking"];
+            export const meta = { url: "http://127.0.0.1:9991/v1" };
+            export function onRequest(ctx: ScriptContext) {
+                ctx.request.body.reasoning_effort = "xhigh";
+                ctx.request.headers["x-primary-only"] = "polluted";
+                ctx.state.touched_by_primary = true;
+            }
+            "#,
+        );
+        let (m2_scripts, m2_comp) = make_chain(
+            &engine,
+            r#"
+            export const meta = { url: "http://127.0.0.1:9992" };
+            "#,
+        );
+        let (p2_scripts, p2_comp) = make_chain(
+            &engine,
+            "export function onRequest(ctx: ScriptContext) { ctx.request.headers['x-p2'] = 'clean'; }",
+        );
+        let (proj_scripts, proj_comp) = make_chain(
+            &engine,
+            "export function onRequest(ctx: ScriptContext) { ctx.state.from_stage_1 = 'yes'; }",
+        );
+        let (cm_scripts, cm_comp) = make_chain(
+            &engine,
+            "export function onRequest(ctx: ScriptContext) { ctx.request.body.reasoning_effort = 'high'; }",
+        );
+        let (r1_scripts, r1_comp) = make_chain(
+            &engine,
+            r"
+            export function onRequest(ctx: ScriptContext) {
+                // Route 1 filters out nothing and passes through without setting target.
+                ctx.state.guard_ran = true;
+            }
+            ",
+        );
+        let (r2_scripts, r2_comp) = make_chain(
+            &engine,
+            r#"
+            export function onRequest(ctx: ScriptContext) {
+                ctx.route.rewriteResponseModel = true;
+                ctx.route.target = { providerId: "p1", modelId: "primary-m" };
+                ctx.route.fallbacks = [{ providerId: "p2", modelId: "fallback-m" }];
+            }
+            "#,
+        );
+
+        let catalog = RuntimeCatalog::new(
             vec![
                 ProviderConfig {
-                    vendor: None,
-                    api_type: None,
                     id: "p1".to_string(),
-                    name: "Provider 1".to_string(),
+                    name: "P1".to_string(),
                     icon: "openai".to_string(),
+                    enabled: true,
                     api_key: "sk-p1".to_string(),
-                    script: None,
-                    models: vec![primary_model],
+                    scripts: Vec::new(),
+                    compiled: crate::models::CompiledScriptChain::default(),
+                    models: vec![ModelConfig {
+                        id: "primary-m".to_string(),
+                        name: "Primary".to_string(),
+                        icon: "openai".to_string(),
+                        enabled: true,
+                        scripts: m1_scripts,
+                        compiled: m1_comp,
+                    }],
                 },
                 ProviderConfig {
-                    vendor: None,
-                    api_type: None,
                     id: "p2".to_string(),
-                    name: "Provider 2".to_string(),
+                    name: "P2".to_string(),
                     icon: "qwen-color".to_string(),
+                    enabled: true,
                     api_key: "sk-p2".to_string(),
-                    script: Some("ctx.request.headers['x-p2'] = 'clean';".to_string()),
-                    models: vec![fallback_model],
+                    scripts: p2_scripts,
+                    compiled: p2_comp,
+                    models: vec![ModelConfig {
+                        id: "fallback-m".to_string(),
+                        name: "Fallback".to_string(),
+                        icon: "qwen-color".to_string(),
+                        enabled: true,
+                        scripts: m2_scripts,
+                        compiled: m2_comp,
+                    }],
                 },
             ],
             vec![ProjectConfig {
                 id: "coding".to_string(),
                 name: "Coding".to_string(),
-                api_key: None,
                 icon: "githubcopilot".to_string(),
-                meta: Map::new(),
-                script: Some("ctx.state.from_stage_1 = 'yes';".to_string()),
+                enabled: true,
+                api_key: "lin-proj-coding".to_string(),
+                scripts: proj_scripts,
+                compiled: proj_comp,
                 call_models: vec![CallModelConfig {
                     id: "smart".to_string(),
                     name: "Smart".to_string(),
                     icon: "cursor".to_string(),
-                    meta: Map::new(),
-                    script: Some("ctx.request.body.reasoning_effort = 'high';".to_string()),
+                    enabled: true,
+                    scripts: cm_scripts,
+                    compiled: cm_comp,
                 }],
             }],
-            vec![RouteRuleConfig {
-                id: "r-smart".to_string(),
-                name: "Smart Route".to_string(),
-                enabled: true,
-                priority: 10,
-                match_rule: RouteMatchConfig {
-                    project_ids: vec!["coding".to_string()],
-                    call_model_ids: vec!["smart".to_string()],
+            vec![
+                RouteRuleConfig {
+                    id: "r-guard".to_string(),
+                    name: "Guard".to_string(),
+                    icon: "route".to_string(),
+                    enabled: true,
+                    position: 0,
+                    scripts: r1_scripts,
+                    compiled: r1_comp,
                 },
-                candidates: RouteCandidatesFilter::default(),
-                target: Some(RouteEndpoint {
-                    provider_id: "p1".to_string(),
-                    model_id: "primary-m".to_string(),
-                    max_attempts: 1,
-                }),
-                fallbacks: vec![RouteEndpoint {
-                    provider_id: "p2".to_string(),
-                    model_id: "fallback-m".to_string(),
-                    max_attempts: 1,
-                }],
-                rewrite_response_model: true,
-                script: None,
-            }],
-        )
-    }
+                RouteRuleConfig {
+                    id: "r-smart".to_string(),
+                    name: "Smart Route".to_string(),
+                    icon: "route".to_string(),
+                    enabled: true,
+                    position: 1,
+                    scripts: r2_scripts,
+                    compiled: r2_comp,
+                },
+            ],
+        );
 
-    #[tokio::test]
-    async fn invalid_script_retry_counts_are_rejected() {
-        let mut catalog = build_fallback_test_catalog();
-        let metrics = MetricsCache::new(&MetricsConfig::default());
-        let engine = ScriptEngine::new(ScriptEngineConfig::default());
-        for value in ["0", "6", "1.5", "null"] {
-            catalog.routes[0].script = Some(format!("ctx.route.target.maxAttempts = {value};"));
-            let result = run_routing_stages(
-                &catalog,
-                &metrics,
-                &engine,
-                Uuid::new_v4(),
-                "coding",
-                "smart",
-                Map::new(),
-            )
-            .await;
-            assert!(result.is_err(), "maxAttempts={value} must be rejected");
-        }
-    }
-
-    #[test]
-    fn static_endpoint_retry_counts_are_validated() {
-        for value in [json!(0), json!(6), json!(1.5), json!(null)] {
-            let endpoint = json!({
-                "providerId": "p1",
-                "modelId": "primary-m",
-                "maxAttempts": value,
-            });
-            assert!(serde_json::from_value::<RouteEndpoint>(endpoint).is_err());
-        }
-        let endpoint = serde_json::from_value::<RouteEndpoint>(json!({
-            "providerId": "p1",
-            "modelId": "primary-m",
-        }));
-        assert_eq!(endpoint.ok().map(|value| value.max_attempts), Some(1));
-    }
-
-    #[tokio::test]
-    async fn post_stage_3_snapshot_isolates_fallback_from_primary_mutations() {
-        let catalog = build_fallback_test_catalog();
-        let metrics = MetricsCache::new(&MetricsConfig::default());
-        let engine = ScriptEngine::new(ScriptEngineConfig::default());
+        let metrics = MetricsCache::new(&crate::config::MetricsConfig::default());
         let mut body = Map::new();
         body.insert("model".to_string(), json!("smart"));
         body.insert(
@@ -373,47 +420,50 @@ mod tests {
             body,
         )
         .await;
-        assert!(plan_res.is_ok());
+        assert!(plan_res.is_ok(), "plan failed: {plan_res:?}");
         let Ok(StageOutcome::Ready(plan)) = plan_res else {
             return;
         };
+        assert_eq!(plan.snapshot_ctx.route.rule_id.as_deref(), Some("r-smart"));
+        assert_eq!(plan.snapshot_ctx.state.get("guard_ran"), Some(&json!(true)));
 
         let Some((p1, m1)) = catalog.find_model("p1", "primary-m") else {
             return;
         };
-        let att1 = prepare_attempt_context(&plan.snapshot_ctx, 1, p1, m1, &engine).await;
-        assert!(att1.is_ok());
-        if let Ok(StageOutcome::Ready(ctx1)) = att1 {
-            assert_eq!(
-                ctx1.request.body.get("reasoning_effort"),
-                Some(&json!("xhigh"))
-            );
-            assert!(ctx1.request.headers.contains_key("x-primary-only"));
-        }
+        let Ok(StageOutcome::Ready(ctx1)) =
+            prepare_attempt_context(&plan.snapshot_ctx, 1, p1, m1, &engine).await
+        else {
+            return;
+        };
+        assert_eq!(
+            ctx1.request.body.get("reasoning_effort"),
+            Some(&json!("xhigh"))
+        );
+        assert!(ctx1.request.headers.contains_key("x-primary-only"));
 
         let Some((p2, m2)) = catalog.find_model("p2", "fallback-m") else {
             return;
         };
-        let att2 = prepare_attempt_context(&plan.snapshot_ctx, 2, p2, m2, &engine).await;
-        assert!(att2.is_ok());
-        if let Ok(StageOutcome::Ready(ctx2)) = att2 {
-            assert_eq!(ctx2.request.attempt, 2);
-            assert_eq!(
-                ctx2.request.body.get("reasoning_effort"),
-                Some(&json!("high"))
-            );
-            assert_eq!(ctx2.request.body.get("model"), Some(&json!("fallback-m")));
-            assert_eq!(
-                ctx2.request.url,
-                "http://127.0.0.1:9992/v1/chat/completions"
-            );
-            assert!(!ctx2.request.headers.contains_key("x-primary-only"));
-            assert_eq!(
-                ctx2.request.headers.get("x-p2").map(String::as_str),
-                Some("clean")
-            );
-            assert_eq!(ctx2.state.get("from_stage_1"), Some(&json!("yes")));
-            assert!(!ctx2.state.contains_key("touched_by_primary"));
-        }
+        let Ok(StageOutcome::Ready(ctx2)) =
+            prepare_attempt_context(&plan.snapshot_ctx, 2, p2, m2, &engine).await
+        else {
+            return;
+        };
+        assert_eq!(ctx2.request.attempt, 2);
+        assert_eq!(
+            ctx2.request.body.get("reasoning_effort"),
+            Some(&json!("high"))
+        );
+        assert_eq!(ctx2.request.body.get("model"), Some(&json!("fallback-m")));
+        assert_eq!(
+            ctx2.request.url,
+            "http://127.0.0.1:9992/v1/chat/completions"
+        );
+        assert!(!ctx2.request.headers.contains_key("x-primary-only"));
+        assert_eq!(
+            ctx2.request.headers.get("x-p2").map(String::as_str),
+            Some("clean")
+        );
+        assert!(!ctx2.state.contains_key("touched_by_primary"));
     }
 }

@@ -633,7 +633,7 @@ function CostView({
         />
       </ChartCard>
 
-      <ChartCard title="费用构成拆解" description="输入费用、输出费用、缓存读取与写入费用堆叠" loading={loading} empty={!hasCost}>
+      <ChartCard title="费用构成拆解" description="输入费用、输出费用、缓存读取/写入与其他费用堆叠" loading={loading} empty={!hasCost}>
         <StackedBarChart
           data={buckets.map((b) => ({
             label: b.label,
@@ -642,6 +642,7 @@ function CostView({
               output: b.outputAmount,
               cacheRead: b.cacheReadAmount,
               cacheWrite: b.cacheWriteAmount,
+              other: b.otherAmount,
             },
           }))}
           series={[
@@ -649,6 +650,7 @@ function CostView({
             { key: "output", label: "输出费用", color: "#14B8A6" },
             { key: "cacheRead", label: "缓存读取费", color: "#6366F1" },
             { key: "cacheWrite", label: "缓存写入费", color: "#F59E0B" },
+            { key: "other", label: "其他费用", color: "#94A3B8" },
           ]}
           formatValue={fmtCost}
         />

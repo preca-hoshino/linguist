@@ -1,88 +1,77 @@
-//! Cross-entry checks shared by catalog writers and runtime readers.
+//! Cross-entry structural and script validation shared by catalog writers and loaders.
 
 use std::collections::HashSet;
 
-use anyhow::{Context, Result, ensure};
+use anyhow::{Result, ensure};
 
 use super::RuntimeCatalog;
-use crate::script_engine::ScriptEngine;
+use crate::models::ScriptItem;
 
-/// Revalidates all script stages when a stored revision is loaded.
-pub(super) fn validate_scripts(catalog: &RuntimeCatalog, engine: &ScriptEngine) -> Result<()> {
-    let providers = catalog.providers.iter().flat_map(|provider| {
-        std::iter::once((provider.id.as_str(), provider.script.as_deref())).chain(
-            provider
-                .models
-                .iter()
-                .map(|model| (model.id.as_str(), model.script.as_deref())),
-        )
-    });
-    let projects = catalog.projects.iter().flat_map(|project| {
-        std::iter::once((project.id.as_str(), project.script.as_deref())).chain(
-            project
-                .call_models
-                .iter()
-                .map(|model| (model.id.as_str(), model.script.as_deref())),
-        )
-    });
-    let routes = catalog
-        .routes
-        .iter()
-        .map(|route| (route.id.as_str(), route.script.as_deref()));
-    for (id, source) in providers.chain(projects).chain(routes) {
-        if let Some(source) = source {
-            engine
-                .validate_script(source)
-                .with_context(|| format!("invalid catalog script for '{id}'"))?;
-        }
-    }
-    Ok(())
-}
-
-/// Checks identities and static route references before the catalog can take effect.
+/// Validates unique identities and script item invariants across the catalog.
+/// Empty catalogs are permitted for clean cold starts.
+///
+/// # Errors
+/// Returns an error if duplicate/blank IDs or invalid script items are found.
 pub(super) fn validate(catalog: &RuntimeCatalog) -> Result<()> {
-    ensure!(
-        !(catalog.providers.is_empty() && catalog.projects.is_empty() && catalog.routes.is_empty()),
-        "the configuration catalog is empty"
-    );
     unique_ids(catalog.providers.iter().map(|p| p.id.as_str()), "provider")?;
     unique_ids(catalog.projects.iter().map(|p| p.id.as_str()), "project")?;
     unique_ids(catalog.routes.iter().map(|r| r.id.as_str()), "route")?;
-    let mut endpoints = HashSet::new();
+
     for provider in &catalog.providers {
+        validate_script_items(&provider.scripts, &format!("provider '{}'", provider.id))?;
         unique_ids(
             provider.models.iter().map(|m| m.id.as_str()),
             "provider model",
         )?;
         for model in &provider.models {
-            ensure!(
-                [model.max_input_tokens, model.max_output_tokens]
-                    .into_iter()
-                    .flatten()
-                    .all(|n| i64::try_from(n).is_ok()),
-                "token limit exceeds PostgreSQL range for '{}/{}'",
-                provider.id,
-                model.id
-            );
-            endpoints.insert((provider.id.as_str(), model.id.as_str()));
+            validate_script_items(
+                &model.scripts,
+                &format!("model '{}/{}'", provider.id, model.id),
+            )?;
         }
     }
+
     for project in &catalog.projects {
+        ensure!(
+            !project.api_key.trim().is_empty(),
+            "project '{}' must have a non-empty apiKey",
+            project.id
+        );
+        validate_script_items(&project.scripts, &format!("project '{}'", project.id))?;
         unique_ids(
             project.call_models.iter().map(|m| m.id.as_str()),
             "project model",
         )?;
-    }
-    for route in &catalog.routes {
-        for endpoint in route.target.iter().chain(&route.fallbacks) {
+        for cm in &project.call_models {
             ensure!(
-                endpoints.contains(&(endpoint.provider_id.as_str(), endpoint.model_id.as_str())),
-                "route '{}' references unknown model '{}/{}'",
-                route.id,
-                endpoint.provider_id,
-                endpoint.model_id
+                cm.id.trim() != "*",
+                "project '{}' callModel id '*' is not allowed",
+                project.id
             );
+            validate_script_items(
+                &cm.scripts,
+                &format!("callModel '{}/{}'", project.id, cm.id),
+            )?;
         }
+    }
+
+    for route in &catalog.routes {
+        validate_script_items(&route.scripts, &format!("route '{}'", route.id))?;
+    }
+
+    Ok(())
+}
+
+/// Ensures script IDs inside an entity's `scripts[]` are non-empty and unique.
+pub(crate) fn validate_script_items(scripts: &[ScriptItem], owner: &str) -> Result<()> {
+    let mut ids = HashSet::new();
+    for item in scripts {
+        ensure!(!item.id.trim().is_empty(), "blank script id inside {owner}");
+        ensure!(
+            ids.insert(item.id.as_str()),
+            "duplicate script id '{}' inside {owner}",
+            item.id
+        );
     }
     Ok(())
 }

@@ -64,12 +64,12 @@ impl CatalogSecrets {
     }
 
     /// Identifies the shared master key without revealing it.
-    pub(super) fn key_tag(&self) -> [u8; 32] {
+    pub(in crate::catalog) fn key_tag(&self) -> [u8; 32] {
         self.fingerprint(b"linguist catalog key check")
     }
 
     /// Computes the digest stored for a project bearer key.
-    pub(super) fn digest_project(&self, project_id: &str, token: &str) -> [u8; 32] {
+    pub(in crate::catalog) fn digest_project(&self, project_id: &str, token: &str) -> [u8; 32] {
         tag_bytes(hmac::sign(
             &self.projects,
             &project_message(project_id, token),
@@ -77,12 +77,22 @@ impl CatalogSecrets {
     }
 
     /// Checks a supplied project key against its stored digest.
-    pub(super) fn verify_project(&self, project_id: &str, token: &str, digest: &[u8]) -> bool {
+    #[allow(dead_code)]
+    pub(in crate::catalog) fn verify_project(
+        &self,
+        project_id: &str,
+        token: &str,
+        digest: &[u8],
+    ) -> bool {
         hmac::verify(&self.projects, &project_message(project_id, token), digest).is_ok()
     }
 
     /// Encrypts one provider key with a random nonce bound to the provider ID.
-    pub(super) fn seal_provider(&self, provider_id: &str, key: &str) -> Result<Option<Vec<u8>>> {
+    pub(in crate::catalog) fn seal_provider(
+        &self,
+        provider_id: &str,
+        key: &str,
+    ) -> Result<Option<Vec<u8>>> {
         if key.is_empty() {
             return Ok(None);
         }

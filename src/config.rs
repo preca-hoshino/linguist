@@ -14,9 +14,7 @@ pub struct AppConfig {
     pub server: ServerConfig,
     /// PostgreSQL logging and telemetry settings.
     pub database: DatabaseConfig,
-    /// Catalog configuration source settings.
-    pub configs: ConfigsSection,
-    /// Script engine sandbox limits and retry status codes.
+    /// Script engine sandbox limits, network controls, and retry status codes.
     pub script_engine: ScriptEngineConfig,
     /// In-memory sliding window speed cache settings.
     pub metrics: MetricsConfig,
@@ -173,6 +171,8 @@ pub struct ServerConfig {
     pub port: u16,
     /// Upstream connection/read inactivity timeout; also the total deadline for non-streaming requests.
     pub upstream_timeout_secs: u64,
+    /// Graceful shutdown drain window in seconds for in-flight SSE streams and async logs.
+    pub graceful_shutdown_secs: u64,
 }
 
 impl Default for ServerConfig {
@@ -181,6 +181,7 @@ impl Default for ServerConfig {
             host: "127.0.0.1".to_string(),
             port: 9527,
             upstream_timeout_secs: 600,
+            graceful_shutdown_secs: 60,
         }
     }
 }
@@ -210,58 +211,28 @@ impl Default for DatabaseConfig {
     }
 }
 
-/// Catalog ingestion configuration. The runtime always reads PostgreSQL.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ConfigsSection {
-    /// `json_sync` imports files into PostgreSQL; `postgres` only consumes it.
-    pub source: String,
-    /// Path to supply-side `chatLanguageModels.json`.
-    pub providers_path: PathBuf,
-    /// Path to consume-side `projects.json`.
-    pub projects_path: PathBuf,
-    /// Path to `routes.json`.
-    pub routes_path: PathBuf,
-    /// Whether to watch JSON files for live hot-reload.
-    pub watch_reload: bool,
-}
-
-impl ConfigsSection {
-    /// Resolves the ingest mode; `json_files` remains an alias for older deployments.
-    ///
-    /// # Errors
-    /// Returns an error for an unknown configuration source.
-    pub fn imports_json(&self) -> Result<bool> {
-        match self.source.as_str() {
-            "json_sync" | "json_files" => Ok(true),
-            "postgres" => Ok(false),
-            _ => anyhow::bail!("[configs].source must be json_sync or postgres"),
-        }
-    }
-}
-
-impl Default for ConfigsSection {
-    fn default() -> Self {
-        Self {
-            source: "json_sync".to_string(),
-            providers_path: PathBuf::from("./chatLanguageModels.json"),
-            projects_path: PathBuf::from("./projects.json"),
-            routes_path: PathBuf::from("./routes.json"),
-            watch_reload: true,
-        }
-    }
-}
-
-/// TS/JS script sandbox constraints and automatic fallback triggers.
+/// TS/JS script sandbox constraints, outbound HTTP limits, and automatic fallback triggers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ScriptEngineConfig {
-    /// Maximum execution time per script invocation in milliseconds.
+    /// Maximum CPU execution time per script invocation in milliseconds.
     pub timeout_ms: u64,
     /// Maximum buffer/memory limit in megabytes.
     pub memory_limit_mb: u64,
     /// HTTP status codes before first byte that trigger fallback retry.
     pub fallback_status_codes: Vec<u16>,
+    /// Maximum total network IO timeout per `linguist.http` call in hot request stages (ms).
+    pub net_timeout_ms: u64,
+    /// Maximum total network IO timeout per `linguist.http` call in async billing stage (ms).
+    pub billing_net_timeout_ms: u64,
+    /// Maximum `linguist.http` calls allowed per request script stage.
+    pub max_http_calls_per_stage: usize,
+    /// Maximum `linguist.http` calls allowed per async billing evaluation.
+    pub max_http_calls_billing: usize,
+    /// Whether scripts may contact private/loopback/link-local IP addresses.
+    pub allow_private_network: bool,
+    /// Explicit hostnames or IPs allowed even when `allow_private_network` is false.
+    pub allowed_hosts: Vec<String>,
 }
 
 impl Default for ScriptEngineConfig {
@@ -270,6 +241,12 @@ impl Default for ScriptEngineConfig {
             timeout_ms: 50,
             memory_limit_mb: 32,
             fallback_status_codes: vec![429, 500, 502, 503, 504],
+            net_timeout_ms: 2500,
+            billing_net_timeout_ms: 5000,
+            max_http_calls_per_stage: 3,
+            max_http_calls_billing: 5,
+            allow_private_network: false,
+            allowed_hosts: Vec::new(),
         }
     }
 }
@@ -335,9 +312,14 @@ impl AppConfig {
             .filter(|p| !p.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
 
-        config.configs.providers_path = resolve_relative(base_dir, &config.configs.providers_path);
-        config.configs.projects_path = resolve_relative(base_dir, &config.configs.projects_path);
-        config.configs.routes_path = resolve_relative(base_dir, &config.configs.routes_path);
+        if let Ok(table) = raw.parse::<toml::Table>()
+            && table.contains_key("configs")
+        {
+            tracing::warn!(
+                "config.toml contains deprecated [configs] section; v0.2.0 uses PostgreSQL exclusively"
+            );
+        }
+
         if !config.oidc.client_secret_file.as_os_str().is_empty() {
             config.oidc.client_secret_file =
                 resolve_relative(base_dir, &config.oidc.client_secret_file);

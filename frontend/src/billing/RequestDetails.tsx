@@ -12,15 +12,42 @@ function tierDetails(details: Record<string, unknown> | null): Record<string, un
   return typeof tier === "object" && tier !== null && !Array.isArray(tier) ? tier as Record<string, unknown> : null;
 }
 
+interface ReceiptLineItem {
+  label: string;
+  category?: string;
+  unitPrice?: string;
+  quantity?: string;
+  amount: string;
+}
+
+function receiptItems(details: Record<string, unknown> | null): ReceiptLineItem[] {
+  const raw = details?.items;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((item): item is ReceiptLineItem => (
+    typeof item === "object" && item !== null && "label" in item && "amount" in item
+  ));
+}
+
 function AttemptDetails({ item }: { item: BillingAttempt }) {
   const tier = tierDetails(item.details);
+  const items = receiptItems(item.details);
   return <div className="billing-details" role="region" aria-label="计价明细">
     <h3>尝试 {item.attemptIndex} · {item.providerName} / {item.modelName}</h3>
     <p>HTTP {item.statusCode} · {item.amount === null ? billingStatus(item.billingStatus) : `${item.billingStatus === "estimated" ? "估算 " : ""}${money(item.amount, item.currency)}`}</p>
     {item.billingStatus === "estimated" && item.details?.source ? <p>估算依据：{detailValue(item.details, "source")}</p> : null}
-    {item.details?.assumedMissingWriteZero === true ? <p>上游未提供缓存写入量，暂按 0 估算。</p> : null}
-    {tier ? <p>价格分档：{detailValue(tier, "minInputTokens")} Token 起 · 单位 {item.currency} / 百万 Token</p> : null}
-    {tier ? <div className="billing-breakdown">
+    {item.details?.error ? <p className="error-text">{detailValue(item.details, "error")}</p> : null}
+    {items.length > 0 ? <div className="billing-breakdown">
+      {items.map((line, idx) => (
+        <div key={`${line.label}-${idx}`}>
+          <strong>{line.label}</strong>
+          <span>{line.quantity ?? "—"}</span>
+          <span>{line.unitPrice ? `单价：${line.unitPrice}` : line.category ?? "—"}</span>
+          <span>{money(line.amount, item.currency)}</span>
+        </div>
+      ))}
+    </div> : null}
+    {items.length === 0 && tier ? <p>价格分档：{detailValue(tier, "minInputTokens")} Token 起 · 单位 {item.currency} / 百万 Token</p> : null}
+    {items.length === 0 && tier ? <div className="billing-breakdown">
       {([["普通输入", "inputTokens", "inputAmount", "inputPrice"], ["输出", "outputTokens", "outputAmount", "outputPrice"], ["缓存读取", "cacheReadTokens", "cacheReadAmount", "cacheReadPrice"], ["缓存写入", "cacheWriteTokens", "cacheWriteAmount", "cacheWritePrice"]] as const).map(([label, tokens, amount, price]) => (
         <div key={label}><strong>{label}</strong><span>{detailValue(item.details, tokens)} Token</span><span>单价：{detailValue(tier, price) === "—" && (price === "cacheReadPrice" || (price === "cacheWritePrice" && tier.cacheWriteMode === "input")) ? detailValue(tier, "inputPrice") : detailValue(tier, price)}</span><span>{money(detailValue(item.details, amount) === "—" ? null : detailValue(item.details, amount), item.currency)}</span></div>
       ))}

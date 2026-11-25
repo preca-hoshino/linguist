@@ -45,9 +45,6 @@ jobs:
           cp linguist.d.ts deploy_pkg/examples/linguist.d.ts
           cp config.docker.example.toml deploy_pkg/examples/config.docker.example.toml
           cp config.example.toml deploy_pkg/examples/config.example.toml
-          cp chatLanguageModels.example.json deploy_pkg/examples/chatLanguageModels.example.json
-          cp projects.json deploy_pkg/examples/projects.example.json
-          cp routes.json deploy_pkg/examples/routes.example.json
 
       - name: Atomic Docker Compose Deploy with Health Probe & Rollback
         env:

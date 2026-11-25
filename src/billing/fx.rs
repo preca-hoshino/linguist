@@ -2,9 +2,11 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, ensure};
+use arc_swap::ArcSwap;
 use chrono::{DateTime, NaiveDate, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
@@ -12,7 +14,7 @@ use serde_json::Value;
 use sqlx::PgPool;
 use tracing::warn;
 
-use super::PriceSchedule;
+use crate::catalog::RuntimeCatalog;
 use crate::state::AppState;
 
 /// One reference exchange rate, in units of quote currency per base unit.
@@ -92,19 +94,19 @@ pub fn start(state: &AppState) {
     }
 
     let client = state.http_client.clone();
+    let catalog = Arc::clone(&state.catalog);
     tokio::spawn(async move {
         loop {
-            if let Err(error) = refresh(&pool, &client, &target).await {
+            if let Err(error) = refresh(&pool, &client, &catalog, &target).await {
                 warn!(%error, "failed to refresh billing reference rates");
             }
-
             tokio::time::sleep(Duration::from_hours(6)).await;
         }
     });
 }
 
-/// Refreshes reference rates after saving a price, without delaying the response.
-pub fn refresh_after_price_change(state: &AppState) {
+/// Triggers an asynchronous reference-rate warmup after catalog edits.
+pub fn refresh_after_catalog_change(state: &AppState) {
     let Some(target) = state.config.billing.display_currency.clone() else {
         return;
     };
@@ -115,27 +117,22 @@ pub fn refresh_after_price_change(state: &AppState) {
         return;
     };
     let client = state.http_client.clone();
+    let catalog = Arc::clone(&state.catalog);
     tokio::spawn(async move {
-        if let Err(error) = refresh(&pool, &client, &target).await {
-            warn!(%error, "failed to refresh billing reference rates after price change");
+        if let Err(error) = refresh(&pool, &client, &catalog, &target).await {
+            warn!(%error, "failed to refresh billing reference rates after catalog change");
         }
     });
 }
 
-/// Refreshes all currencies used by current prices or existing billing rows.
-async fn refresh(pool: &PgPool, client: &reqwest::Client, target: &str) -> Result<()> {
-    let prices: Option<Value> =
-        sqlx::query_scalar("SELECT billing_prices FROM catalog_state WHERE singleton")
-            .fetch_one(pool)
-            .await?;
-    let schedules: Vec<PriceSchedule> = prices
-        .map(serde_json::from_value)
-        .transpose()?
-        .unwrap_or_default();
-    let mut bases: BTreeSet<String> = schedules
-        .into_iter()
-        .map(|version| version.currency)
-        .collect();
+/// Refreshes all currencies declared in catalog `meta` or recorded in `request_logs`.
+async fn refresh(
+    pool: &PgPool,
+    client: &reqwest::Client,
+    catalog: &ArcSwap<RuntimeCatalog>,
+    target: &str,
+) -> Result<()> {
+    let mut bases: BTreeSet<String> = catalog.load().declared_currencies();
     let used: Vec<String> = sqlx::query_scalar(
         "SELECT DISTINCT billing_currency FROM request_logs WHERE billing_currency IS NOT NULL",
     )
@@ -143,6 +140,7 @@ async fn refresh(pool: &PgPool, client: &reqwest::Client, target: &str) -> Resul
     .await?;
     bases.extend(used);
     bases.remove(target);
+
     let previous: Option<Value> =
         sqlx::query_scalar("SELECT billing_fx_rates FROM catalog_state WHERE singleton")
             .fetch_one(pool)
@@ -169,6 +167,7 @@ async fn refresh(pool: &PgPool, client: &reqwest::Client, target: &str) -> Resul
             }
         }
     }
+
     let snapshot = RateSnapshot {
         target: target.to_owned(),
         fetched_at: Utc::now(),

@@ -864,6 +864,8 @@ struct CostBucketAcc {
     cache_read_currencies: BTreeMap<String, Decimal>,
     /// Cache write cost per currency.
     cache_write_currencies: BTreeMap<String, Decimal>,
+    /// Other/miscellaneous cost per currency.
+    other_currencies: BTreeMap<String, Decimal>,
     /// Count of priced requests.
     priced_requests: i64,
     /// Count of unpriced requests.
@@ -1002,6 +1004,11 @@ pub async fn query_cost_monitoring(
                     &curr,
                     json_decimal(&det, "cacheWriteAmount"),
                 );
+                add_currency_amount(
+                    &mut acc.other_currencies,
+                    &curr,
+                    json_decimal(&det, "otherAmount"),
+                );
             }
         } else {
             acc.unpriced_count += 1;
@@ -1082,6 +1089,7 @@ pub async fn query_cost_monitoring(
                     output_amount: 0.0,
                     cache_read_amount: 0.0,
                     cache_write_amount: 0.0,
+                    other_amount: 0.0,
                     cost_per_1m_tokens: 0.0,
                     avg_cost_per_request: 0.0,
                 };
@@ -1132,6 +1140,11 @@ pub async fn query_cost_monitoring(
                 ),
                 cache_write_amount: convert_decimal_map(
                     &acc.cache_write_currencies,
+                    target_currency,
+                    snapshot.as_ref(),
+                ),
+                other_amount: convert_decimal_map(
+                    &acc.other_currencies,
                     target_currency,
                     snapshot.as_ref(),
                 ),

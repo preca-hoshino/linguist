@@ -1,178 +1,81 @@
-//! Domain models, JSON configuration structs, 1:1 `ScriptContext` contracts, and telemetry DTOs.
+//! Domain models, PostgreSQL catalog structs, `ScriptContext` contracts, and telemetry DTOs.
 
 use std::collections::BTreeMap;
 use std::fmt;
-use std::path::Path;
+use std::sync::Arc;
 
 use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
-/// Flexible script source supporting inline string, array of lines, or `@file:<path>`.
+/// Single script unit inside an entity's ordered script chain (`scripts[]`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(untagged)]
-pub enum ScriptSource {
-    /// Single string or `@file:<path>` directive.
-    Single(String),
-    /// Multi-line string array joined with `\n`.
-    Lines(Vec<String>),
-}
-
-impl ScriptSource {
-    /// Converts the raw JSON script representation into normalized source code,
-    /// reading external files when prefixed with `@file:`.
-    ///
-    /// # Errors
-    /// Returns an error if an `@file:` reference cannot be read.
-    pub fn resolve(&self, base_dir: &Path) -> anyhow::Result<String> {
-        match self {
-            Self::Single(text) => {
-                let trimmed = text.trim();
-                if let Some(rel_path) = trimmed.strip_prefix("@file:") {
-                    let target = Path::new(rel_path.trim());
-                    let resolved = if target.is_absolute() {
-                        target.to_path_buf()
-                    } else {
-                        base_dir.join(target)
-                    };
-                    std::fs::read_to_string(&resolved).map_err(|err| {
-                        anyhow::anyhow!(
-                            "failed to load @file script '{}': {err}",
-                            resolved.display()
-                        )
-                    })
-                } else {
-                    Ok(text.clone())
-                }
-            }
-            Self::Lines(lines) => Ok(lines.join("\n")),
-        }
-    }
-}
-
-/// Version-tolerant wrapper supporting both legacy top-level arrays (`v1`) and
-/// explicit `{ "schemaVersion": ..., "items": [...] }` objects.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
-pub enum VersionedList<T> {
-    /// Legacy v1 bare JSON array.
-    Bare(Vec<T>),
-    /// Versioned wrapper object.
-    Wrapped {
-        /// Schema version number (defaults to 1 if omitted).
-        #[serde(rename = "schemaVersion", default = "default_schema_version")]
-        schema_version: u32,
-        /// Configuration records.
-        items: Vec<T>,
-    },
-}
-
-/// Default schema version when omitted in versioned wrapper files.
-const fn default_schema_version() -> u32 {
-    1
-}
-
-impl<T> VersionedList<T> {
-    /// Extracts the inner list and its detected schema version.
-    #[must_use]
-    pub fn into_items(self) -> (u32, Vec<T>) {
-        match self {
-            Self::Bare(items) => (1, items),
-            Self::Wrapped {
-                schema_version,
-                items,
-            } => (schema_version, items),
-        }
-    }
-}
-
-/// Raw supply-side provider object deserialized from `chatLanguageModels.json`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct RawProviderConfig {
-    /// Optional stable provider identifier; derived from `name` when absent.
-    #[serde(default)]
-    pub id: Option<String>,
-    /// Display name of the provider.
-    pub name: String,
-    /// Optional vendor filter from VS Code `chatLanguageModels.json`.
-    #[serde(default)]
-    pub vendor: Option<String>,
-    /// Optional API type filter from VS Code `chatLanguageModels.json`.
-    #[serde(default)]
-    pub api_type: Option<String>,
-    /// Optional plaintext or placeholder API key.
-    #[serde(default)]
-    pub api_key: String,
-    /// Optional `LobeHub` icon slug.
-    #[serde(default)]
-    pub icon: Option<String>,
-    /// Optional Stage ⑤ provider script.
-    #[serde(default)]
-    pub script: Option<ScriptSource>,
-    /// Configured models under this provider.
-    #[serde(default)]
-    pub models: Vec<RawModelConfig>,
-}
-
-/// Raw supply-side model object deserialized from `chatLanguageModels.json`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RawModelConfig {
-    /// Model identifier sent to upstream.
+pub struct ScriptItem {
+    /// Unique identifier within the entity's script list.
     pub id: String,
-    /// Human-readable display name.
+    /// Human-readable display label.
     pub name: String,
-    /// Optional `LobeHub` icon slug.
+    /// Whether this script participates in compilation and execution.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    /// TypeScript or JavaScript source code.
     #[serde(default)]
-    pub icon: Option<String>,
-    /// Upstream base or completions endpoint URL.
-    pub url: String,
-    /// Supported `reasoning_effort` values if any.
-    #[serde(default)]
-    pub supports_reasoning_effort: Option<Vec<String>>,
-    /// Whether the model supports tool/function calling.
-    #[serde(default)]
-    pub tool_calling: Option<bool>,
-    /// Whether the model supports vision/image inputs.
-    #[serde(default)]
-    pub vision: Option<bool>,
-    /// Whether the model supports thinking/reasoning.
-    #[serde(default)]
-    pub thinking: Option<bool>,
-    /// Whether the model supports SSE streaming.
-    #[serde(default)]
-    pub streaming: Option<bool>,
-    /// Maximum context input tokens.
-    #[serde(default)]
-    pub max_input_tokens: Option<u64>,
-    /// Maximum completion output tokens.
-    #[serde(default)]
-    pub max_output_tokens: Option<u64>,
-    /// Optional Stage ④ model script.
-    #[serde(default)]
-    pub script: Option<ScriptSource>,
+    pub code: String,
+}
+
+/// Helper default returning `true` for serde defaults.
+const fn default_true() -> bool {
+    true
+}
+
+/// Pre-compiled executable representation of a single enabled `ScriptItem`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledScriptUnit {
+    /// Script identifier.
+    pub id: String,
+    /// Script display name.
+    pub name: String,
+    /// Transpiled JavaScript source ready for module execution.
+    pub js_code: String,
+    /// Whether this script exports `onRequest` (or uses legacy inline statement form).
+    pub has_on_request: bool,
+    /// Whether this script exports `onBilling`.
+    pub has_on_billing: bool,
+}
+
+/// Aggregated compile-time metadata extracted from an entity's ordered `scripts[]`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CompiledScriptChain {
+    /// Deduplicated union of `export const tags` across enabled scripts.
+    pub tags: Vec<String>,
+    /// Shallow-merged `export const meta` across enabled scripts (later overwrites earlier).
+    pub meta: Map<String, Value>,
+    /// Distinct hook names exported (`"onRequest"`, `"onBilling"`).
+    pub hooks: Vec<String>,
+    /// Ordered compiled units for enabled scripts that export at least one runtime hook.
+    pub units: Vec<CompiledScriptUnit>,
 }
 
 /// Normalized supply-side provider configuration loaded into `RuntimeCatalog`.
 #[derive(Debug, Clone)]
 pub struct ProviderConfig {
-    /// Optional VS Code provider kind.
-    pub vendor: Option<String>,
-    /// Optional VS Code API kind.
-    pub api_type: Option<String>,
     /// Stable provider identifier.
     pub id: String,
     /// Human-readable display name.
     pub name: String,
-    /// Resolved `LobeHub` icon slug.
+    /// Gateway-managed `LobeHub` icon slug.
     pub icon: String,
-    /// Upstream bearer API key (kept out of `ScriptContext`).
+    /// Whether this provider is enabled.
+    pub enabled: bool,
+    /// Upstream bearer API key (exposed only in stages ④⑤ and `onBilling`, scrubbed from logs).
     pub api_key: String,
-    /// Resolved Stage ⑤ script source if configured.
-    pub script: Option<String>,
-    /// Normalized models keyed in order.
+    /// Ordered script chain.
+    pub scripts: Vec<ScriptItem>,
+    /// Pre-compiled declarations and hooks extracted from `scripts`.
+    pub compiled: CompiledScriptChain,
+    /// Configured models under this provider.
     pub models: Vec<ModelConfig>,
 }
 
@@ -183,70 +86,14 @@ pub struct ModelConfig {
     pub id: String,
     /// Display name.
     pub name: String,
-    /// Resolved `LobeHub` icon slug.
+    /// Gateway-managed `LobeHub` icon slug.
     pub icon: String,
-    /// Upstream URL as configured.
-    pub url: String,
-    /// Supported reasoning effort modes.
-    pub supports_reasoning_effort: Option<Vec<String>>,
-    /// Tool calling support flag.
-    pub tool_calling: Option<bool>,
-    /// Vision support flag.
-    pub vision: Option<bool>,
-    /// Thinking support flag.
-    pub thinking: Option<bool>,
-    /// Streaming support flag.
-    pub streaming: Option<bool>,
-    /// Max input token limit.
-    pub max_input_tokens: Option<u64>,
-    /// Max output token limit.
-    pub max_output_tokens: Option<u64>,
-    /// Resolved Stage ④ script source if configured.
-    pub script: Option<String>,
-}
-
-/// Raw consume-side project deserialized from `projects.json`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RawProjectConfig {
-    /// Project identifier.
-    pub id: String,
-    /// Project display name.
-    pub name: String,
-    /// Optional gateway bearer key required for this project.
-    #[serde(default)]
-    pub api_key: Option<String>,
-    /// Optional `LobeHub` icon slug.
-    #[serde(default)]
-    pub icon: Option<String>,
-    /// Arbitrary metadata exposed as `ctx.project.meta`.
-    #[serde(default)]
-    pub meta: Map<String, Value>,
-    /// Optional Stage ① project script.
-    #[serde(default)]
-    pub script: Option<ScriptSource>,
-    /// Configured virtual/call models under this project.
-    #[serde(default)]
-    pub call_models: Vec<RawCallModelConfig>,
-}
-
-/// Raw consume-side call model deserialized from `projects.json`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RawCallModelConfig {
-    /// Call model identifier clients send as `model` (`"*"` is not allowed).
-    pub id: String,
-    /// Display name.
-    pub name: String,
-    /// Optional `LobeHub` icon slug.
-    #[serde(default)]
-    pub icon: Option<String>,
-    /// Arbitrary metadata exposed as `ctx.callModel.meta`.
-    #[serde(default)]
-    pub meta: Map<String, Value>,
-    /// Optional Stage ② call-model script.
-    #[serde(default)]
-    pub script: Option<ScriptSource>,
+    /// Whether this model is enabled.
+    pub enabled: bool,
+    /// Ordered script chain.
+    pub scripts: Vec<ScriptItem>,
+    /// Pre-compiled declarations and hooks extracted from `scripts`.
+    pub compiled: CompiledScriptChain,
 }
 
 /// Normalized consume-side project configuration.
@@ -256,14 +103,16 @@ pub struct ProjectConfig {
     pub id: String,
     /// Project display name.
     pub name: String,
-    /// Optional gateway authentication key (stripped before entering `ScriptContext`).
-    pub api_key: Option<String>,
-    /// Resolved icon slug.
+    /// Gateway-managed `LobeHub` icon slug.
     pub icon: String,
-    /// Metadata dictionary exposed to scripts.
-    pub meta: Map<String, Value>,
-    /// Resolved Stage ① script source if configured.
-    pub script: Option<String>,
+    /// Whether this project is enabled.
+    pub enabled: bool,
+    /// Plaintext gateway authentication key (stripped before entering `ScriptContext`).
+    pub api_key: String,
+    /// Ordered script chain.
+    pub scripts: Vec<ScriptItem>,
+    /// Pre-compiled declarations and hooks extracted from `scripts`.
+    pub compiled: CompiledScriptChain,
     /// Configured call models.
     pub call_models: Vec<CallModelConfig>,
 }
@@ -275,129 +124,48 @@ pub struct CallModelConfig {
     pub id: String,
     /// Display name.
     pub name: String,
-    /// Resolved icon slug.
+    /// Gateway-managed `LobeHub` icon slug.
     pub icon: String,
-    /// Metadata dictionary exposed to scripts.
-    pub meta: Map<String, Value>,
-    /// Resolved Stage ② script source if configured.
-    pub script: Option<String>,
-}
-
-/// Raw routing rule deserialized from `routes.json`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RawRouteRuleConfig {
-    /// Unique rule identifier.
-    pub id: String,
-    /// Human-readable rule name.
-    pub name: String,
-    /// Whether this rule participates in matching.
-    #[serde(default = "default_true")]
+    /// Whether this call model is enabled.
     pub enabled: bool,
-    /// Matching priority (higher wins).
-    #[serde(default)]
-    pub priority: i32,
-    /// Match predicates (`projectIds`, `callModelIds`).
-    #[serde(rename = "match")]
-    pub match_rule: RouteMatchConfig,
-    /// Candidate pool allow/deny filter patterns.
-    #[serde(default)]
-    pub candidates: RouteCandidatesFilter,
-    /// Optional static primary endpoint.
-    #[serde(default)]
-    pub target: Option<RouteEndpoint>,
-    /// Optional static fallback endpoints.
-    #[serde(default)]
-    pub fallbacks: Vec<RouteEndpoint>,
-    /// Whether to rewrite response `model` field back to `ctx.callModel.id`.
-    #[serde(default)]
-    pub rewrite_response_model: bool,
-    /// Optional Stage ③ routing script.
-    #[serde(default)]
-    pub script: Option<ScriptSource>,
+    /// Ordered script chain.
+    pub scripts: Vec<ScriptItem>,
+    /// Pre-compiled declarations and hooks extracted from `scripts`.
+    pub compiled: CompiledScriptChain,
 }
 
-/// Helper default returning `true` for serde defaults.
-const fn default_true() -> bool {
-    true
-}
-
-/// Matching predicates for a routing rule.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct RouteMatchConfig {
-    /// Project IDs matched by this rule (`"*"` matches any).
-    #[serde(default)]
-    pub project_ids: Vec<String>,
-    /// Call model IDs matched by this rule (`"*"` matches any).
-    #[serde(default)]
-    pub call_model_ids: Vec<String>,
-}
-
-/// Candidate allow/deny glob patterns on `providerId/modelId`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RouteCandidatesFilter {
-    /// Allowed candidate patterns (defaults to `["*"]`).
-    #[serde(default = "default_allow_all")]
-    pub allow: Vec<String>,
-    /// Denied candidate patterns.
-    #[serde(default)]
-    pub deny: Vec<String>,
-}
-
-impl Default for RouteCandidatesFilter {
-    fn default() -> Self {
-        Self {
-            allow: default_allow_all(),
-            deny: Vec::new(),
-        }
-    }
-}
-
-/// Default wildcard allow list.
-fn default_allow_all() -> Vec<String> {
-    vec!["*".to_string()]
-}
-
-/// Normalized routing rule stored in `RuntimeCatalog`.
+/// Normalized routing rule stored in `RuntimeCatalog` (evaluated in `position` order).
 #[derive(Debug, Clone)]
 pub struct RouteRuleConfig {
     /// Unique rule identifier (`ctx.route.ruleId`).
     pub id: String,
     /// Rule display name.
     pub name: String,
+    /// Gateway-managed `LobeHub` icon slug.
+    pub icon: String,
     /// Enabled flag.
     pub enabled: bool,
-    /// Rule priority (higher evaluated first).
-    pub priority: i32,
-    /// Match condition.
-    pub match_rule: RouteMatchConfig,
-    /// Candidate filter configuration.
-    pub candidates: RouteCandidatesFilter,
-    /// Optional default target endpoint.
-    pub target: Option<RouteEndpoint>,
-    /// Optional default fallback endpoints.
-    pub fallbacks: Vec<RouteEndpoint>,
-    /// Response model rewrite flag.
-    pub rewrite_response_model: bool,
-    /// Resolved Stage ③ script source if configured.
-    pub script: Option<String>,
+    /// Ascending evaluation order.
+    pub position: i64,
+    /// Ordered script chain.
+    pub scripts: Vec<ScriptItem>,
+    /// Pre-compiled declarations and hooks extracted from `scripts`.
+    pub compiled: CompiledScriptChain,
 }
 
 /// Five unidirectional script execution stages matching `linguist.d.ts`.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub enum ScriptStage {
-    /// ① Project-level outbound script.
+    /// ① Project-level outbound script chain.
     Project,
-    /// ② Call-model-level outbound script.
+    /// ② Call-model-level outbound script chain.
     CallModel,
-    /// ③ Route selection outbound script.
+    /// ③ Route selection outbound script chain.
     Route,
-    /// ④ Supply model outbound script.
+    /// ④ Supply model outbound script chain.
     Model,
-    /// ⑤ Supply provider outbound script.
+    /// ⑤ Supply provider outbound script chain.
     Provider,
 }
 
@@ -414,121 +182,55 @@ impl fmt::Display for ScriptStage {
     }
 }
 
-/// Unified 9-key context passed to and mutated by scripts across stages ①..⑤.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ScriptContext {
-    /// 1. Current execution stage (read-only).
-    pub stage: ScriptStage,
-    /// 2. Consume-side project metadata (read-only, sanitized).
-    pub project: ProjectMeta,
-    /// 3. Consume-side call model metadata (read-only).
-    pub call_model: CallModelMeta,
-    /// 4. Supply-side provider metadata (read-only, populated for stages ④ and ⑤).
-    pub provider: Option<ProviderMeta>,
-    /// 5. Supply-side model metadata (read-only, populated for stages ④ and ⑤).
-    pub model: Option<ModelMeta>,
-    /// 6. Route control state.
-    pub route: RouteState,
-    /// 7. Mutable outbound HTTP request state.
-    pub request: RequestState,
-    /// 8. Cross-stage shared key-value bag.
-    pub state: Map<String, Value>,
-    /// 9. Immediate request rejection directive.
-    pub reject: Option<RejectDirective>,
-}
-
-/// Sanitized project descriptor exposed as `ctx.project`.
+/// Unified entity descriptor exposed to scripts across all 5 dimensions (`EntityInfo`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct ProjectMeta {
-    /// Project ID.
+pub struct EntityInfo {
+    /// Entity ID.
     pub id: String,
-    /// Project display name.
+    /// Entity display name.
     pub name: String,
-    /// Optional `LobeHub` icon slug.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub icon: Option<String>,
-    /// Project metadata map.
+    /// Gateway-managed `LobeHub` icon slug.
+    pub icon: String,
+    /// Merged `export const tags` declared by the entity's scripts.
+    pub tags: Vec<String>,
+    /// Merged `export const meta` declared by the entity's scripts.
     pub meta: Map<String, Value>,
 }
 
-/// Sanitized call-model descriptor exposed as `ctx.callModel`.
+/// Supply-side provider descriptor exposed in stages ④, ⑤, and `onBilling` (`ProviderInfo`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct CallModelMeta {
-    /// Call model ID (requested `model` string).
-    pub id: String,
-    /// Call model display name.
-    pub name: String,
-    /// Optional `LobeHub` icon slug.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub icon: Option<String>,
-    /// Call model metadata map.
-    pub meta: Map<String, Value>,
-}
-
-/// Sanitized provider descriptor exposed as `ctx.provider` and `c.provider`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ProviderMeta {
+pub struct ProviderInfo {
     /// Provider ID.
     pub id: String,
     /// Provider display name.
     pub name: String,
-    /// Optional `LobeHub` icon slug.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub icon: Option<String>,
-}
-
-/// Sanitized supply model descriptor exposed as `ctx.model` and `c.model`.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
-pub struct ModelMeta {
-    /// Upstream model ID.
-    pub id: String,
-    /// Model display name.
-    pub name: String,
-    /// Optional `LobeHub` icon slug.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub icon: Option<String>,
-    /// Configured upstream URL.
-    pub url: String,
-    /// Supported `reasoning_effort` levels.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub supports_reasoning_effort: Option<Vec<String>>,
-    /// Tool calling support flag.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tool_calling: Option<bool>,
-    /// Vision support flag.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub vision: Option<bool>,
-    /// Thinking support flag.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub thinking: Option<bool>,
-    /// Streaming support flag.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub streaming: Option<bool>,
-    /// Maximum input tokens.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_input_tokens: Option<u64>,
-    /// Maximum output tokens.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub max_output_tokens: Option<u64>,
+    /// Gateway-managed `LobeHub` icon slug.
+    pub icon: String,
+    /// Merged `export const tags` declared by the provider's scripts.
+    pub tags: Vec<String>,
+    /// Merged `export const meta` declared by the provider's scripts.
+    pub meta: Map<String, Value>,
+    /// Upstream API key (populated only in stages ④, ⑤, and `onBilling`; scrubbed before logging).
+    pub api_key: String,
 }
 
 /// Route state exposed as `ctx.route`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RouteState {
-    /// Matched rule ID (`routes.json[].id`).
-    pub rule_id: String,
-    /// Candidate pool (filterable in stages ①/②, ranked in ③).
+    /// Matched rule ID once a route selects a target (`null` prior to selection).
+    pub rule_id: Option<String>,
+    /// Candidate pool (filterable in stages ①/②/③).
     pub candidates: Vec<CandidateItem>,
     /// Selected primary target.
     pub target: Option<RouteEndpoint>,
     /// Ordered fallback targets.
     pub fallbacks: Vec<RouteEndpoint>,
+    /// Whether subsequent routes may continue executing even after `target` is set.
+    #[serde(rename = "continue", default)]
+    pub continue_routing: bool,
     /// Whether response `model` should be rewritten to `callModel.id`.
     pub rewrite_response_model: bool,
 }
@@ -554,7 +256,7 @@ const fn default_max_attempts() -> u8 {
     1
 }
 
-/// Reject invalid retry counts in both static routes and script-generated endpoints.
+/// Reject invalid retry counts in script-generated endpoints.
 fn deserialize_max_attempts<'de, D>(deserializer: D) -> Result<u8, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -574,9 +276,9 @@ where
 #[serde(rename_all = "camelCase")]
 pub struct CandidateItem {
     /// Supply-side provider descriptor.
-    pub provider: ProviderMeta,
+    pub provider: EntityInfo,
     /// Supply-side model descriptor.
-    pub model: ModelMeta,
+    pub model: EntityInfo,
     /// Live sliding-window telemetry metrics.
     pub metrics: CandidateMetrics,
 }
@@ -607,12 +309,21 @@ pub struct RequestState {
     pub uid: String,
     /// 1-based attempt number (read-only).
     pub attempt: u16,
-    /// Outbound HTTP URL (populated for stages ④ and ⑤).
+    /// Outbound HTTP URL (pre-populated before stage ④).
     pub url: String,
     /// Mutable outbound request headers.
     pub headers: BTreeMap<String, String>,
     /// Mutable `OpenAI` chat completions JSON body.
     pub body: Map<String, Value>,
+    /// Whether the gateway injects `stream_options.include_usage = true` for streaming calls.
+    #[serde(default = "default_true")]
+    pub inject_stream_options: bool,
+    /// Optional per-request upstream timeout override in seconds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_secs: Option<u64>,
+    /// Optional per-request list of HTTP status codes triggering fallback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retry_status_codes: Option<Vec<u16>>,
     /// Read-only derived signals extracted from the incoming payload.
     pub signals: RequestSignals,
 }
@@ -643,6 +354,32 @@ pub struct RejectDirective {
     pub message: String,
 }
 
+/// Unified context passed to and mutated by scripts across stages ①..⑤.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ScriptContext {
+    /// 1. Current execution stage (read-only).
+    pub stage: ScriptStage,
+    /// 2. Consume-side project descriptor (read-only).
+    pub project: EntityInfo,
+    /// 3. Consume-side call model descriptor (read-only).
+    pub call_model: EntityInfo,
+    /// 4. Active route rule descriptor in stage ③ (read-only).
+    pub route_info: Option<EntityInfo>,
+    /// 5. Supply-side provider descriptor (read-only, populated for stages ④ and ⑤).
+    pub provider: Option<ProviderInfo>,
+    /// 6. Supply-side model descriptor (read-only, populated for stages ④ and ⑤).
+    pub model: Option<EntityInfo>,
+    /// 7. Route control state.
+    pub route: RouteState,
+    /// 8. Mutable outbound HTTP request state.
+    pub request: RequestState,
+    /// 9. Cross-stage shared key-value bag.
+    pub state: Map<String, Value>,
+    /// 10. Immediate request rejection directive.
+    pub reject: Option<RejectDirective>,
+}
+
 /// Completed request log record sent asynchronously to PostgreSQL.
 #[derive(Debug, Clone)]
 pub struct RequestLogRecord {
@@ -652,12 +389,16 @@ pub struct RequestLogRecord {
     pub parent_request_uid: Option<Uuid>,
     /// 1-based attempt index.
     pub attempt_index: i16,
+    /// Timestamp when the upstream attempt started.
+    pub started_at: DateTime<Utc>,
     /// Timestamp when the request finished.
     pub created_at: DateTime<Utc>,
-    /// Presence-preserving Chat Completions usage for billing.
-    pub billing_usage: Option<crate::billing::BillingUsage>,
-    /// Price and target captured at the start of this upstream attempt.
-    pub billing: crate::billing::AttemptBilling,
+    /// Whether the SSE stream terminated early due to client disconnect or upstream interruption.
+    pub interrupted: bool,
+    /// Full raw upstream `usage` object preserved for `onBilling` scripts.
+    pub raw_usage: Option<Value>,
+    /// Snapshot of the catalog active when the request entered the gateway.
+    pub catalog_snapshot: Option<Arc<crate::catalog::RuntimeCatalog>>,
     /// Project ID snapshot.
     pub project_id: String,
     /// Project display name snapshot.
@@ -692,6 +433,8 @@ pub struct RequestLogRecord {
     pub reasoning_tokens: i64,
     /// Total tokens (`input + output` or upstream `total_tokens`).
     pub total_tokens: i64,
+    /// Extra non-standard token breakdown counters (`JSONB`).
+    pub extra_tokens: BTreeMap<String, i64>,
     /// Time to first token in milliseconds.
     pub ttft_ms: f64,
     /// Total elapsed duration in milliseconds.
@@ -908,10 +651,14 @@ pub struct RecentRequestItem {
     pub output_tokens: i64,
     /// Cache read tokens.
     pub cache_read_tokens: i64,
+    /// Cache creation tokens.
+    pub cache_creation_tokens: i64,
     /// Reasoning tokens.
     pub reasoning_tokens: i64,
     /// Total tokens.
     pub total_tokens: i64,
+    /// Extra non-standard token counters.
+    pub extra_tokens: BTreeMap<String, i64>,
     /// TTFT in milliseconds.
     pub ttft_ms: f64,
     /// Total duration in milliseconds.
@@ -1164,6 +911,8 @@ pub struct CostBucket {
     pub cache_read_amount: f64,
     /// Cache write cost component.
     pub cache_write_amount: f64,
+    /// Other/storage/flat cost component.
+    pub other_amount: f64,
     /// Effective unit cost per 1M total tokens.
     pub cost_per_1m_tokens: f64,
     /// Average cost per priced request.
@@ -1300,17 +1049,31 @@ pub fn infer_model_icon(model_id: &str, model_name: &str, fallback_icon: &str) -
 }
 
 /// Normalizes an upstream base URL into a `/chat/completions` endpoint without
-/// duplicating `/v1` when already present.
+/// duplicating `/v1` when an explicit `/vN` version suffix is already present.
 #[must_use]
 pub fn normalize_chat_completions_url(base_url: &str) -> String {
     let trimmed = base_url.trim().trim_end_matches('/');
+    if trimmed.is_empty() {
+        return String::new();
+    }
     if trimmed.ends_with("/chat/completions") {
         trimmed.to_string()
-    } else if trimmed.ends_with("/v1") {
+    } else if has_version_segment_suffix(trimmed) {
         format!("{trimmed}/chat/completions")
     } else {
         format!("{trimmed}/v1/chat/completions")
     }
+}
+
+/// Checks if a URL ends with `/v<digits>` (e.g., `/v1`, `/api/v3`, `/api/paas/v4`).
+fn has_version_segment_suffix(url: &str) -> bool {
+    let Some((_, last)) = url.rsplit_once('/') else {
+        return false;
+    };
+    let Some(digits) = last.strip_prefix('v') else {
+        return false;
+    };
+    !digits.is_empty() && digits.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Extracts pre-computed `RequestSignals` from an OpenAI-compatible JSON payload.
@@ -1380,59 +1143,84 @@ fn inspect_content_value(
 }
 
 impl ProviderConfig {
-    /// Converts into sanitized `ProviderMeta` for `ScriptContext` (without `apiKey` or `script`).
+    /// Converts into sanitized `EntityInfo` (without `apiKey` or `scripts`) for stages ①..③ & candidates.
     #[must_use]
-    pub fn to_meta(&self) -> ProviderMeta {
-        ProviderMeta {
+    pub fn to_entity_info(&self) -> EntityInfo {
+        EntityInfo {
             id: self.id.clone(),
             name: self.name.clone(),
-            icon: Some(self.icon.clone()),
+            icon: self.icon.clone(),
+            tags: self.compiled.tags.clone(),
+            meta: self.compiled.meta.clone(),
+        }
+    }
+
+    /// Converts into `ProviderInfo` (including `apiKey`) for stages ④, ⑤, and `onBilling`.
+    #[must_use]
+    pub fn to_provider_info(&self) -> ProviderInfo {
+        ProviderInfo {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            icon: self.icon.clone(),
+            tags: self.compiled.tags.clone(),
+            meta: self.compiled.meta.clone(),
+            api_key: self.api_key.clone(),
         }
     }
 }
 
 impl ModelConfig {
-    /// Converts into sanitized `ModelMeta` for `ScriptContext` (without `script`).
+    /// Converts into `EntityInfo` for `ScriptContext`, `CandidateItem`, and `BillingContext`.
     #[must_use]
-    pub fn to_meta(&self) -> ModelMeta {
-        ModelMeta {
+    pub fn to_entity_info(&self) -> EntityInfo {
+        EntityInfo {
             id: self.id.clone(),
             name: self.name.clone(),
-            icon: Some(self.icon.clone()),
-            url: self.url.clone(),
-            supports_reasoning_effort: self.supports_reasoning_effort.clone(),
-            tool_calling: self.tool_calling,
-            vision: self.vision,
-            thinking: self.thinking,
-            streaming: self.streaming,
-            max_input_tokens: self.max_input_tokens,
-            max_output_tokens: self.max_output_tokens,
+            icon: self.icon.clone(),
+            tags: self.compiled.tags.clone(),
+            meta: self.compiled.meta.clone(),
         }
     }
 }
 
 impl ProjectConfig {
-    /// Converts into sanitized `ProjectMeta` for `ScriptContext` (without `apiKey` or `script`).
+    /// Converts into sanitized `EntityInfo` (without `apiKey` or `scripts`).
     #[must_use]
-    pub fn to_meta(&self) -> ProjectMeta {
-        ProjectMeta {
+    pub fn to_entity_info(&self) -> EntityInfo {
+        EntityInfo {
             id: self.id.clone(),
             name: self.name.clone(),
-            icon: Some(self.icon.clone()),
-            meta: self.meta.clone(),
+            icon: self.icon.clone(),
+            tags: self.compiled.tags.clone(),
+            meta: self.compiled.meta.clone(),
         }
     }
 }
 
 impl CallModelConfig {
-    /// Converts into sanitized `CallModelMeta` for `ScriptContext` (without `script`).
+    /// Converts into `EntityInfo` for `ScriptContext` and `BillingContext`.
     #[must_use]
-    pub fn to_meta(&self) -> CallModelMeta {
-        CallModelMeta {
+    pub fn to_entity_info(&self) -> EntityInfo {
+        EntityInfo {
             id: self.id.clone(),
             name: self.name.clone(),
-            icon: Some(self.icon.clone()),
-            meta: self.meta.clone(),
+            icon: self.icon.clone(),
+            tags: self.compiled.tags.clone(),
+            meta: self.compiled.meta.clone(),
+        }
+    }
+}
+
+impl RouteRuleConfig {
+    /// Converts into `EntityInfo` for `ctx.routeInfo` during stage ③.
+    #[must_use]
+    pub fn to_entity_info(&self) -> EntityInfo {
+        EntityInfo {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            icon: self.icon.clone(),
+            tags: self.compiled.tags.clone(),
+            meta: self.compiled.meta.clone(),
         }
     }
 }
@@ -1442,7 +1230,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn url_normalization_handles_v1_variants() {
+    fn url_normalization_handles_version_variants() {
         assert_eq!(
             normalize_chat_completions_url("https://api.deepseek.com"),
             "https://api.deepseek.com/v1/chat/completions"
@@ -1456,8 +1244,12 @@ mod tests {
             "https://opencode.ai/zen/go/v1/chat/completions"
         );
         assert_eq!(
-            normalize_chat_completions_url("https://opencode.ai/zen/go/v1/"),
-            "https://opencode.ai/zen/go/v1/chat/completions"
+            normalize_chat_completions_url("https://ark.cn-beijing.volces.com/api/v3"),
+            "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+        );
+        assert_eq!(
+            normalize_chat_completions_url("https://open.bigmodel.cn/api/paas/v4/"),
+            "https://open.bigmodel.cn/api/paas/v4/chat/completions"
         );
         assert_eq!(
             normalize_chat_completions_url("http://127.0.0.1:8317/v1/chat/completions"),
@@ -1470,9 +1262,6 @@ mod tests {
         assert_eq!(derive_provider_slug("深度求索"), "deepseek");
         assert_eq!(derive_provider_slug("阿里云百炼"), "bailian");
         assert_eq!(derive_provider_slug("Opencode"), "opencode");
-        assert_eq!(derive_provider_slug("Lonnet's"), "lonnets");
-        assert_eq!(derive_provider_slug("Antigravity"), "antigravity");
-        assert_eq!(derive_provider_slug("Codex"), "codex");
 
         assert_eq!(
             infer_provider_icon("deepseek", "深度求索"),
@@ -1489,32 +1278,34 @@ mod tests {
     }
 
     #[test]
-    fn script_context_strips_secrets() {
+    fn script_context_strips_project_key_and_provider_sanitized_info() {
         let project = ProjectConfig {
             id: "coding".to_string(),
             name: "Coding".to_string(),
-            api_key: Some("secret-project-key".to_string()),
             icon: "githubcopilot".to_string(),
-            meta: Map::new(),
-            script: Some("ctx.state.a = 1;".to_string()),
+            enabled: true,
+            api_key: "secret-project-key".to_string(),
+            scripts: Vec::new(),
+            compiled: CompiledScriptChain::default(),
             call_models: Vec::new(),
         };
-        let meta_json = serde_json::to_string(&project.to_meta()).unwrap_or_default();
+        let meta_json = serde_json::to_string(&project.to_entity_info()).unwrap_or_default();
         assert!(!meta_json.contains("secret-project-key"));
-        assert!(!meta_json.contains("ctx.state.a"));
 
         let provider = ProviderConfig {
-            vendor: None,
-            api_type: None,
             id: "deepseek".to_string(),
             name: "DeepSeek".to_string(),
             icon: "deepseek-color".to_string(),
+            enabled: true,
             api_key: "sk-secret-provider".to_string(),
-            script: Some("ctx.request.headers.x = '1';".to_string()),
+            scripts: Vec::new(),
+            compiled: CompiledScriptChain::default(),
             models: Vec::new(),
         };
-        let p_json = serde_json::to_string(&provider.to_meta()).unwrap_or_default();
-        assert!(!p_json.contains("sk-secret-provider"));
-        assert!(!p_json.contains("ctx.request.headers"));
+        let sanitized = serde_json::to_string(&provider.to_entity_info()).unwrap_or_default();
+        assert!(!sanitized.contains("sk-secret-provider"));
+
+        let full = serde_json::to_string(&provider.to_provider_info()).unwrap_or_default();
+        assert!(full.contains("sk-secret-provider"));
     }
 }

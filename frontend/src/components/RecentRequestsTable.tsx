@@ -152,12 +152,24 @@ export function RecentRequestsTable({
                           <span className="token-pill-tag">缓</span>
                           {formatInteger(row.cacheReadTokens)}
                         </span>
+                        {row.cacheCreationTokens > 0 ? (
+                          <span className="token-pill">
+                            <span className="token-pill-tag">缓写</span>
+                            {formatInteger(row.cacheCreationTokens)}
+                          </span>
+                        ) : null}
                         {row.reasoningTokens > 0 ? (
                           <span className="token-pill">
                             <span className="token-pill-tag">思</span>
                             {formatInteger(row.reasoningTokens)}
                           </span>
                         ) : null}
+                        {Object.entries(row.extraTokens).map(([key, val]) => (
+                          <span key={key} className="token-pill">
+                            <span className="token-pill-tag">{key}</span>
+                            {formatInteger(val)}
+                          </span>
+                        ))}
                       </div>
                     </td>
 

@@ -15,7 +15,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use futures::StreamExt;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 use tokio::net::TcpListener;
 
 use linguist::catalog::RuntimeCatalog;
@@ -23,8 +23,8 @@ use linguist::config::{AppConfig, MetricsConfig, ScriptEngineConfig};
 use linguist::db::LogWriterHandle;
 use linguist::metrics_cache::MetricsCache;
 use linguist::models::{
-    CallModelConfig, ModelConfig, ProjectConfig, ProviderConfig, RouteCandidatesFilter,
-    RouteEndpoint, RouteMatchConfig, RouteRuleConfig,
+    CallModelConfig, CompiledScriptChain, ModelConfig, ProjectConfig, ProviderConfig,
+    RouteRuleConfig, ScriptItem,
 };
 use linguist::script_engine::ScriptEngine;
 use linguist::state::AppState;
@@ -164,152 +164,187 @@ async fn spawn_mock_upstream() -> (String, MockUpstreamState) {
     (format!("http://{addr}"), state)
 }
 
+/// Compiles a single-unit `CompiledScriptChain` from TypeScript/JavaScript source.
+fn compile_code(
+    engine: &ScriptEngine,
+    id: &str,
+    code: &str,
+) -> (Vec<ScriptItem>, CompiledScriptChain) {
+    let items = vec![ScriptItem {
+        id: id.to_string(),
+        name: id.to_string(),
+        enabled: true,
+        code: code.to_string(),
+    }];
+    let compiled = engine.compile_chain(&items).unwrap();
+    (items, compiled)
+}
+
 /// Builds mock supply-side providers wired to `mock_base_url`.
-fn e2e_providers(mock_base_url: &str) -> Vec<ProviderConfig> {
+fn e2e_providers(engine: &ScriptEngine, mock_base_url: &str) -> Vec<ProviderConfig> {
+    let (p1_s, p1_c) = compile_code(
+        engine,
+        "p1",
+        "export function onRequest(ctx) { ctx.request.headers['x-prov-tag'] = 'primary'; return ctx; }",
+    );
+    let (m1_s, m1_c) = compile_code(
+        engine,
+        "m1",
+        &format!(
+            "export const meta = {{ url: '{mock_base_url}/primary', supportsReasoningEffort: ['xhigh'], toolCalling: true, vision: true, thinking: true, streaming: true, maxInputTokens: 128000, maxOutputTokens: 16000 }};\n\
+             export function onRequest(ctx) {{ ctx.request.body.reasoning_effort = 'xhigh'; return ctx; }}"
+        ),
+    );
+    let (p2_s, p2_c) = compile_code(
+        engine,
+        "p2",
+        "export function onRequest(ctx) { ctx.request.headers['x-prov-tag'] = 'fallback-clean'; return ctx; }",
+    );
+    let (m2_s, m2_c) = compile_code(
+        engine,
+        "m2",
+        &format!(
+            "export const meta = {{ url: '{mock_base_url}/fallback', supportsReasoningEffort: ['high'], toolCalling: true, vision: true, thinking: true, streaming: true, maxInputTokens: 128000, maxOutputTokens: 16000 }};"
+        ),
+    );
     vec![
         ProviderConfig {
-            vendor: None,
-            api_type: None,
             id: "primary-prov".to_string(),
             name: "Primary".to_string(),
             icon: "openai".to_string(),
+            enabled: true,
             api_key: "sk-primary".to_string(),
-            script: Some("ctx.request.headers['x-prov-tag'] = 'primary';".to_string()),
+            scripts: p1_s,
+            compiled: p1_c,
             models: vec![ModelConfig {
                 id: "m-primary".to_string(),
                 name: "Primary Model".to_string(),
                 icon: "openai".to_string(),
-                url: format!("{mock_base_url}/primary"),
-                supports_reasoning_effort: Some(vec!["xhigh".to_string()]),
-                tool_calling: Some(true),
-                vision: Some(true),
-                thinking: Some(true),
-                streaming: Some(true),
-                max_input_tokens: Some(128_000),
-                max_output_tokens: Some(16_000),
-                script: Some("ctx.request.body.reasoning_effort = 'xhigh';".to_string()),
+                enabled: true,
+                scripts: m1_s,
+                compiled: m1_c,
             }],
         },
         ProviderConfig {
-            vendor: None,
-            api_type: None,
             id: "fallback-prov".to_string(),
             name: "Fallback".to_string(),
             icon: "qwen-color".to_string(),
+            enabled: true,
             api_key: "sk-fallback".to_string(),
-            script: Some("ctx.request.headers['x-prov-tag'] = 'fallback-clean';".to_string()),
+            scripts: p2_s,
+            compiled: p2_c,
             models: vec![ModelConfig {
                 id: "m-fallback".to_string(),
                 name: "Fallback Model".to_string(),
                 icon: "qwen-color".to_string(),
-                url: format!("{mock_base_url}/fallback"),
-                supports_reasoning_effort: Some(vec!["high".to_string()]),
-                tool_calling: Some(true),
-                vision: Some(true),
-                thinking: Some(true),
-                streaming: Some(true),
-                max_input_tokens: Some(128_000),
-                max_output_tokens: Some(16_000),
-                script: None,
+                enabled: true,
+                scripts: m2_s,
+                compiled: m2_c,
             }],
         },
     ]
 }
 
 /// Builds test projects for E2E verification.
-fn e2e_projects() -> Vec<ProjectConfig> {
-    let mut cm_meta = Map::new();
-    cm_meta.insert("defaultEffort".to_string(), json!("high"));
-
+fn e2e_projects(engine: &ScriptEngine) -> Vec<ProjectConfig> {
+    let (cm1_s, cm1_c) = compile_code(
+        engine,
+        "cm1",
+        "export const meta = { defaultEffort: 'high' };\n\
+         export function onRequest(ctx) { ctx.request.body.reasoning_effort ??= ctx.callModel.meta.defaultEffort; return ctx; }",
+    );
     vec![
         ProjectConfig {
             id: "default".to_string(),
             name: "Default".to_string(),
-            api_key: Some("lin-proj-default-secret".to_string()),
+            api_key: "lin-proj-default-secret".to_string(),
             icon: "copilot-color".to_string(),
-            meta: Map::new(),
-            script: None,
+            enabled: true,
+            scripts: vec![],
+            compiled: CompiledScriptChain::default(),
             call_models: vec![CallModelConfig {
                 id: "m-fallback".to_string(),
                 name: "Fallback Passthrough".to_string(),
                 icon: "codex-color".to_string(),
-                meta: Map::new(),
-                script: None,
+                enabled: true,
+                scripts: vec![],
+                compiled: CompiledScriptChain::default(),
             }],
         },
         ProjectConfig {
             id: "coding".to_string(),
             name: "VS Code Coding".to_string(),
-            api_key: Some("lin-proj-coding-secret".to_string()),
+            api_key: "lin-proj-coding-secret".to_string(),
             icon: "githubcopilot".to_string(),
-            meta: Map::new(),
-            script: None,
+            enabled: true,
+            scripts: vec![],
+            compiled: CompiledScriptChain::default(),
             call_models: vec![CallModelConfig {
                 id: "smart-coder".to_string(),
                 name: "Smart Coder".to_string(),
                 icon: "cursor".to_string(),
-                meta: cm_meta,
-                script: Some(
-                    "ctx.request.body.reasoning_effort ??= ctx.callModel.meta.defaultEffort;"
-                        .to_string(),
-                ),
+                enabled: true,
+                scripts: cm1_s,
+                compiled: cm1_c,
             }],
         },
     ]
 }
 
 /// Builds test routing rules for E2E verification.
-fn e2e_routes() -> Vec<RouteRuleConfig> {
+fn e2e_routes(engine: &ScriptEngine) -> Vec<RouteRuleConfig> {
+    let (r1_s, r1_c) = compile_code(
+        engine,
+        "r1",
+        "export function onRequest(ctx) {\n\
+           if (ctx.project.id === 'coding' && ctx.callModel.id === 'smart-coder') {\n\
+             ctx.route.target = { providerId: 'primary-prov', modelId: 'm-primary', maxAttempts: 1 };\n\
+             ctx.route.fallbacks = [{ providerId: 'fallback-prov', modelId: 'm-fallback', maxAttempts: 1 }];\n\
+             ctx.route.rewriteResponseModel = true;\n\
+           }\n\
+           return ctx;\n\
+         }",
+    );
+    let (r2_s, r2_c) = compile_code(
+        engine,
+        "r2",
+        "export function onRequest(ctx) {\n\
+           const match = ctx.route.candidates.find(c => c.model.id === ctx.callModel.id);\n\
+           if (!match) { ctx.reject = { statusCode: 404, message: 'Not found' }; return ctx; }\n\
+           ctx.route.target = { providerId: match.provider.id, modelId: match.model.id };\n\
+           return ctx;\n\
+         }",
+    );
     vec![
         RouteRuleConfig {
             id: "coding-smart".to_string(),
             name: "Coding Smart".to_string(),
+            icon: "route".to_string(),
             enabled: true,
-            priority: 100,
-            match_rule: RouteMatchConfig {
-                project_ids: vec!["coding".to_string()],
-                call_model_ids: vec!["smart-coder".to_string()],
-            },
-            candidates: RouteCandidatesFilter::default(),
-            target: Some(RouteEndpoint {
-                provider_id: "primary-prov".to_string(),
-                model_id: "m-primary".to_string(),
-                max_attempts: 1,
-            }),
-            fallbacks: vec![RouteEndpoint {
-                provider_id: "fallback-prov".to_string(),
-                model_id: "m-fallback".to_string(),
-                max_attempts: 1,
-            }],
-            rewrite_response_model: true,
-            script: None,
+            position: 1,
+            scripts: r1_s,
+            compiled: r1_c,
         },
         RouteRuleConfig {
             id: "default-pass".to_string(),
             name: "Default Pass".to_string(),
+            icon: "route".to_string(),
             enabled: true,
-            priority: 0,
-            match_rule: RouteMatchConfig {
-                project_ids: vec!["*".to_string()],
-                call_model_ids: vec!["*".to_string()],
-            },
-            candidates: RouteCandidatesFilter::default(),
-            target: None,
-            fallbacks: Vec::new(),
-            rewrite_response_model: false,
-            script: Some(
-                "const match = ctx.route.candidates.find(c => c.model.id === ctx.callModel.id); \
-                 if (!match) { ctx.reject = { statusCode: 404, message: 'Not found' }; return; } \
-                 ctx.route.target = { providerId: match.provider.id, modelId: match.model.id };"
-                    .to_string(),
-            ),
+            position: 2,
+            scripts: r2_s,
+            compiled: r2_c,
         },
     ]
 }
 
 /// Builds the test `RuntimeCatalog` wired to `mock_base_url`.
 fn build_e2e_catalog(mock_base_url: &str) -> RuntimeCatalog {
-    RuntimeCatalog::new(e2e_providers(mock_base_url), e2e_projects(), e2e_routes())
+    let engine = ScriptEngine::new(ScriptEngineConfig::default());
+    RuntimeCatalog::new(
+        e2e_providers(&engine, mock_base_url),
+        e2e_projects(&engine),
+        e2e_routes(&engine),
+    )
 }
 
 /// Spawns an in-process Linguist gateway wired to the mock upstream and returns `base_url`.
@@ -396,9 +431,26 @@ async fn streaming_timeout_tracks_inactivity_not_total_duration() {
     });
     let mut config = AppConfig::default();
     config.server.upstream_timeout_secs = 5;
-    let mut routes = e2e_routes();
-    routes[0].fallbacks.clear();
-    let catalog = RuntimeCatalog::new(e2e_providers(&mock_url), e2e_projects(), routes);
+    let engine = ScriptEngine::new(ScriptEngineConfig::default());
+    let mut routes = e2e_routes(&engine);
+    let (r_s, r_c) = compile_code(
+        &engine,
+        "r1",
+        "export function onRequest(ctx) {\n\
+           if (ctx.project.id === 'coding' && ctx.callModel.id === 'smart-coder') {\n\
+             ctx.route.target = { providerId: 'primary-prov', modelId: 'm-primary', maxAttempts: 1 };\n\
+             ctx.route.rewriteResponseModel = true;\n\
+           }\n\
+           return ctx;\n\
+         }",
+    );
+    routes[0].scripts = r_s;
+    routes[0].compiled = r_c;
+    let catalog = RuntimeCatalog::new(
+        e2e_providers(&engine, &mock_url),
+        e2e_projects(&engine),
+        routes,
+    );
     let gateway = spawn_gateway_with_config(catalog, config).await;
     let url = format!("{gateway}/model/coding/v1/chat/completions");
     let client = reqwest::Client::new();
@@ -462,21 +514,33 @@ async fn endpoint_retries_are_bounded_and_start_over_for_each_request() {
         StatusCode::OK,
         StatusCode::BAD_REQUEST,
     ]);
-    let mut routes = e2e_routes();
-    routes[0].script = Some(
-        "ctx.route.target = { providerId: 'primary-prov', modelId: 'm-primary', maxAttempts: 2 }; \
-         ctx.route.fallbacks = [ \
-           { providerId: 'primary-prov', modelId: 'm-primary', maxAttempts: 5 }, \
-           { providerId: 'fallback-prov', modelId: 'm-fallback' } \
-         ];"
-        .to_string(),
+    let engine = ScriptEngine::new(ScriptEngineConfig::default());
+    let mut routes = e2e_routes(&engine);
+    let (r_s, r_c) = compile_code(
+        &engine,
+        "r1",
+        "export function onRequest(ctx) {\n\
+           ctx.route.target = { providerId: 'primary-prov', modelId: 'm-primary', maxAttempts: 2 };\n\
+           ctx.route.fallbacks = [\n\
+             { providerId: 'primary-prov', modelId: 'm-primary', maxAttempts: 5 },\n\
+             { providerId: 'fallback-prov', modelId: 'm-fallback' }\n\
+           ];\n\
+           return ctx;\n\
+         }",
     );
-    let mut providers = e2e_providers(&mock_url);
+    routes[0].scripts = r_s;
+    routes[0].compiled = r_c;
+    let mut providers = e2e_providers(&engine, &mock_url);
     for provider in &mut providers {
-        provider.script =
-            Some("ctx.request.headers['x-attempt'] = String(ctx.request.attempt);".to_string());
+        let (p_s, p_c) = compile_code(
+            &engine,
+            "attempt",
+            "export function onRequest(ctx) { ctx.request.headers['x-attempt'] = String(ctx.request.attempt); return ctx; }",
+        );
+        provider.scripts = p_s;
+        provider.compiled = p_c;
     }
-    let catalog = RuntimeCatalog::new(providers, e2e_projects(), routes);
+    let catalog = RuntimeCatalog::new(providers, e2e_projects(&engine), routes);
     let gw_url = spawn_gateway_with_catalog(catalog).await;
     let client = reqwest::Client::new();
     let coding = format!("{gw_url}/model/coding/v1/chat/completions");
@@ -549,18 +613,29 @@ async fn post_chat(
 #[ignore = "requires a disposable PostgreSQL server via DATABASE_URL"]
 async fn gateway_prices_each_attempt_from_its_captured_price(pool: sqlx::PgPool) {
     let (mock_url, _) = spawn_mock_upstream().await;
-    sqlx::query("UPDATE catalog_state SET billing_prices=$1 WHERE singleton")
-        .bind(json!([{ "providerId":"fallback-prov", "modelId":"m-fallback", "currency":"USD", "source":"fixture", "tiers":[{
-            "minInputTokens":0, "inputPrice":"2", "outputPrice":"8", "cacheReadPrice":null,
-            "cacheWriteMode":"input", "cacheWritePrice":null
-        }] }])).execute(&pool).await.unwrap();
+    let engine = ScriptEngine::new(ScriptEngineConfig::default());
+    let mut providers = e2e_providers(&engine, &mock_url);
+    let (m2_s, m2_c) = compile_code(
+        &engine,
+        "m2-billing",
+        &format!(
+            "export const meta = {{ url: '{mock_url}/fallback', currencies: ['USD'] }};\n\
+             export function onBilling(b) {{\n\
+               const spec = {{ currency: 'USD', tiers: [{{ minInputTokens: 0, inputPrice: '2', outputPrice: '8' }}] }};\n\
+               linguist.tierBilling(b, spec);\n\
+             }}"
+        ),
+    );
+    providers[1].models[0].scripts = m2_s;
+    providers[1].models[0].compiled = m2_c;
+    let catalog = RuntimeCatalog::new(providers, e2e_projects(&engine), e2e_routes(&engine));
     let cfg = AppConfig::default();
-    let writer = LogWriterHandle::spawn(pool.clone(), cfg.database.clone(), 0);
+    let writer = LogWriterHandle::spawn(pool.clone(), cfg.database.clone(), 0, engine.clone());
     let state = AppState::new(
         cfg,
-        Arc::new(ArcSwap::from_pointee(build_e2e_catalog(&mock_url))),
+        Arc::new(ArcSwap::from_pointee(catalog)),
         MetricsCache::new(&MetricsConfig::default()),
-        ScriptEngine::new(ScriptEngineConfig::default()),
+        engine,
         Some(pool.clone()),
         Some(writer),
     )

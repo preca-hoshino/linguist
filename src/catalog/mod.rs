@@ -1,22 +1,22 @@
 //! Configuration catalog snapshot (`RuntimeCatalog`) and `CatalogProvider` abstraction.
 
-pub mod json_loader;
+pub mod migrate_v02;
 pub mod postgres;
-pub(crate) mod read;
+pub mod read;
 pub mod secrets;
 pub mod sync;
-mod validation;
+pub mod validation;
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 use anyhow::Result;
 use async_trait::async_trait;
-use secrets::{CatalogSecrets, tokens_equal};
 use serde_json::{Value, json};
 
+use crate::catalog::secrets::tokens_equal;
 use crate::models::{
     CallModelConfig, CandidateItem, CandidateMetrics, ModelConfig, ProjectConfig, ProviderConfig,
-    RouteCandidatesFilter, RouteRuleConfig,
+    RouteRuleConfig,
 };
 
 /// Loads a complete runtime snapshot, independent of the storage backend.
@@ -27,36 +27,25 @@ pub trait CatalogProvider: Send + Sync {
 }
 
 /// Immutable in-memory snapshot of supply providers/models, consume projects/callModels,
-/// and routing rules stored inside `ArcSwap<RuntimeCatalog>`.
+/// and ordered routing rules stored inside `ArcSwap<RuntimeCatalog>`.
 #[derive(Debug, Clone, Default)]
 pub struct RuntimeCatalog {
-    /// Supply-side providers and models.
+    /// Supply-side providers and models ordered by `position`.
     pub providers: Vec<ProviderConfig>,
     /// Lookup index `provider_id -> index in providers`.
     provider_by_id: HashMap<String, usize>,
-    /// Consume-side projects and call models.
+    /// Consume-side projects and call models ordered by `position`.
     pub projects: Vec<ProjectConfig>,
     /// Lookup index `project_id -> index in projects`.
     project_by_id: HashMap<String, usize>,
-    /// Routing rules sorted descending by `priority`.
+    /// Routing rules ordered ascending by `position`.
     pub routes: Vec<RouteRuleConfig>,
-    /// Committed PostgreSQL revision; zero for a file or test snapshot.
+    /// Committed PostgreSQL revision; zero for an empty cold-start or test snapshot.
     revision: i64,
-    /// Project credentials for a database-backed catalog.
-    project_auth: Option<ProjectAuth>,
-}
-
-/// Keyed project digests travel with the rest of the runtime snapshot.
-#[derive(Debug, Clone)]
-struct ProjectAuth {
-    /// Shared catalog secrets.
-    secrets: CatalogSecrets,
-    /// Digest keyed by the project ID.
-    digests: HashMap<String, Vec<u8>>,
 }
 
 impl RuntimeCatalog {
-    /// Constructs a new `RuntimeCatalog` and indexes providers, projects, and sorted routes.
+    /// Constructs a new `RuntimeCatalog` and indexes providers, projects, and ordered routes.
     #[must_use]
     pub fn new(
         providers: Vec<ProviderConfig>,
@@ -73,7 +62,7 @@ impl RuntimeCatalog {
             project_by_id.insert(p.id.clone(), idx);
         }
 
-        routes.sort_by_key(|a| std::cmp::Reverse(a.priority));
+        routes.sort_by_key(|r| r.position);
 
         Self {
             providers,
@@ -82,40 +71,28 @@ impl RuntimeCatalog {
             project_by_id,
             routes,
             revision: 0,
-            project_auth: None,
         }
     }
 
-    /// Returns the loaded PostgreSQL revision (zero for an uncommitted snapshot).
+    /// Returns the loaded PostgreSQL revision (zero for an empty/uncommitted snapshot).
     #[must_use]
     pub const fn revision(&self) -> i64 {
         self.revision
     }
 
-    /// Binds project authentication to the same revision used for model routing.
-    fn with_project_auth(
-        mut self,
-        revision: i64,
-        secrets: CatalogSecrets,
-        digests: HashMap<String, Vec<u8>>,
-    ) -> Self {
+    /// Attaches the committed PostgreSQL revision to this snapshot.
+    #[must_use]
+    pub const fn with_revision(mut self, revision: i64) -> Self {
         self.revision = revision;
-        self.project_auth = Some(ProjectAuth { secrets, digests });
         self
     }
 
-    /// Verifies a project bearer credential against this snapshot.
+    /// Verifies a project bearer credential against this snapshot in constant time.
     #[must_use]
     pub fn verify_project_key(&self, project_id: &str, token: &str) -> bool {
-        if let Some(auth) = &self.project_auth {
-            return auth
-                .digests
-                .get(project_id)
-                .is_some_and(|digest| auth.secrets.verify_project(project_id, token, digest));
-        }
         self.find_project(project_id)
-            .and_then(|project| project.api_key.as_deref())
-            .is_some_and(|key| tokens_equal(key.as_bytes(), token.as_bytes()))
+            .filter(|project| project.enabled && !project.api_key.trim().is_empty())
+            .is_some_and(|project| tokens_equal(project.api_key.as_bytes(), token.as_bytes()))
     }
 
     /// Looks up a provider by ID.
@@ -146,71 +123,56 @@ impl RuntimeCatalog {
             .and_then(|&idx| self.projects.get(idx))
     }
 
-    /// Resolves `(project, callModel)` by exact match of the requested model against the
-    /// project's declared `callModels` (there is no wildcard fallback).
+    /// Resolves an enabled `(project, callModel)` by exact ID match.
     #[must_use]
     pub fn resolve_project_and_call_model(
         &self,
         project_id: &str,
         requested_model: &str,
     ) -> Option<(&ProjectConfig, &CallModelConfig)> {
-        let project = self.find_project(project_id)?;
+        let project = self.find_project(project_id).filter(|p| p.enabled)?;
         project
             .call_models
             .iter()
-            .find(|cm| cm.id == requested_model)
+            .find(|cm| cm.enabled && cm.id == requested_model)
             .map(|cm| (project, cm))
     }
 
-    /// Finds the highest-priority enabled route rule matching `(project_id, call_model_id)`.
-    #[must_use]
-    pub fn match_route_rule(
-        &self,
-        project_id: &str,
-        call_model_id: &str,
-    ) -> Option<&RouteRuleConfig> {
-        self.routes.iter().find(|rule| {
-            rule.enabled
-                && list_matches(&rule.match_rule.project_ids, project_id)
-                && list_matches(&rule.match_rule.call_model_ids, call_model_id)
-        })
-    }
-
-    /// Expands all eligible `(provider, model)` candidates for `rule` and enriches each
-    /// with live sliding-window metrics via `metrics_lookup`.
-    pub fn build_candidates<F>(
-        &self,
-        rule: &RouteRuleConfig,
-        metrics_lookup: F,
-    ) -> Vec<CandidateItem>
+    /// Builds the full enabled `(provider, model)` candidate pool enriched with live metrics.
+    pub fn build_all_candidates<F>(&self, metrics_lookup: F) -> Vec<CandidateItem>
     where
         F: Fn(&str, &str) -> CandidateMetrics,
     {
         let mut out = Vec::new();
         for provider in &self.providers {
+            if !provider.enabled {
+                continue;
+            }
             for model in &provider.models {
-                if candidate_allowed(&rule.candidates, &provider.id, &model.id) {
-                    out.push(CandidateItem {
-                        provider: provider.to_meta(),
-                        model: model.to_meta(),
-                        metrics: metrics_lookup(&provider.id, &model.id),
-                    });
+                if !model.enabled {
+                    continue;
                 }
+                out.push(CandidateItem {
+                    provider: provider.to_entity_info(),
+                    model: model.to_entity_info(),
+                    metrics: metrics_lookup(&provider.id, &model.id),
+                });
             }
         }
         out
     }
 
     /// Builds the OpenAI-compatible model list for `/model/{project_id}/v1/models`:
-    /// exactly the project's declared `callModels`. Unknown projects yield an empty list.
+    /// all enabled `callModels` declared under the project.
     #[must_use]
     pub fn list_openai_models(&self, project_id: &str) -> Vec<Value> {
-        let Some(project) = self.find_project(project_id) else {
+        let Some(project) = self.find_project(project_id).filter(|p| p.enabled) else {
             return Vec::new();
         };
         project
             .call_models
             .iter()
+            .filter(|cm| cm.enabled)
             .map(|cm| {
                 json!({
                     "id": cm.id,
@@ -221,48 +183,39 @@ impl RuntimeCatalog {
             })
             .collect()
     }
+
     /// Total count of configured models across all supply providers.
     #[must_use]
     pub fn total_models(&self) -> usize {
         self.providers.iter().map(|p| p.models.len()).sum()
     }
-}
 
-/// Checks if `patterns` contains `"*"` or an exact match for `value`.
-fn list_matches(patterns: &[String], value: &str) -> bool {
-    patterns.iter().any(|p| p == "*" || p == value)
-}
-
-/// Evaluates `allow` and `deny` candidate filter rules for `(provider_id, model_id)`.
-fn candidate_allowed(filter: &RouteCandidatesFilter, provider_id: &str, model_id: &str) -> bool {
-    let allowed = if filter.allow.is_empty() {
-        true
-    } else {
-        filter
-            .allow
-            .iter()
-            .any(|pat| pattern_matches(pat, provider_id, model_id))
-    };
-    if !allowed {
-        return false;
+    /// Extracts distinct 3-letter currency codes declared in provider/model `meta` for FX warmup.
+    #[must_use]
+    pub fn declared_currencies(&self) -> BTreeSet<String> {
+        let mut out = BTreeSet::new();
+        for p in &self.providers {
+            collect_currency_from_meta(&p.compiled.meta, &mut out);
+            for m in &p.models {
+                collect_currency_from_meta(&m.compiled.meta, &mut out);
+            }
+        }
+        out
     }
-    !filter
-        .deny
-        .iter()
-        .any(|pat| pattern_matches(pat, provider_id, model_id))
 }
 
-/// Matches patterns of the form `"*"`, `"provider/*"`, `"provider/model"`, or `"model"`.
-fn pattern_matches(pattern: &str, provider_id: &str, model_id: &str) -> bool {
-    let pat = pattern.trim();
-    if pat == "*" {
-        return true;
-    }
-    if let Some((p_pat, m_pat)) = pat.split_once('/') {
-        let p_ok = p_pat == "*" || p_pat == provider_id;
-        let m_ok = m_pat == "*" || m_pat == model_id;
-        p_ok && m_ok
-    } else {
-        pat == model_id || pat == provider_id
+/// Inspects `meta.currency` and `meta.pricing.currency` for 3-letter ISO currency codes.
+fn collect_currency_from_meta(meta: &serde_json::Map<String, Value>, out: &mut BTreeSet<String>) {
+    let candidates = [
+        meta.get("currency").and_then(Value::as_str),
+        meta.get("pricing")
+            .and_then(|p| p.get("currency"))
+            .and_then(Value::as_str),
+    ];
+    for c in candidates.into_iter().flatten() {
+        let upper = c.trim().to_ascii_uppercase();
+        if upper.len() == 3 && upper.bytes().all(|b| b.is_ascii_uppercase()) {
+            out.insert(upper);
+        }
     }
 }

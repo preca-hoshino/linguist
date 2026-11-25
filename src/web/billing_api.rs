@@ -3,8 +3,8 @@
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
-use axum::extract::{Extension, Query, State};
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::extract::{Query, State};
+use axum::http::{StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -15,11 +15,8 @@ use serde_json::{Value, json};
 use sqlx::{PgPool, Row, postgres::PgRow};
 use uuid::Uuid;
 
-use crate::auth::session::AdminSession;
 use crate::billing::fx::{RateSnapshot, convert_totals};
-use crate::billing::{PriceSchedule, PriceTier};
 use crate::state::AppState;
-use crate::web::auth_api;
 
 /// Registers billing endpoints (all protected by the admin session middleware).
 pub(super) fn router() -> Router<AppState> {
@@ -27,7 +24,6 @@ pub(super) fn router() -> Router<AppState> {
         .route("/api/v1/billing/fx", get(exchange_rate))
         .route("/api/v1/billing/report", get(report))
         .route("/api/v1/billing/attempts", get(attempts))
-        .route("/api/v1/billing/prices", get(prices).post(publish_price))
 }
 
 /// Registers dashboard billing endpoints under `/api/v1/stats/*` (protected by admin session).
@@ -35,88 +31,6 @@ pub(super) fn stats_router() -> Router<AppState> {
     Router::new()
         .route("/api/v1/stats/billing", post(dashboard))
         .route("/api/v1/stats/billing/attempts", get(attempts))
-}
-
-/// Provider-scoped model identity.
-#[derive(Debug, Deserialize)]
-struct PriceQuery {
-    /// Provider identifier.
-    provider_id: String,
-    /// Model identifier.
-    model_id: String,
-}
-
-/// Incoming current price schedule.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct PublishPrice {
-    /// Provider identity.
-    provider_id: String,
-    /// Model identity.
-    model_id: String,
-    /// Original currency.
-    currency: String,
-    /// Optional source description.
-    #[serde(default)]
-    source: String,
-    /// Inclusive maximum prompt size for the schedule.
-    #[serde(default)]
-    max_input_tokens: Option<i64>,
-    /// Price tiers.
-    tiers: Vec<PriceTier>,
-}
-
-/// Returns the current price for a provider-scoped model.
-async fn prices(State(state): State<AppState>, Query(query): Query<PriceQuery>) -> Response {
-    let Some(pool) = state.db_pool.as_ref() else {
-        return fail(StatusCode::SERVICE_UNAVAILABLE, "billing_unavailable");
-    };
-    match crate::billing::load_price(pool, &query.provider_id, &query.model_id).await {
-        Ok(item) => (
-            [(header::CACHE_CONTROL, "no-store")],
-            Json(json!({ "item": item })),
-        )
-            .into_response(),
-        Err(error) => database_error(&error),
-    }
-}
-
-/// Saves the current price.
-async fn publish_price(
-    State(state): State<AppState>,
-    Extension(session): Extension<AdminSession>,
-    headers: HeaderMap,
-    Json(input): Json<PublishPrice>,
-) -> Response {
-    if !auth_api::verify_csrf(&session, &headers) {
-        return fail(StatusCode::FORBIDDEN, "csrf_mismatch");
-    }
-    let Some(pool) = state.db_pool.as_ref() else {
-        return fail(StatusCode::SERVICE_UNAVAILABLE, "billing_unavailable");
-    };
-    let schedule = PriceSchedule {
-        provider_id: input.provider_id,
-        model_id: input.model_id,
-        currency: input.currency,
-        source: input.source,
-        max_input_tokens: input.max_input_tokens,
-        tiers: input.tiers,
-    };
-    if schedule.validate().is_err() {
-        return fail(StatusCode::BAD_REQUEST, "invalid_price");
-    }
-    match save_price(pool, &schedule).await {
-        Ok(true) => {
-            crate::billing::fx::refresh_after_price_change(&state);
-            (
-                [(header::CACHE_CONTROL, "no-store")],
-                Json(json!({ "item": schedule })),
-            )
-                .into_response()
-        }
-        Ok(false) => fail(StatusCode::NOT_FOUND, "model_not_found"),
-        Err(error) => database_error(&error),
-    }
 }
 
 /// Source currency for a reference rate.
@@ -167,40 +81,6 @@ async fn exchange_rate(State(state): State<AppState>, Query(query): Query<FxQuer
         .map(|item| item.date);
     Json(json!({"target":target,"rate":rate.map(|value| value.to_string()),"date":date}))
         .into_response()
-}
-
-/// Locks the state row so concurrent JSON imports or price edits cannot overwrite one another.
-async fn save_price(pool: &PgPool, schedule: &PriceSchedule) -> Result<bool, anyhow::Error> {
-    let mut tx = pool.begin().await?;
-    let raw: Option<Value> =
-        sqlx::query_scalar("SELECT billing_prices FROM catalog_state WHERE singleton FOR UPDATE")
-            .fetch_one(&mut *tx)
-            .await?;
-    let mut schedules: Vec<PriceSchedule> = raw
-        .map(serde_json::from_value)
-        .transpose()?
-        .unwrap_or_default();
-    let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM catalog_provider_models WHERE provider_id=$1 AND id=$2)",
-    )
-    .bind(&schedule.provider_id)
-    .bind(&schedule.model_id)
-    .fetch_one(&mut *tx)
-    .await?;
-    if !exists {
-        tx.rollback().await?;
-        return Ok(false);
-    }
-    schedules.retain(|item| {
-        item.provider_id != schedule.provider_id || item.model_id != schedule.model_id
-    });
-    schedules.push(schedule.clone());
-    sqlx::query("UPDATE catalog_state SET billing_prices=$1 WHERE singleton")
-        .bind(serde_json::to_value(schedules)?)
-        .execute(&mut *tx)
-        .await?;
-    tx.commit().await?;
-    Ok(true)
 }
 
 /// Filters matching the telemetry overview and its visible request rows.

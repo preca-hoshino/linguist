@@ -1,21 +1,3 @@
-export interface PriceTier {
-  minInputTokens: number;
-  inputPrice: string;
-  outputPrice: string;
-  cacheReadPrice: string | null;
-  cacheWriteMode: "input" | "separate" | "unsupported";
-  cacheWritePrice: string | null;
-}
-
-export interface PriceSchedule {
-  providerId: string;
-  modelId: string;
-  currency: string;
-  source: string;
-  maxInputTokens: number | null;
-  tiers: PriceTier[];
-}
-
 export interface BillingAttempt {
   requestUid: string;
   parentRequestUid: string | null;
@@ -78,22 +60,6 @@ async function request<T>(path: string, signal: AbortSignal, init?: RequestInit)
   return await response.json() as T;
 }
 
-export function getPrices(providerId: string, modelId: string, signal: AbortSignal) {
-  const query = new URLSearchParams({ provider_id: providerId, model_id: modelId });
-  return request<{ item: PriceSchedule | null }>(`prices?${query}`, signal);
-}
-
-export function savePrice(price: PriceSchedule, csrfToken: string, signal: AbortSignal) {
-  return request<{ item: PriceSchedule }>("prices", signal, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-CSRF-Token": csrfToken,
-    },
-    body: JSON.stringify(price),
-  });
-}
-
 export function getReferenceRate(currency: string, signal: AbortSignal) {
   return request<{ target: string | null; rate: string | null; date: string | null }>(`fx?${new URLSearchParams({ currency })}`, signal);
 }
@@ -122,9 +88,17 @@ async function statsRequest<T>(path: string, signal: AbortSignal, init?: Request
 }
 
 const statusLabels: Record<string, string> = {
-  estimated: "估算", missing_price: "未配置价格", missing_usage: "缺少用量", invalid_usage: "用量异常",
-  unsupported_price: "不支持计价", target_changed: "上游地址或模型已改写",
-  pricing_error: "计价失败", invalid_price: "价格无效",
+  priced: "已计价",
+  unpriced: "未配置计价",
+  script_error: "脚本计价失败",
+  estimated: "估算",
+  missing_price: "未配置价格",
+  missing_usage: "缺少用量",
+  invalid_usage: "用量异常",
+  unsupported_price: "不支持计价",
+  target_changed: "上游地址或模型已改写",
+  pricing_error: "计价失败",
+  invalid_price: "价格无效",
 };
 
 export function billingStatus(status: string | null): string {
