@@ -10,7 +10,9 @@ use std::time::Instant;
 use bytes::Bytes;
 use chrono::Utc;
 use futures::Stream;
+use serde::Deserialize;
 use serde_json::Value;
+use serde_json::value::RawValue;
 use uuid::Uuid;
 
 use crate::metrics_cache::{MetricSample, MetricsCache};
@@ -169,38 +171,80 @@ impl StreamTelemetryTracker {
     /// lines if `rewrite_response_model` is enabled, and returns transformed bytes
     /// ready to forward immediately downstream.
     pub fn process_sse_chunk(&mut self, chunk: &[u8]) -> Bytes {
+        self.process_sse_bytes(Bytes::copy_from_slice(chunk))
+    }
+
+    /// Zero-copy-capable SSE processor taking ownership of `Bytes` chunks.
+    ///
+    /// When `rewrite_response_model` is `false`, returns `chunk` untouched without
+    /// allocating an output buffer or copying bytes.
+    pub fn process_sse_bytes(&mut self, chunk: Bytes) -> Bytes {
         let now = Instant::now();
-        self.line_buffer.extend_from_slice(chunk);
 
+        if !self.meta.rewrite_response_model {
+            if self.line_buffer.is_empty() {
+                let mut start = 0usize;
+                for (i, &b) in chunk.iter().enumerate() {
+                    if b == b'\n' || b == b'\r' {
+                        if i > start
+                            && let Ok(line_str) = std::str::from_utf8(&chunk[start..i])
+                        {
+                            self.inspect_sse_line_readonly(line_str, now);
+                        }
+                        start = i + 1;
+                    }
+                }
+                if start < chunk.len() {
+                    self.line_buffer.extend_from_slice(&chunk[start..]);
+                }
+                return chunk;
+            }
+
+            let mut buf = std::mem::take(&mut self.line_buffer);
+            buf.extend_from_slice(&chunk);
+            let mut cursor = 0usize;
+            while let Some(rel) = buf[cursor..].iter().position(|&b| b == b'\n' || b == b'\r') {
+                let end = cursor + rel;
+                if end > cursor
+                    && let Ok(line_str) = std::str::from_utf8(&buf[cursor..end])
+                {
+                    self.inspect_sse_line_readonly(line_str, now);
+                }
+                cursor = end + 1;
+            }
+            if cursor < buf.len() {
+                buf.drain(..cursor);
+                self.line_buffer = buf;
+            }
+            return chunk;
+        }
+
+        let mut buf = std::mem::take(&mut self.line_buffer);
+        buf.extend_from_slice(&chunk);
         let mut output = Vec::with_capacity(chunk.len() + 64);
+        let mut cursor = 0usize;
 
-        while let Some(newline_pos) = self
-            .line_buffer
-            .iter()
-            .position(|&b| b == b'\n' || b == b'\r')
-        {
-            let mut line_bytes: Vec<u8> = self.line_buffer.drain(..=newline_pos).collect();
-            let delimiter = line_bytes[newline_pos];
-            line_bytes.truncate(newline_pos);
+        while let Some(rel) = buf[cursor..].iter().position(|&b| b == b'\n' || b == b'\r') {
+            let newline_pos = cursor + rel;
+            let delimiter = buf[newline_pos];
+            let line_slice = &buf[cursor..newline_pos];
 
-            if let Ok(line_str) = std::str::from_utf8(&line_bytes)
-                && let Some(rewritten) = self.inspect_sse_line(line_str, now)
+            if let Ok(line_str) = std::str::from_utf8(line_slice)
+                && let Some(rewritten) = self.inspect_sse_line_rewrite(line_str, now)
             {
                 output.extend_from_slice(rewritten.as_bytes());
-            } else if self.meta.rewrite_response_model {
-                output.extend_from_slice(&line_bytes);
+            } else {
+                output.extend_from_slice(line_slice);
             }
-
-            if self.meta.rewrite_response_model {
-                output.push(delimiter);
-            }
+            output.push(delimiter);
+            cursor = newline_pos + 1;
+        }
+        if cursor < buf.len() {
+            buf.drain(..cursor);
+            self.line_buffer = buf;
         }
 
-        if self.meta.rewrite_response_model {
-            Bytes::from(output)
-        } else {
-            Bytes::copy_from_slice(chunk)
-        }
+        Bytes::from(output)
     }
 
     /// Flushes any trailing incomplete SSE line when the upstream stream closes.
@@ -210,10 +254,14 @@ impl StreamTelemetryTracker {
         }
         let now = Instant::now();
         let remaining = std::mem::take(&mut self.line_buffer);
-        if let Ok(line_str) = std::str::from_utf8(&remaining)
-            && let Some(rewritten) = self.inspect_sse_line(line_str, now)
-        {
-            return Bytes::from(rewritten.into_bytes());
+        if let Ok(line_str) = std::str::from_utf8(&remaining) {
+            if self.meta.rewrite_response_model {
+                if let Some(rewritten) = self.inspect_sse_line_rewrite(line_str, now) {
+                    return Bytes::from(rewritten.into_bytes());
+                }
+                return Bytes::from(remaining);
+            }
+            self.inspect_sse_line_readonly(line_str, now);
         }
         if self.meta.rewrite_response_model {
             Bytes::from(remaining)
@@ -407,9 +455,23 @@ impl StreamTelemetryTracker {
         )
     }
 
+    /// Inspects a single SSE line (`data: {...}`) without rewriting or allocating a full JSON DOM.
+    fn inspect_sse_line_readonly(&mut self, line: &str, now: Instant) {
+        let trimmed = line.trim();
+        let Some(data_payload) = trimmed.strip_prefix("data:").map(str::trim_start) else {
+            return;
+        };
+        if data_payload == "[DONE]" || data_payload.is_empty() {
+            return;
+        }
+        if let Ok(probe) = serde_json::from_str::<SseChunkProbe<'_>>(data_payload) {
+            self.extract_from_sse_probe(&probe, now);
+        }
+    }
+
     /// Inspects a single SSE line (`data: {...}`), returning a rewritten `data: ...` line
     /// when `rewrite_response_model` changed the payload.
-    fn inspect_sse_line(&mut self, line: &str, now: Instant) -> Option<String> {
+    fn inspect_sse_line_rewrite(&mut self, line: &str, now: Instant) -> Option<String> {
         let trimmed = line.trim();
         let data_payload = trimmed.strip_prefix("data:").map(str::trim_start)?;
 
@@ -417,11 +479,20 @@ impl StreamTelemetryTracker {
             return None;
         }
 
+        if let Ok(probe) = serde_json::from_str::<SseChunkProbe<'_>>(data_payload) {
+            self.extract_from_sse_probe(&probe, now);
+            if let Some(rewritten) =
+                rewrite_top_level_model_json(data_payload, &self.meta.call_model_id)
+            {
+                return Some(format!("data: {rewritten}"));
+            }
+            return None;
+        }
+
         let mut val: Value = serde_json::from_str(data_payload).ok()?;
         self.extract_from_json_value(&val, now, true);
 
-        if self.meta.rewrite_response_model
-            && let Some(obj) = val.as_object_mut()
+        if let Some(obj) = val.as_object_mut()
             && obj.contains_key("model")
         {
             obj.insert(
@@ -433,6 +504,112 @@ impl StreamTelemetryTracker {
             }
         }
         None
+    }
+
+    /// Extracts telemetry from a lightweight borrowed `SseChunkProbe` without full DOM allocation.
+    fn extract_from_sse_probe(&mut self, probe: &SseChunkProbe<'_>, now: Instant) {
+        let mut all_have_finish_reason = true;
+        if let Some(choices) = &probe.choices {
+            for choice in choices {
+                if let Some(reason) = choice.finish_reason.filter(|r| !r.is_empty()) {
+                    self.finish_reason = Some(reason.to_string());
+                } else {
+                    all_have_finish_reason = false;
+                }
+
+                if let Some(delta) = &choice.delta {
+                    let chars = count_probe_chars(delta);
+                    if chars > 0 {
+                        if self.t_first_token.is_none() {
+                            self.t_first_token = Some(now);
+                        }
+                        self.output_chars = self.output_chars.saturating_add(chars);
+                    }
+                }
+            }
+        }
+
+        if let Some(raw_usage) = probe.usage
+            && let Ok(usage_val) = serde_json::from_str::<Value>(raw_usage.get())
+            && let Some(usage) = usage_val.as_object()
+        {
+            let is_final = probe
+                .choices
+                .as_ref()
+                .is_some_and(|choices| choices.is_empty() || all_have_finish_reason);
+            if is_final {
+                self.raw_usage = Some(Value::Object(usage.clone()));
+            }
+            self.record_usage_object(usage);
+        }
+    }
+
+    /// Records `OpenAI` usage counters from a parsed `usage` JSON object.
+    fn record_usage_object(&mut self, usage: &serde_json::Map<String, Value>) {
+        let input_tokens = usage
+            .get("prompt_tokens")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        let output_tokens = usage
+            .get("completion_tokens")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        let total_tokens = usage
+            .get("total_tokens")
+            .and_then(Value::as_i64)
+            .unwrap_or_else(|| input_tokens.saturating_add(output_tokens));
+
+        let cache_read_tokens = usage
+            .get("prompt_tokens_details")
+            .and_then(|d| d.get("cached_tokens"))
+            .and_then(Value::as_i64)
+            .or_else(|| usage.get("prompt_cache_hit_tokens").and_then(Value::as_i64))
+            .unwrap_or(0);
+
+        let cache_creation_tokens = usage
+            .get("prompt_tokens_details")
+            .and_then(|d| {
+                d.get("cache_write_tokens")
+                    .or_else(|| d.get("cache_creation_tokens"))
+            })
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+
+        let reasoning_tokens = usage
+            .get("completion_tokens_details")
+            .and_then(|d| d.get("reasoning_tokens"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+
+        for detail_key in ["prompt_tokens_details", "completion_tokens_details"] {
+            if let Some(details) = usage.get(detail_key).and_then(Value::as_object) {
+                for (k, v) in details {
+                    if matches!(
+                        k.as_str(),
+                        "cached_tokens"
+                            | "cache_write_tokens"
+                            | "cache_creation_tokens"
+                            | "reasoning_tokens"
+                    ) {
+                        continue;
+                    }
+                    if let Some(count) = v.as_i64()
+                        && count > 0
+                    {
+                        self.extra_tokens.insert(k.clone(), count);
+                    }
+                }
+            }
+        }
+
+        self.usage = Some(ParsedUsage {
+            prompt: input_tokens,
+            completion: output_tokens,
+            cache_read: cache_read_tokens,
+            cache_creation: cache_creation_tokens,
+            reasoning: reasoning_tokens,
+            combined_total: total_tokens,
+        });
     }
 
     /// Extracts delta content length, first-token timestamp, finish reason, and usage
@@ -477,72 +654,163 @@ impl StreamTelemetryTracker {
             {
                 self.raw_usage = Some(Value::Object(usage.clone()));
             }
-            let input_tokens = usage
-                .get("prompt_tokens")
-                .and_then(Value::as_i64)
-                .unwrap_or(0);
-            let output_tokens = usage
-                .get("completion_tokens")
-                .and_then(Value::as_i64)
-                .unwrap_or(0);
-            let total_tokens = usage
-                .get("total_tokens")
-                .and_then(Value::as_i64)
-                .unwrap_or_else(|| input_tokens.saturating_add(output_tokens));
+            self.record_usage_object(usage);
+        }
+    }
+}
 
-            let cache_read_tokens = usage
-                .get("prompt_tokens_details")
-                .and_then(|d| d.get("cached_tokens"))
-                .and_then(Value::as_i64)
-                .or_else(|| usage.get("prompt_cache_hit_tokens").and_then(Value::as_i64))
-                .unwrap_or(0);
+/// Lightweight borrowed SSE chunk projection avoiding full `serde_json::Value` DOM allocation.
+#[derive(Debug, Deserialize)]
+struct SseChunkProbe<'a> {
+    /// Optional `choices` array.
+    #[serde(default, borrow)]
+    choices: Option<Vec<SseChoiceProbe<'a>>>,
+    /// Optional raw `usage` object.
+    #[serde(default, borrow)]
+    usage: Option<&'a RawValue>,
+}
 
-            let cache_creation_tokens = usage
-                .get("prompt_tokens_details")
-                .and_then(|d| {
-                    d.get("cache_write_tokens")
-                        .or_else(|| d.get("cache_creation_tokens"))
-                })
-                .and_then(Value::as_i64)
-                .unwrap_or(0);
+/// Lightweight borrowed SSE choice projection.
+#[derive(Debug, Deserialize)]
+struct SseChoiceProbe<'a> {
+    /// Optional finish reason.
+    #[serde(default, borrow)]
+    finish_reason: Option<&'a str>,
+    /// Optional delta payload.
+    #[serde(default, borrow)]
+    delta: Option<SseDeltaProbe<'a>>,
+}
 
-            let reasoning_tokens = usage
-                .get("completion_tokens_details")
-                .and_then(|d| d.get("reasoning_tokens"))
-                .and_then(Value::as_i64)
-                .unwrap_or(0);
+/// Lightweight borrowed SSE delta projection.
+#[derive(Debug, Deserialize)]
+struct SseDeltaProbe<'a> {
+    /// Assistant content text.
+    #[serde(default, borrow)]
+    content: Option<&'a str>,
+    /// Reasoning content text.
+    #[serde(default, borrow)]
+    reasoning_content: Option<&'a str>,
+    /// Alternative reasoning text field.
+    #[serde(default, borrow)]
+    reasoning: Option<&'a str>,
+    /// Optional raw `tool_calls` array.
+    #[serde(default, borrow)]
+    tool_calls: Option<Vec<&'a RawValue>>,
+}
 
-            for detail_key in ["prompt_tokens_details", "completion_tokens_details"] {
-                if let Some(details) = usage.get(detail_key).and_then(Value::as_object) {
-                    for (k, v) in details {
-                        if matches!(
-                            k.as_str(),
-                            "cached_tokens"
-                                | "cache_write_tokens"
-                                | "cache_creation_tokens"
-                                | "reasoning_tokens"
-                        ) {
-                            continue;
+/// Counts emitted characters inside a borrowed `SseDeltaProbe`.
+fn count_probe_chars(delta: &SseDeltaProbe<'_>) -> usize {
+    let mut chars = 0usize;
+    if let Some(c) = delta.content {
+        chars = chars.saturating_add(c.chars().count());
+    }
+    if let Some(r) = delta.reasoning_content {
+        chars = chars.saturating_add(r.chars().count());
+    }
+    if let Some(r) = delta.reasoning {
+        chars = chars.saturating_add(r.chars().count());
+    }
+    if let Some(tc) = &delta.tool_calls
+        && !tc.is_empty()
+    {
+        chars = chars.saturating_add(tc.iter().map(|v| v.get().chars().count()).sum::<usize>());
+    }
+    chars
+}
+
+/// Splices a new `"model"` string value at top-level JSON object depth without full DOM round-trip.
+///
+/// Returns `None` if `"model"` is absent at top level or not a JSON string/scalar, letting caller
+/// skip or fall back cleanly.
+fn rewrite_top_level_model_json(json_str: &str, new_model: &str) -> Option<String> {
+    let bytes = json_str.as_bytes();
+    let len = bytes.len();
+    let mut i = 0usize;
+    while i < len && bytes[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i >= len || bytes[i] != b'{' {
+        return None;
+    }
+    i += 1;
+    let mut depth = 1usize;
+
+    while i < len {
+        let b = bytes[i];
+        if b == b'"' {
+            let str_start = i;
+            i += 1;
+            let mut has_escape = false;
+            while i < len {
+                if bytes[i] == b'\\' {
+                    has_escape = true;
+                    i += 2;
+                    continue;
+                }
+                if bytes[i] == b'"' {
+                    break;
+                }
+                i += 1;
+            }
+            if i >= len {
+                return None;
+            }
+            let str_end = i + 1;
+            i = str_end;
+
+            if depth == 1 && !has_escape && &json_str[str_start..str_end] == "\"model\"" {
+                let mut k = i;
+                while k < len && bytes[k].is_ascii_whitespace() {
+                    k += 1;
+                }
+                if k < len && bytes[k] == b':' {
+                    k += 1;
+                    while k < len && bytes[k].is_ascii_whitespace() {
+                        k += 1;
+                    }
+                    if k < len && bytes[k] == b'"' {
+                        let val_start = k;
+                        k += 1;
+                        while k < len {
+                            if bytes[k] == b'\\' {
+                                k += 2;
+                                continue;
+                            }
+                            if bytes[k] == b'"' {
+                                break;
+                            }
+                            k += 1;
                         }
-                        if let Some(count) = v.as_i64()
-                            && count > 0
-                        {
-                            self.extra_tokens.insert(k.clone(), count);
+                        if k >= len {
+                            return None;
                         }
+                        let val_end = k + 1;
+                        let encoded_model = serde_json::to_string(new_model).ok()?;
+                        let mut out = String::with_capacity(
+                            json_str.len() - (val_end - val_start) + encoded_model.len(),
+                        );
+                        out.push_str(&json_str[..val_start]);
+                        out.push_str(&encoded_model);
+                        out.push_str(&json_str[val_end..]);
+                        return Some(out);
                     }
                 }
             }
-
-            self.usage = Some(ParsedUsage {
-                prompt: input_tokens,
-                completion: output_tokens,
-                cache_read: cache_read_tokens,
-                cache_creation: cache_creation_tokens,
-                reasoning: reasoning_tokens,
-                combined_total: total_tokens,
-            });
+            continue;
         }
+        match b {
+            b'{' | b'[' => depth += 1,
+            b'}' | b']' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    break;
+                }
+            }
+            _ => {}
+        }
+        i += 1;
     }
+    None
 }
 
 /// Counts emitted characters inside an `OpenAI` `delta` or `message` object for token estimation
@@ -666,7 +934,7 @@ where
                             std::sync::atomic::Ordering::Relaxed,
                         );
                     }
-                    guard.process_sse_chunk(&chunk)
+                    guard.process_sse_bytes(chunk)
                 } else {
                     chunk
                 };
