@@ -16,6 +16,16 @@ max_connections = 10
 log_error_payload = true
 log_full_payload = false
 
+[redis]
+# 可选：启用外部 Redis 加速会话/监控缓存与多实例协同（亦可通过 LINGUIST_REDIS_URL 覆盖 url）
+enabled = false
+url = "redis://:CHANGE_ME@host.docker.internal:6379/0"
+key_prefix = "linguist"
+connect_timeout_ms = 1500
+command_timeout_ms = 200
+fail_open = true
+pubsub_enabled = true
+
 [script_engine]
 timeout_ms = 50
 memory_limit_mb = 32

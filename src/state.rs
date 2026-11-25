@@ -13,6 +13,7 @@ use crate::config::AppConfig;
 use crate::db::LogWriterHandle;
 use crate::metrics_cache::MetricsCache;
 use crate::models::RequestLogRecord;
+use crate::redis_store::RedisStore;
 use crate::runtime_metrics::RuntimeMetrics;
 use crate::script_engine::ScriptEngine;
 
@@ -35,6 +36,8 @@ pub struct AppState {
     pub log_writer: Option<LogWriterHandle>,
     /// OIDC client and validated admin identity configuration.
     pub oidc: Option<OidcClient>,
+    /// Optional Redis store for caching, sessions, and multi-instance coordination.
+    pub redis: Option<RedisStore>,
     /// In-process runtime telemetry & HTTP byte/request counters.
     pub runtime: Arc<RuntimeMetrics>,
 }
@@ -69,6 +72,7 @@ impl AppState {
             db_pool,
             log_writer,
             oidc: None,
+            redis: None,
             runtime: Arc::new(RuntimeMetrics::new()),
         })
     }
@@ -77,6 +81,13 @@ impl AppState {
     #[must_use]
     pub fn with_oidc(mut self, oidc: OidcClient) -> Self {
         self.oidc = Some(oidc);
+        self
+    }
+
+    /// Configures optional Redis integration.
+    #[must_use]
+    pub fn with_redis(mut self, redis: Option<RedisStore>) -> Self {
+        self.redis = redis;
         self
     }
 

@@ -19,6 +19,7 @@ use linguist::catalog::{CatalogProvider, RuntimeCatalog, sync};
 use linguist::config::AppConfig;
 use linguist::db::{self, LogWriterHandle};
 use linguist::metrics_cache::MetricsCache;
+use linguist::redis_store::RedisStore;
 use linguist::script_engine::ScriptEngine;
 use linguist::script_engine::pipeline::{
     StageOutcome, prepare_attempt_context, run_routing_stages,
@@ -252,12 +253,12 @@ async fn run_serve(cfg: AppConfig) -> Result<()> {
     let oidc_config = cfg.oidc.validate_for_serve(admin_sub.as_deref())?;
     let oidc_client = OidcClient::new(oidc_config)?;
     let pool = db::init_db_pool(&cfg.database).await?;
+    let redis_store = RedisStore::connect(&cfg.redis).await?;
     let engine = ScriptEngine::new(cfg.script_engine.clone());
-    let catalog_swap = sync::start(PgCatalogProvider::new(
-        pool.clone(),
-        secrets,
-        engine.clone(),
-    ))
+    let catalog_swap = sync::start(
+        PgCatalogProvider::new(pool.clone(), secrets, engine.clone()),
+        redis_store.clone(),
+    )
     .await?;
     let metrics = MetricsCache::new(&cfg.metrics);
     match db::warmup_metrics_cache(&pool, &metrics, cfg.metrics.warmup_days_from_db).await {
@@ -291,7 +292,8 @@ async fn run_serve(cfg: AppConfig) -> Result<()> {
         Some(pool),
         Some(log_writer),
     )?
-    .with_oidc(oidc_client);
+    .with_oidc(oidc_client)
+    .with_redis(redis_store);
 
     linguist::billing::fx::start(&state);
     linguist::runtime_metrics::start_sampler(&state);

@@ -521,6 +521,14 @@ async fn refresh_runtime_after_write(
             committed_rev
         }
     };
+    if let Some(redis) = &state.redis
+        && redis.pubsub_enabled()
+        && let Err(err) = redis
+            .publish(&sync::catalog_rev_channel(redis), &loaded.to_string())
+            .await
+    {
+        tracing::warn!(error = %err, "failed to publish catalog revision to Redis Pub/Sub");
+    }
     crate::billing::fx::refresh_after_catalog_change(state);
     Json(json!({ "ok": true, "revision": loaded })).into_response()
 }

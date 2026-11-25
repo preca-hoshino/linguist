@@ -14,6 +14,8 @@ pub struct AppConfig {
     pub server: ServerConfig,
     /// PostgreSQL logging and telemetry settings.
     pub database: DatabaseConfig,
+    /// Optional Redis cache, session, and multi-instance coordination settings.
+    pub redis: RedisConfig,
     /// Script engine sandbox limits, network controls, and retry status codes.
     pub script_engine: ScriptEngineConfig,
     /// In-memory sliding window speed cache settings.
@@ -211,6 +213,54 @@ impl Default for DatabaseConfig {
     }
 }
 
+/// Optional Redis connection, key namespace, and degradation settings.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RedisConfig {
+    /// Whether Redis integration is enabled.
+    pub enabled: bool,
+    /// Redis connection URL (`redis://...` or `rediss://...`).
+    pub url: String,
+    /// Key prefix namespace for all Linguist keys in Redis.
+    pub key_prefix: String,
+    /// Connection establishment timeout in milliseconds.
+    pub connect_timeout_ms: u64,
+    /// Per-command execution timeout in milliseconds.
+    pub command_timeout_ms: u64,
+    /// Whether to degrade gracefully to local/PostgreSQL behavior when Redis is unavailable.
+    pub fail_open: bool,
+    /// Whether to subscribe/publish catalog revision updates via Redis Pub/Sub.
+    pub pubsub_enabled: bool,
+}
+
+impl std::fmt::Debug for RedisConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RedisConfig")
+            .field("enabled", &self.enabled)
+            .field("url", &"[REDACTED]")
+            .field("key_prefix", &self.key_prefix)
+            .field("connect_timeout_ms", &self.connect_timeout_ms)
+            .field("command_timeout_ms", &self.command_timeout_ms)
+            .field("fail_open", &self.fail_open)
+            .field("pubsub_enabled", &self.pubsub_enabled)
+            .finish()
+    }
+}
+
+impl Default for RedisConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            url: "redis://127.0.0.1:6379/0".to_string(),
+            key_prefix: "linguist".to_string(),
+            connect_timeout_ms: 1500,
+            command_timeout_ms: 200,
+            fail_open: true,
+            pubsub_enabled: true,
+        }
+    }
+}
+
 /// TS/JS script sandbox constraints, outbound HTTP limits, and automatic fallback triggers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
@@ -315,6 +365,13 @@ impl AppConfig {
         if !config.oidc.client_secret_file.as_os_str().is_empty() {
             config.oidc.client_secret_file =
                 resolve_relative(base_dir, &config.oidc.client_secret_file);
+        }
+
+        if let Ok(env_url) = std::env::var("LINGUIST_REDIS_URL") {
+            let trimmed = env_url.trim();
+            if !trimmed.is_empty() {
+                config.redis.url = trimmed.to_string();
+            }
         }
 
         Ok(config)

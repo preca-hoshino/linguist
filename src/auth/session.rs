@@ -3,10 +3,13 @@
 use anyhow::{Context, Result};
 use axum::http::HeaderMap;
 use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::auth::jwt::{IdTokenClaims, random_token_b64, sha256};
+use crate::redis_store::RedisStore;
 
 /// HTTP cookie name storing the opaque admin session token.
 pub const SESSION_COOKIE_NAME: &str = "linguist_session";
@@ -18,7 +21,7 @@ pub const SESSION_TTL_SECS: i64 = 8 * 60 * 60;
 const TRANSACTION_TTL_SECS: i64 = 600;
 
 /// Single-use OIDC login transaction loaded upon callback.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoginTransaction {
     /// Nonce expected in the returned ID token.
     pub nonce: String,
@@ -40,7 +43,7 @@ pub struct CreatedSession {
 }
 
 /// Verified admin session for the currently configured `issuer` and `admin_sub`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AdminSession {
     /// Session identifier.
     pub session_id: Uuid,
@@ -109,23 +112,57 @@ pub fn clear_session_cookie(secure: bool) -> String {
     format!("{SESSION_COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0{secure_attr}")
 }
 
-/// Creates a new single-use OIDC login transaction in PostgreSQL.
+/// Encodes a byte slice as lowercase hexadecimal for Redis key namespacing.
+fn hex_encode(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut out = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
+}
+
+/// Creates a new single-use OIDC login transaction (Redis-first when enabled, otherwise PostgreSQL).
 ///
 /// Returns `(state, nonce, pkce_verifier)`.
 ///
 /// # Errors
-/// Returns an error if CSPRNG or database insertion fails.
+/// Returns an error if CSPRNG or persistence fails.
 pub async fn create_login_transaction(
     pool: &PgPool,
+    redis: Option<&RedisStore>,
     return_to: &str,
 ) -> Result<(String, String, String)> {
     let state = random_token_b64(32)?;
     let nonce = random_token_b64(32)?;
     let pkce_verifier = random_token_b64(48)?;
     let state_hash = sha256(state.as_bytes());
-    let expires_at = Utc::now() + Duration::seconds(TRANSACTION_TTL_SECS);
     let safe_return = sanitize_return_to(Some(return_to));
 
+    if let Some(redis) = redis {
+        let tx = LoginTransaction {
+            nonce: nonce.clone(),
+            pkce_verifier: pkce_verifier.clone(),
+            return_to: safe_return.clone(),
+        };
+        let key = redis.key(&format!("sys:oidc_tx:{}", hex_encode(&state_hash)));
+        match redis
+            .set_json_ex(
+                &key,
+                &tx,
+                u64::try_from(TRANSACTION_TTL_SECS).unwrap_or(600),
+            )
+            .await
+        {
+            Ok(()) => return Ok((state, nonce, pkce_verifier)),
+            Err(err) if redis.fail_open() => {
+                warn!(error = %err, "failed to store OIDC transaction in Redis; falling back to PostgreSQL");
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
+    let expires_at = Utc::now() + Duration::seconds(TRANSACTION_TTL_SECS);
     sqlx::query(
         "INSERT INTO oidc_login_transactions (id, state_hash, nonce, pkce_verifier, return_to, expires_at)
          VALUES ($1, $2, $3, $4, $5, $6)",
@@ -146,12 +183,26 @@ pub async fn create_login_transaction(
 /// Atomically consumes a valid, unexpired OIDC login transaction matching `state`.
 ///
 /// # Errors
-/// Returns an error if the database query fails.
+/// Returns an error if the store query fails.
 pub async fn consume_login_transaction(
     pool: &PgPool,
+    redis: Option<&RedisStore>,
     state: &str,
 ) -> Result<Option<LoginTransaction>> {
     let state_hash = sha256(state.as_bytes());
+
+    if let Some(redis) = redis {
+        let key = redis.key(&format!("sys:oidc_tx:{}", hex_encode(&state_hash)));
+        match redis.get_del_json::<LoginTransaction>(&key).await {
+            Ok(Some(tx)) => return Ok(Some(tx)),
+            Ok(None) => {}
+            Err(err) if redis.fail_open() => {
+                warn!(error = %err, "failed to consume OIDC transaction from Redis; checking PostgreSQL");
+            }
+            Err(err) => return Err(err),
+        }
+    }
+
     let row = sqlx::query(
         "UPDATE oidc_login_transactions
          SET consumed_at = NOW()
@@ -176,6 +227,7 @@ pub async fn consume_login_transaction(
 /// Returns an error if database persistence fails.
 pub async fn upsert_identity_and_create_session(
     pool: &PgPool,
+    redis: Option<&RedisStore>,
     claims: &IdTokenClaims,
     issuer: &str,
 ) -> Result<CreatedSession> {
@@ -208,12 +260,13 @@ pub async fn upsert_identity_and_create_session(
     let csrf_token = random_token_b64(24)?;
     let token_hash = sha256(raw_token.as_bytes());
     let expires_at = Utc::now() + Duration::seconds(SESSION_TTL_SECS);
+    let session_id = Uuid::new_v4();
 
     sqlx::query(
         "INSERT INTO admin_sessions (id, token_hash, identity_id, issuer, subject, csrf_token, expires_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7)",
     )
-    .bind(Uuid::new_v4())
+    .bind(session_id)
     .bind(token_hash.as_slice())
     .bind(identity_id)
     .bind(issuer)
@@ -223,6 +276,29 @@ pub async fn upsert_identity_and_create_session(
     .execute(pool)
     .await
     .context("failed to create admin session")?;
+
+    if let Some(redis) = redis {
+        let cached = AdminSession {
+            session_id,
+            issuer: issuer.to_string(),
+            subject: claims.sub.clone(),
+            email: claims.email.clone(),
+            display_name: display_name.map(str::to_string),
+            csrf_token: csrf_token.clone(),
+            expires_at,
+        };
+        let key = redis.key(&format!("sys:session:{}", hex_encode(&token_hash)));
+        if let Err(err) = redis
+            .set_json_ex(
+                &key,
+                &cached,
+                u64::try_from(SESSION_TTL_SECS).unwrap_or(28_800),
+            )
+            .await
+        {
+            warn!(error = %err, "failed to cache admin session in Redis");
+        }
+    }
 
     Ok(CreatedSession {
         raw_token,
@@ -238,11 +314,32 @@ pub async fn upsert_identity_and_create_session(
 /// Returns an error if the database query fails.
 pub async fn load_valid_admin_session(
     pool: &PgPool,
+    redis: Option<&RedisStore>,
     raw_token: &str,
     expected_issuer: &str,
     expected_sub: &str,
 ) -> Result<Option<AdminSession>> {
     let token_hash = sha256(raw_token.as_bytes());
+    let cache_key = redis.map(|r| r.key(&format!("sys:session:{}", hex_encode(&token_hash))));
+
+    if let (Some(redis), Some(key)) = (redis, &cache_key) {
+        match redis.get_json::<AdminSession>(key).await {
+            Ok(Some(session)) => {
+                if session.expires_at > Utc::now()
+                    && session.issuer == expected_issuer
+                    && session.subject == expected_sub
+                {
+                    return Ok(Some(session));
+                }
+                let _ = redis.del(key).await;
+            }
+            Ok(None) => {}
+            Err(err) => {
+                warn!(error = %err, "failed to read admin session from Redis; falling back to PostgreSQL");
+            }
+        }
+    }
+
     let row = sqlx::query(
         "SELECT s.id, s.issuer, s.subject, s.csrf_token, s.expires_at,
                 i.email, i.display_name
@@ -265,7 +362,7 @@ pub async fn load_valid_admin_session(
         return Ok(None);
     }
 
-    Ok(Some(AdminSession {
+    let session = AdminSession {
         session_id: row.get("id"),
         issuer,
         subject,
@@ -273,15 +370,38 @@ pub async fn load_valid_admin_session(
         display_name: row.get("display_name"),
         csrf_token: row.get("csrf_token"),
         expires_at: row.get("expires_at"),
-    }))
+    };
+
+    if let (Some(redis), Some(key)) = (redis, &cache_key) {
+        let remaining = (session.expires_at - Utc::now()).num_seconds();
+        if remaining > 0
+            && let Ok(ttl) = u64::try_from(remaining)
+            && let Err(err) = redis.set_json_ex(key, &session, ttl).await
+        {
+            warn!(error = %err, "failed to backfill admin session into Redis");
+        }
+    }
+
+    Ok(Some(session))
 }
 
 /// Revokes an admin session by its raw cookie token.
 ///
 /// # Errors
 /// Returns an error if the database update fails.
-pub async fn revoke_session(pool: &PgPool, raw_token: &str) -> Result<()> {
+pub async fn revoke_session(
+    pool: &PgPool,
+    redis: Option<&RedisStore>,
+    raw_token: &str,
+) -> Result<()> {
     let token_hash = sha256(raw_token.as_bytes());
+    if let Some(redis) = redis {
+        let key = redis.key(&format!("sys:session:{}", hex_encode(&token_hash)));
+        if let Err(err) = redis.del(&key).await {
+            warn!(error = %err, "failed to delete admin session from Redis");
+        }
+    }
+
     sqlx::query(
         "UPDATE admin_sessions SET revoked_at = NOW()
          WHERE token_hash = $1 AND revoked_at IS NULL",

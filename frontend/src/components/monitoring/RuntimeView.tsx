@@ -88,6 +88,19 @@ export function RuntimeView({ data, loading }: RuntimeViewProps) {
     : `峰值 ${formatBytes(snap?.peakRssBytes ?? 0)} · 系统总内存 ${formatBytes(snap?.systemTotalBytes ?? 0)}`;
 
   const pgActive = snap ? Math.max(0, snap.pgPoolSize - snap.pgPoolIdle) : 0;
+  const redisStatusText = !snap?.redisEnabled
+    ? "未启用"
+    : snap.redisConnected
+      ? "已连接"
+      : "降级断开";
+  const redisTone = !snap?.redisEnabled
+    ? "default"
+    : !snap.redisConnected || snap.redisErrors > 0
+      ? "red"
+      : "green";
+  const redisSub = !snap?.redisEnabled
+    ? "可在 config.toml [redis] 开启"
+    : `命中率 ${snap.redisHitRate.toFixed(1)}% · 最近 ${formatMs(snap.redisLastLatencyMs)} · 错误 ${snap.redisErrors}`;
 
   return (
     <>
@@ -130,6 +143,13 @@ export function RuntimeView({ data, loading }: RuntimeViewProps) {
           subValue={`日志队列 ${snap?.logQueueDepth ?? 0}/${snap?.logQueueCapacity ?? 1024} · 丢弃 ${snap?.logDropped ?? 0}`}
           helpText="PostgreSQL 活跃/总连接数，以及异步写库通道排队深度"
           tone={(snap?.logDropped ?? 0) > 0 ? "red" : "green"}
+        />
+        <StatKpiCard
+          title="Redis 缓存 & 状态"
+          value={redisStatusText}
+          subValue={redisSub}
+          helpText="Redis 连接健康度、缓存命中率与最近命令延迟"
+          tone={redisTone}
         />
       </div>
 
@@ -371,6 +391,72 @@ export function RuntimeView({ data, loading }: RuntimeViewProps) {
                 value: snap?.metricsCacheSamples ?? 0,
                 subLabel: `${snap?.metricsCacheEndpoints ?? 0} 个端点 · HTTP缓存 ${snap?.scriptHttpCacheEntries ?? 0} 条`,
                 color: "#F59E0B",
+              },
+            ]}
+            formatValue={formatCompactNumber}
+          />
+        </ChartCard>
+      </SectionGroup>
+
+      <SectionGroup title="Redis 缓存与协同状态" subtitle="Redis 命令吞吐速率、平均往返延迟与命中分布">
+        <ChartCard title="Redis 命令吞吐 (ops/s)" helpText="采样周期内读命中、读未命中与写入/发布速率" loading={loading} empty={!hasSamples}>
+          <LineAreaChart
+            data={samples.map((s) => ({
+              label: s.label,
+              values: {
+                hits: s.redisHitsRps,
+                misses: s.redisMissesRps,
+                writes: s.redisWritesRps,
+              },
+            }))}
+            series={[
+              { key: "hits", label: "读命中/s", color: "#22C55E", area: true },
+              { key: "misses", label: "读未命中/s", color: "#F59E0B" },
+              { key: "writes", label: "写入/发布/s", color: "#4B7FFF" },
+            ]}
+            formatValue={(v) => `${v.toFixed(2)}/s`}
+          />
+        </ChartCard>
+
+        <ChartCard title="Redis 平均响应延迟 (ms)" helpText="采样周期内 Redis 命令平均往返延迟" loading={loading} empty={!hasSamples}>
+          <LineAreaChart
+            data={samples.map((s) => ({
+              label: s.label,
+              values: { latency: s.redisAvgLatencyMs },
+            }))}
+            series={[{ key: "latency", label: "平均延迟 (ms)", color: "#6366F1", area: true }]}
+            formatValue={formatMs}
+          />
+        </ChartCard>
+
+        <ChartCard title="Redis 累计操作与健康度" loading={loading} empty={!snap}>
+          <HorizontalBarChart
+            items={[
+              {
+                key: "hits",
+                label: "缓存命中 (Hits)",
+                value: snap?.redisHits ?? 0,
+                subLabel: `命中率 ${(snap?.redisHitRate ?? 0).toFixed(1)}%`,
+                color: "#22C55E",
+              },
+              {
+                key: "misses",
+                label: "缓存未命中 (Misses)",
+                value: snap?.redisMisses ?? 0,
+                color: "#F59E0B",
+              },
+              {
+                key: "writes",
+                label: "写入 / 删除 / 发布",
+                value: snap?.redisWrites ?? 0,
+                color: "#4B7FFF",
+              },
+              {
+                key: "errors",
+                label: "失败 / 超时",
+                value: snap?.redisErrors ?? 0,
+                subLabel: `累计命令 ${snap?.redisOpsTotal ?? 0}`,
+                color: "#EF4444",
               },
             ]}
             formatValue={formatCompactNumber}

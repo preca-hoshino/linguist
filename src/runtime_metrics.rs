@@ -266,6 +266,18 @@ struct PrevSnapshot {
     script_errors: u64,
     /// Previous persisted log count.
     log_persisted: u64,
+    /// Previous Redis hits count.
+    redis_hits: u64,
+    /// Previous Redis misses count.
+    redis_misses: u64,
+    /// Previous Redis writes count.
+    redis_writes: u64,
+    /// Previous Redis errors count.
+    redis_errors: u64,
+    /// Previous Redis latency sum in microseconds.
+    redis_latency_us_sum: u64,
+    /// Previous Redis latency sample count.
+    redis_latency_count: u64,
 }
 
 /// One time-bucketed point in the runtime monitoring time series.
@@ -344,6 +356,16 @@ pub struct RuntimeSample {
     pub script_calls_rps: f64,
     /// Script errors during interval.
     pub script_errors: u64,
+    /// Redis read hits per second during interval.
+    pub redis_hits_rps: f64,
+    /// Redis read misses per second during interval.
+    pub redis_misses_rps: f64,
+    /// Redis write/publish ops per second during interval.
+    pub redis_writes_rps: f64,
+    /// Redis errors during interval.
+    pub redis_errors: u64,
+    /// Average Redis command latency in ms during interval.
+    pub redis_avg_latency_ms: f64,
 }
 
 /// Real-time instantaneous snapshot of process, pool, cache, and HTTP totals.
@@ -436,6 +458,24 @@ pub struct RuntimeSnapshot {
     pub script_http_errors: u64,
     /// Current `linguist.http` cached entries.
     pub script_http_cache_entries: usize,
+    /// Whether Redis is enabled in configuration.
+    pub redis_enabled: bool,
+    /// Whether Redis is currently connected.
+    pub redis_connected: bool,
+    /// Cumulative Redis commands executed.
+    pub redis_ops_total: u64,
+    /// Cumulative Redis cache/lookup hits.
+    pub redis_hits: u64,
+    /// Cumulative Redis cache/lookup misses.
+    pub redis_misses: u64,
+    /// Cumulative Redis write/delete/publish commands.
+    pub redis_writes: u64,
+    /// Cumulative Redis errors.
+    pub redis_errors: u64,
+    /// Latest Redis command latency in ms.
+    pub redis_last_latency_ms: f64,
+    /// Cumulative Redis hit rate percentage (`0.0..=100.0`).
+    pub redis_hit_rate: f64,
 }
 
 /// One row in the runtime HTTP channel breakdown table.
@@ -601,6 +641,10 @@ impl RuntimeMetrics {
             .as_ref()
             .map_or_default(crate::db::LogWriterHandle::stats);
         let script_stats = state.engine.runtime_stats();
+        let redis_stats = state
+            .redis
+            .as_ref()
+            .map_or_default(crate::redis_store::RedisStore::stats);
         let (pg_size, pg_idle) = state.db_pool.as_ref().map_or((0, 0), |p| {
             (p.size(), u32::try_from(p.num_idle()).unwrap_or(0))
         });
@@ -666,10 +710,25 @@ impl RuntimeMetrics {
 
         let cur_script_calls = script_stats.on_request_calls + script_stats.on_billing_calls;
         let cur_script_errs = script_stats.on_request_errors + script_stats.on_billing_errors;
+        let cur_redis_hits = redis_stats.hits;
+        let cur_redis_misses = redis_stats.misses;
+        let cur_redis_writes = redis_stats.writes;
+        let cur_redis_errors = redis_stats.errors;
+        let cur_redis_lat_sum = redis_stats.latency_us_sum;
+        let cur_redis_lat_cnt = redis_stats.latency_count;
 
         #[allow(clippy::cast_precision_loss)]
         let dt = FINE_INTERVAL_SECS as f64;
         let p = &guard.prev;
+
+        let delta_redis_lat_cnt = cur_redis_lat_cnt.saturating_sub(p.redis_latency_count);
+        #[allow(clippy::cast_precision_loss)]
+        let redis_avg_latency_ms = if delta_redis_lat_cnt > 0 {
+            cur_redis_lat_sum.saturating_sub(p.redis_latency_us_sum) as f64
+                / (delta_redis_lat_cnt as f64 * 1000.0)
+        } else {
+            0.0
+        };
 
         let delta_routing_cnt = routing_cnt_total.saturating_sub(p.routing_count);
         let delta_prep_cnt = prep_cnt_total.saturating_sub(p.prep_count);
@@ -732,6 +791,11 @@ impl RuntimeMetrics {
             log_persisted_rps: log_stats.persisted.saturating_sub(p.log_persisted) as f64 / dt,
             script_calls_rps: cur_script_calls.saturating_sub(p.script_calls) as f64 / dt,
             script_errors: cur_script_errs.saturating_sub(p.script_errors),
+            redis_hits_rps: cur_redis_hits.saturating_sub(p.redis_hits) as f64 / dt,
+            redis_misses_rps: cur_redis_misses.saturating_sub(p.redis_misses) as f64 / dt,
+            redis_writes_rps: cur_redis_writes.saturating_sub(p.redis_writes) as f64 / dt,
+            redis_errors: cur_redis_errors.saturating_sub(p.redis_errors),
+            redis_avg_latency_ms,
         };
 
         guard.prev = PrevSnapshot {
@@ -760,6 +824,12 @@ impl RuntimeMetrics {
             script_calls: cur_script_calls,
             script_errors: cur_script_errs,
             log_persisted: log_stats.persisted,
+            redis_hits: cur_redis_hits,
+            redis_misses: cur_redis_misses,
+            redis_writes: cur_redis_writes,
+            redis_errors: cur_redis_errors,
+            redis_latency_us_sum: cur_redis_lat_sum,
+            redis_latency_count: cur_redis_lat_cnt,
         };
 
         if guard.fine.len() >= FINE_CAPACITY {
@@ -847,6 +917,19 @@ impl RuntimeMetrics {
             .as_ref()
             .map_or_default(crate::db::LogWriterHandle::stats);
         let script_stats = state.engine.runtime_stats();
+        let redis_stats = state
+            .redis
+            .as_ref()
+            .map_or_default(crate::redis_store::RedisStore::stats);
+        let redis_reads = redis_stats.hits + redis_stats.misses;
+        #[allow(clippy::cast_precision_loss)]
+        let redis_hit_rate = if redis_reads > 0 {
+            (redis_stats.hits as f64) * 100.0 / (redis_reads as f64)
+        } else {
+            0.0
+        };
+        #[allow(clippy::cast_precision_loss)]
+        let redis_last_latency_ms = redis_stats.last_latency_us as f64 / 1000.0;
         let (mc_endpoints, mc_samples) = state.metrics.stats();
         let (pg_size, pg_idle) = state.db_pool.as_ref().map_or((0, 0), |p| {
             (p.size(), u32::try_from(p.num_idle()).unwrap_or(0))
@@ -897,6 +980,15 @@ impl RuntimeMetrics {
             script_http_ssrf_blocked: script_stats.http_ssrf_blocked,
             script_http_errors: script_stats.http_errors,
             script_http_cache_entries: script_stats.http_cache_entries,
+            redis_enabled: state.redis.is_some(),
+            redis_connected: redis_stats.connected,
+            redis_ops_total: redis_stats.ops_total,
+            redis_hits: redis_stats.hits,
+            redis_misses: redis_stats.misses,
+            redis_writes: redis_stats.writes,
+            redis_errors: redis_stats.errors,
+            redis_last_latency_ms,
+            redis_hit_rate,
         };
 
         let mut channels = Vec::with_capacity(RouteGroup::COUNT + 2);
@@ -1033,6 +1125,11 @@ fn aggregate_coarse_samples(slice: &[RuntimeSample]) -> RuntimeSample {
         log_persisted_rps: 0.0,
         script_calls_rps: 0.0,
         script_errors: 0,
+        redis_hits_rps: 0.0,
+        redis_misses_rps: 0.0,
+        redis_writes_rps: 0.0,
+        redis_errors: 0,
+        redis_avg_latency_ms: 0.0,
     });
     let label = last.label.get(..5).unwrap_or(&last.label).to_string();
 
@@ -1077,6 +1174,11 @@ fn aggregate_coarse_samples(slice: &[RuntimeSample]) -> RuntimeSample {
         log_persisted_rps: slice.iter().map(|s| s.log_persisted_rps).sum::<f64>() / nf,
         script_calls_rps: slice.iter().map(|s| s.script_calls_rps).sum::<f64>() / nf,
         script_errors: slice.iter().map(|s| s.script_errors).sum(),
+        redis_hits_rps: slice.iter().map(|s| s.redis_hits_rps).sum::<f64>() / nf,
+        redis_misses_rps: slice.iter().map(|s| s.redis_misses_rps).sum::<f64>() / nf,
+        redis_writes_rps: slice.iter().map(|s| s.redis_writes_rps).sum::<f64>() / nf,
+        redis_errors: slice.iter().map(|s| s.redis_errors).sum(),
+        redis_avg_latency_ms: slice.iter().map(|s| s.redis_avg_latency_ms).sum::<f64>() / nf,
     }
 }
 

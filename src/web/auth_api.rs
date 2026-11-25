@@ -71,6 +71,7 @@ pub(super) async fn require_admin_session(
 
     let session = match load_valid_admin_session(
         pool,
+        state.redis.as_ref(),
         &raw_token,
         &oidc.config().issuer,
         &oidc.config().admin_sub,
@@ -108,13 +109,14 @@ async fn login_handler(State(state): State<AppState>, Query(query): Query<LoginQ
     };
 
     let return_to = sanitize_return_to(query.return_to.as_deref());
-    let (tx_state, nonce, pkce_verifier) = match create_login_transaction(pool, &return_to).await {
-        Ok(vals) => vals,
-        Err(err) => {
-            warn!(error = %err, "failed to create OIDC login transaction");
-            return Redirect::to("/?auth_error=auth_unavailable").into_response();
-        }
-    };
+    let (tx_state, nonce, pkce_verifier) =
+        match create_login_transaction(pool, state.redis.as_ref(), &return_to).await {
+            Ok(vals) => vals,
+            Err(err) => {
+                warn!(error = %err, "failed to create OIDC login transaction");
+                return Redirect::to("/?auth_error=auth_unavailable").into_response();
+            }
+        };
 
     let challenge = pkce_code_challenge(&pkce_verifier);
     match oidc
@@ -154,7 +156,7 @@ async fn callback_handler(
         return Redirect::to("/?auth_error=invalid_request").into_response();
     };
 
-    let tx = match consume_login_transaction(pool, tx_state).await {
+    let tx = match consume_login_transaction(pool, state.redis.as_ref(), tx_state).await {
         Ok(Some(tx)) => tx,
         Ok(None) => return Redirect::to("/?auth_error=invalid_state").into_response(),
         Err(err) => {
@@ -182,14 +184,20 @@ async fn callback_handler(
         return Redirect::to("/?auth_error=forbidden").into_response();
     }
 
-    let created =
-        match upsert_identity_and_create_session(pool, &claims, &oidc.config().issuer).await {
-            Ok(created) => created,
-            Err(err) => {
-                warn!(error = %err, "failed to create admin session");
-                return Redirect::to("/?auth_error=auth_unavailable").into_response();
-            }
-        };
+    let created = match upsert_identity_and_create_session(
+        pool,
+        state.redis.as_ref(),
+        &claims,
+        &oidc.config().issuer,
+    )
+    .await
+    {
+        Ok(created) => created,
+        Err(err) => {
+            warn!(error = %err, "failed to create admin session");
+            return Redirect::to("/?auth_error=auth_unavailable").into_response();
+        }
+    };
 
     let mut resp = Redirect::to(&tx.return_to).into_response();
     resp.headers_mut()
@@ -230,6 +238,7 @@ async fn logout_handler(State(state): State<AppState>, request: Request) -> Resp
     if let Some(raw_token) = &raw_token {
         match load_valid_admin_session(
             pool,
+            state.redis.as_ref(),
             raw_token,
             &oidc.config().issuer,
             &oidc.config().admin_sub,
@@ -245,7 +254,7 @@ async fn logout_handler(State(state): State<AppState>, request: Request) -> Resp
                 if !tokens_equal(session.csrf_token.as_bytes(), provided_csrf.as_bytes()) {
                     return json_error(StatusCode::FORBIDDEN, "csrf_mismatch");
                 }
-                if let Err(err) = revoke_session(pool, raw_token).await {
+                if let Err(err) = revoke_session(pool, state.redis.as_ref(), raw_token).await {
                     warn!(error = %err, "failed to revoke admin session on logout");
                 }
             }

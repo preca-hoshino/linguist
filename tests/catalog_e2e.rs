@@ -267,7 +267,7 @@ async fn pg_catalog_crud_reorder_and_runtime_reload(pool: PgPool) {
         .await
         .unwrap();
 
-    let swap = sync::start(provider.clone()).await.unwrap();
+    let swap = sync::start(provider.clone(), None).await.unwrap();
     let loaded = swap.load();
     assert_eq!(loaded.routes.len(), 2);
     assert_eq!(loaded.routes[0].id, "r2");

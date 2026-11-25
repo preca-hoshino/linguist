@@ -7,7 +7,9 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use serde::Deserialize;
-use serde_json::json;
+use serde::Serialize;
+use serde_json::{Value, json};
+use tracing::warn;
 
 use crate::db;
 use crate::models::{
@@ -132,6 +134,52 @@ fn clean_opt(val: Option<&str>) -> Option<&str> {
     val.map(str::trim).filter(|s| !s.is_empty())
 }
 
+/// Computes a short-TTL cache duration in seconds based on monitoring range.
+fn monitoring_cache_ttl(range: &str) -> u64 {
+    match range {
+        "1h" => 10,
+        "6h" | "24h" => 30,
+        _ => 60,
+    }
+}
+
+/// Reads a cached JSON response from Redis when enabled, or computes and caches it.
+async fn cached_stats_response<T, F, Fut>(
+    state: &AppState,
+    subkey: &str,
+    ttl_secs: u64,
+    compute: F,
+) -> Response
+where
+    T: Serialize,
+    F: FnOnce() -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<T>>,
+{
+    let cache_key = state
+        .redis
+        .as_ref()
+        .map(|r| r.key(&format!("sys:stats:{subkey}")));
+    if let (Some(redis), Some(key)) = (&state.redis, &cache_key) {
+        match redis.get_json::<Value>(key).await {
+            Ok(Some(cached)) => return Json(cached).into_response(),
+            Ok(None) => {}
+            Err(err) => warn!(error = %err, "Redis stats cache read failed; querying PostgreSQL"),
+        }
+    }
+
+    match compute().await {
+        Ok(resp) => {
+            if let (Some(redis), Some(key)) = (&state.redis, &cache_key)
+                && let Err(err) = redis.set_json_ex(key, &resp, ttl_secs).await
+            {
+                warn!(error = %err, "Redis stats cache write failed");
+            }
+            Json(resp).into_response()
+        }
+        Err(err) => db_error_response(&err),
+    }
+}
+
 /// `GET /api/v1/stats/overview` handler.
 async fn overview_handler(
     State(state): State<AppState>,
@@ -176,19 +224,26 @@ async fn overview_handler(
     };
 
     let days = query.days.unwrap_or(365);
-    match db::query_overview(
-        pool,
-        &catalog,
-        &state.config.ui,
-        clean_opt(query.project_id.as_deref()),
-        clean_opt(query.provider_id.as_deref()),
+    let project_id = clean_opt(query.project_id.as_deref());
+    let provider_id = clean_opt(query.provider_id.as_deref());
+    let cache_key = format!(
+        "overview:{}:{}:{}:{}",
         days,
-    )
+        project_id.unwrap_or(""),
+        provider_id.unwrap_or(""),
+        state.config.ui.timezone
+    );
+    cached_stats_response(&state, &cache_key, 30, || {
+        db::query_overview(
+            pool,
+            &catalog,
+            &state.config.ui,
+            project_id,
+            provider_id,
+            days,
+        )
+    })
     .await
-    {
-        Ok(resp) => Json(resp).into_response(),
-        Err(err) => db_error_response(&err),
-    }
 }
 
 /// `GET /api/v1/stats/leaderboard` handler.
@@ -202,21 +257,29 @@ async fn leaderboard_handler(
     let catalog = state.catalog.load();
     let days = query.days.filter(|&d| d > 0);
     let sort = query.sort.as_deref().unwrap_or("avg_decode_tps");
-
-    match db::query_leaderboard(
-        pool,
-        &catalog,
-        clean_opt(query.project_id.as_deref()),
-        clean_opt(query.provider_id.as_deref()),
-        days,
+    let project_id = clean_opt(query.project_id.as_deref());
+    let provider_id = clean_opt(query.provider_id.as_deref());
+    let cache_key = format!(
+        "leaderboard:{}:{}:{}:{}:{}",
+        days.unwrap_or(0),
         sort,
-        state.config.ui.leaderboard_min_requests,
-    )
+        project_id.unwrap_or(""),
+        provider_id.unwrap_or(""),
+        state.config.ui.leaderboard_min_requests
+    );
+
+    cached_stats_response(&state, &cache_key, 30, || {
+        db::query_leaderboard(
+            pool,
+            &catalog,
+            project_id,
+            provider_id,
+            days,
+            sort,
+            state.config.ui.leaderboard_min_requests,
+        )
+    })
     .await
-    {
-        Ok(items) => Json(items).into_response(),
-        Err(err) => db_error_response(&err),
-    }
 }
 
 /// `GET /api/v1/stats/daily-models` handler.
@@ -228,19 +291,20 @@ async fn daily_models_handler(
         return Json(json!([])).into_response();
     };
     let days = query.days.unwrap_or(state.config.ui.default_days_range);
-
-    match db::query_daily_models(
-        pool,
-        &state.config.ui,
-        clean_opt(query.project_id.as_deref()),
-        clean_opt(query.provider_id.as_deref()),
+    let project_id = clean_opt(query.project_id.as_deref());
+    let provider_id = clean_opt(query.provider_id.as_deref());
+    let cache_key = format!(
+        "daily_models:{}:{}:{}:{}",
         days,
-    )
+        project_id.unwrap_or(""),
+        provider_id.unwrap_or(""),
+        state.config.ui.timezone
+    );
+
+    cached_stats_response(&state, &cache_key, 30, || {
+        db::query_daily_models(pool, &state.config.ui, project_id, provider_id, days)
+    })
     .await
-    {
-        Ok(days_data) => Json(days_data).into_response(),
-        Err(err) => db_error_response(&err),
-    }
 }
 
 /// `GET /api/v1/stats/recent-requests` handler.
@@ -310,6 +374,24 @@ struct MonitoringQuery {
     stream_mode: Option<String>,
 }
 
+/// Builds a normalized Redis cache subkey for `/api/v1/stats/monitoring/*`.
+fn monitoring_cache_key(
+    kind: &str,
+    filter: &MonitoringFilter<'_>,
+    timezone: &str,
+    extra: &str,
+) -> String {
+    format!(
+        "mon:{kind}:{}:{}:{}:{}:{}:{}:{timezone}:{extra}",
+        filter.range,
+        filter.granularity,
+        filter.project_id.unwrap_or(""),
+        filter.provider_id.unwrap_or(""),
+        filter.model_id.unwrap_or(""),
+        filter.stream_mode.unwrap_or("")
+    )
+}
+
 /// Normalizes `MonitoringQuery` into a `MonitoringFilter`.
 fn as_monitoring_filter(query: &MonitoringQuery) -> MonitoringFilter<'_> {
     MonitoringFilter {
@@ -346,10 +428,12 @@ async fn monitoring_traffic_handler(
         })
         .into_response();
     };
-    match monitoring_db::query_traffic_monitoring(pool, &catalog, &state.config.ui, &filter).await {
-        Ok(resp) => Json(resp).into_response(),
-        Err(err) => db_error_response(&err),
-    }
+    let cache_key = monitoring_cache_key("traffic", &filter, &state.config.ui.timezone, "");
+    let ttl = monitoring_cache_ttl(filter.range);
+    cached_stats_response(&state, &cache_key, ttl, || {
+        monitoring_db::query_traffic_monitoring(pool, &catalog, &state.config.ui, &filter)
+    })
+    .await
 }
 
 /// `GET /api/v1/stats/monitoring/performance` handler.
@@ -376,12 +460,12 @@ async fn monitoring_performance_handler(
         })
         .into_response();
     };
-    match monitoring_db::query_performance_monitoring(pool, &catalog, &state.config.ui, &filter)
-        .await
-    {
-        Ok(resp) => Json(resp).into_response(),
-        Err(err) => db_error_response(&err),
-    }
+    let cache_key = monitoring_cache_key("performance", &filter, &state.config.ui.timezone, "");
+    let ttl = monitoring_cache_ttl(filter.range);
+    cached_stats_response(&state, &cache_key, ttl, || {
+        monitoring_db::query_performance_monitoring(pool, &catalog, &state.config.ui, &filter)
+    })
+    .await
 }
 
 /// `GET /api/v1/stats/monitoring/routing` handler.
@@ -415,10 +499,12 @@ async fn monitoring_routing_handler(
         })
         .into_response();
     };
-    match monitoring_db::query_routing_monitoring(pool, &catalog, &state.config.ui, &filter).await {
-        Ok(resp) => Json(resp).into_response(),
-        Err(err) => db_error_response(&err),
-    }
+    let cache_key = monitoring_cache_key("routing", &filter, &state.config.ui.timezone, "");
+    let ttl = monitoring_cache_ttl(filter.range);
+    cached_stats_response(&state, &cache_key, ttl, || {
+        monitoring_db::query_routing_monitoring(pool, &catalog, &state.config.ui, &filter)
+    })
+    .await
 }
 
 /// `GET /api/v1/stats/monitoring/errors` handler.
@@ -446,10 +532,12 @@ async fn monitoring_errors_handler(
         })
         .into_response();
     };
-    match monitoring_db::query_errors_monitoring(pool, &catalog, &state.config.ui, &filter).await {
-        Ok(resp) => Json(resp).into_response(),
-        Err(err) => db_error_response(&err),
-    }
+    let cache_key = monitoring_cache_key("errors", &filter, &state.config.ui.timezone, "");
+    let ttl = monitoring_cache_ttl(filter.range);
+    cached_stats_response(&state, &cache_key, ttl, || {
+        monitoring_db::query_errors_monitoring(pool, &catalog, &state.config.ui, &filter)
+    })
+    .await
 }
 
 /// `GET /api/v1/stats/monitoring/cost` handler.
@@ -481,18 +569,24 @@ async fn monitoring_cost_handler(
         })
         .into_response();
     };
-    match monitoring_db::query_cost_monitoring(
-        pool,
-        &catalog,
-        &state.config.ui,
-        &state.config.billing,
-        &filter,
-    )
+    let display = state
+        .config
+        .billing
+        .display_currency
+        .as_deref()
+        .unwrap_or("");
+    let cache_key = monitoring_cache_key("cost", &filter, &state.config.ui.timezone, display);
+    let ttl = monitoring_cache_ttl(filter.range);
+    cached_stats_response(&state, &cache_key, ttl, || {
+        monitoring_db::query_cost_monitoring(
+            pool,
+            &catalog,
+            &state.config.ui,
+            &state.config.billing,
+            &filter,
+        )
+    })
     .await
-    {
-        Ok(resp) => Json(resp).into_response(),
-        Err(err) => db_error_response(&err),
-    }
 }
 
 /// Query parameters for `/api/v1/stats/monitoring/runtime`.

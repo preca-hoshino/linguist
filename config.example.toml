@@ -13,6 +13,16 @@ max_connections = 10
 log_error_payload = true
 log_full_payload = false
 
+[redis]
+# 可选：启用 Redis 用于会话加速、监控查询缓存、目录 Pub/Sub 热更新等
+enabled = false
+url = "redis://127.0.0.1:6379/0"
+key_prefix = "linguist"
+connect_timeout_ms = 1500
+command_timeout_ms = 200
+fail_open = true
+pubsub_enabled = true
+
 [script_engine]
 timeout_ms = 50
 memory_limit_mb = 32

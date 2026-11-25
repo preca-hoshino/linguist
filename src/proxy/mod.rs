@@ -45,32 +45,48 @@ pub fn router() -> Router<AppState> {
         .route("/model/{project_id}/v1/models", get(project_list_models))
 }
 
-/// Service and database readiness endpoint used by deployments and monitoring.
+/// Service, database, and Redis readiness endpoint used by deployments and monitoring.
 async fn healthz_handler(State(state): State<AppState>) -> Response {
-    if let Some(pool) = &state.db_pool {
+    let (db_ok, db_label) = if let Some(pool) = &state.db_pool {
         match sqlx::query("SELECT 1").execute(pool).await {
-            Ok(_) => (
-                StatusCode::OK,
-                Json(json!({ "status": "ok", "service": "linguist", "database": "ok" })),
-            )
-                .into_response(),
-            Err(err) => (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({
-                    "status": "degraded",
-                    "service": "linguist",
-                    "database": format!("error: {err}")
-                })),
-            )
-                .into_response(),
+            Ok(_) => (true, "ok".to_string()),
+            Err(err) => (false, format!("error: {err}")),
         }
     } else {
-        (
-            StatusCode::OK,
-            Json(json!({ "status": "ok", "service": "linguist", "database": "disabled" })),
-        )
-            .into_response()
-    }
+        (true, "disabled".to_string())
+    };
+
+    let (redis_ok, redis_label) = if let Some(redis) = &state.redis {
+        match redis.ping().await {
+            Ok(_) => (true, "ok".to_string()),
+            Err(err) => (redis.fail_open(), format!("degraded: {err}")),
+        }
+    } else {
+        (true, "disabled".to_string())
+    };
+
+    let overall_ok = db_ok && redis_ok;
+    let status_code = if overall_ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+    let status_str = if overall_ok && !redis_label.starts_with("degraded") {
+        "ok"
+    } else {
+        "degraded"
+    };
+
+    (
+        status_code,
+        Json(json!({
+            "status": status_str,
+            "service": "linguist",
+            "database": db_label,
+            "redis": redis_label,
+        })),
+    )
+        .into_response()
 }
 
 /// Project-scoped `/model/{project_id}/v1/models` handler.

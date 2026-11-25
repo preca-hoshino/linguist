@@ -399,6 +399,11 @@ export interface RuntimeSample {
   logPersistedRps: number;
   scriptCallsRps: number;
   scriptErrors: number;
+  redisHitsRps: number;
+  redisMissesRps: number;
+  redisWritesRps: number;
+  redisErrors: number;
+  redisAvgLatencyMs: number;
 }
 
 export interface RuntimeSnapshot {
@@ -445,6 +450,15 @@ export interface RuntimeSnapshot {
   scriptHttpSsrfBlocked: number;
   scriptHttpErrors: number;
   scriptHttpCacheEntries: number;
+  redisEnabled: boolean;
+  redisConnected: boolean;
+  redisOpsTotal: number;
+  redisHits: number;
+  redisMisses: number;
+  redisWrites: number;
+  redisErrors: number;
+  redisLastLatencyMs: number;
+  redisHitRate: number;
 }
 
 export interface HttpChannelRow {
