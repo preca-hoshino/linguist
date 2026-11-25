@@ -23,11 +23,11 @@ mime_guess = "2.0"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-webpki-roots", "rustls-tls-native-roots", "stream", "json"] }
 ring = "0.17"
 rust_decimal = { version = "1.39", features = ["serde-with-str"] }
-rust-embed = { version = "8.7", features = ["include-exclude"] }
+rust-embed = { version = "8.7", features = ["include-exclude", "compression"] }
 rustls = { version = "0.23", default-features = false }
 rustls-native-certs = "0.8"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = { version = "1.0", features = ["arbitrary_precision"] }
+serde_json = { version = "1.0", features = ["raw_value"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "chrono", "uuid", "json", "macros", "migrate", "rust_decimal"] }
 sysinfo = { version = "0.40", default-features = false, features = ["system"] }
 tokio = { version = "1.45", features = ["full"] }

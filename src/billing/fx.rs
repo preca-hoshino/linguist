@@ -203,44 +203,33 @@ async fn refresh(
     Ok(())
 }
 
-/// Fetches and validates one currency pair.
-async fn fetch_rate(client: &reqwest::Client, base: &str, target: &str) -> Result<Rate> {
-    let response: Value = client
-        .get("https://api.frankfurter.dev/v2/rates")
-        .query(&[("base", base), ("quotes", target)])
-        .timeout(Duration::from_secs(10))
-        .send()
-        .await?
-        .error_for_status()?
-        .json()
-        .await?;
-    let item = response
-        .as_array()
-        .and_then(|items| items.first())
-        .context("missing exchange rate")?;
-    ensure!(
-        item.get("base").and_then(Value::as_str) == Some(base),
-        "unexpected rate base"
-    );
-    ensure!(
-        item.get("quote").and_then(Value::as_str) == Some(target),
-        "unexpected rate quote"
-    );
-    let rate = item
-        .get("rate")
-        .and_then(Value::as_number)
-        .context("missing rate")?
-        .to_string();
+/// Raw JSON response item from the Frankfurter rates API.
+#[derive(Debug, Deserialize)]
+struct FrankfurterRateItem<'a> {
+    /// Base currency code.
+    base: String,
+    /// Quote currency code.
+    quote: String,
+    /// Observation date (`YYYY-MM-DD`).
+    date: String,
+    /// Raw JSON numeric token preserved without `f64` rounding.
+    #[serde(borrow)]
+    rate: &'a serde_json::value::RawValue,
+}
+
+/// Parses and validates a single Frankfurter exchange-rate response payload.
+fn parse_rate_response(raw_body: &str, base: &str, target: &str) -> Result<Rate> {
+    let items: Vec<FrankfurterRateItem<'_>> =
+        serde_json::from_str(raw_body).context("invalid exchange rate JSON")?;
+    let item = items.into_iter().next().context("missing exchange rate")?;
+    ensure!(item.base == base, "unexpected rate base");
+    ensure!(item.quote == target, "unexpected rate quote");
+    let rate = item.rate.get().trim().to_owned();
     ensure!(
         Decimal::from_str(&rate)? > Decimal::ZERO,
         "invalid exchange rate"
     );
-    let date = NaiveDate::parse_from_str(
-        item.get("date")
-            .and_then(Value::as_str)
-            .context("missing rate date")?,
-        "%Y-%m-%d",
-    )?;
+    let date = NaiveDate::parse_from_str(&item.date, "%Y-%m-%d")?;
     Ok(Rate {
         base: base.to_owned(),
         quote: target.to_owned(),
@@ -248,6 +237,20 @@ async fn fetch_rate(client: &reqwest::Client, base: &str, target: &str) -> Resul
         rate,
         fetched_at: Utc::now(),
     })
+}
+
+/// Fetches and validates one currency pair.
+async fn fetch_rate(client: &reqwest::Client, base: &str, target: &str) -> Result<Rate> {
+    let raw_body = client
+        .get("https://api.frankfurter.dev/v2/rates")
+        .query(&[("base", base), ("quotes", target)])
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await?
+        .error_for_status()?
+        .text()
+        .await?;
+    parse_rate_response(&raw_body, base, target)
 }
 
 /// Converts an entire set of original-currency totals, refusing partial totals.

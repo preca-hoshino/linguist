@@ -1658,13 +1658,9 @@ fn convert_decimal_map(
     converted.and_then(|d| d.to_f64()).unwrap_or(0.0)
 }
 
-/// Extracts a decimal string field from `billing_details` JSONB.
-fn json_decimal(details: &Value, key: &str) -> Decimal {
-    details
-        .get(key)
-        .and_then(Value::as_str)
-        .and_then(|s| Decimal::from_str(s).ok())
-        .unwrap_or(Decimal::ZERO)
+/// Parses a `Decimal` string returned by PostgreSQL `NUMERIC::text`, defaulting to zero.
+fn parse_decimal_or_zero(raw: &str) -> Decimal {
+    Decimal::from_str(raw.trim()).unwrap_or(Decimal::ZERO)
 }
 
 /// Accumulates `Decimal` into a currency map safely.
@@ -1757,21 +1753,28 @@ pub async fn query_cost_monitoring(
         SELECT
             date_trunc($1, created_at AT TIME ZONE 'UTC' + make_interval(secs => $2::int)) AS bucket,
             project_id,
-            project_name,
+            MAX(project_name) AS project_name,
             provider_id,
-            provider_name,
+            MAX(provider_name) AS provider_name,
             model_id,
-            model_name,
-            total_tokens,
-            billing_amount::text AS amount,
+            MAX(model_name) AS model_name,
             billing_currency,
-            billing_status,
-            billing_details
+            COALESCE(billing_status, 'unpriced') AS b_status,
+            COUNT(*)::BIGINT AS row_count,
+            COUNT(*) FILTER (WHERE billing_amount IS NOT NULL AND billing_currency IS NOT NULL)::BIGINT AS priced_count,
+            COALESCE(SUM(total_tokens) FILTER (WHERE billing_amount IS NOT NULL AND billing_currency IS NOT NULL), 0)::BIGINT AS priced_tokens,
+            COALESCE(SUM(billing_amount) FILTER (WHERE billing_amount IS NOT NULL AND billing_currency IS NOT NULL), 0)::text AS sum_amount,
+            COALESCE(SUM(CASE WHEN billing_amount IS NOT NULL AND billing_currency IS NOT NULL AND billing_details->>'inputAmount' ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (billing_details->>'inputAmount')::numeric ELSE 0 END), 0)::text AS sum_input_amt,
+            COALESCE(SUM(CASE WHEN billing_amount IS NOT NULL AND billing_currency IS NOT NULL AND billing_details->>'outputAmount' ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (billing_details->>'outputAmount')::numeric ELSE 0 END), 0)::text AS sum_output_amt,
+            COALESCE(SUM(CASE WHEN billing_amount IS NOT NULL AND billing_currency IS NOT NULL AND billing_details->>'cacheReadAmount' ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (billing_details->>'cacheReadAmount')::numeric ELSE 0 END), 0)::text AS sum_cache_read_amt,
+            COALESCE(SUM(CASE WHEN billing_amount IS NOT NULL AND billing_currency IS NOT NULL AND billing_details->>'cacheWriteAmount' ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (billing_details->>'cacheWriteAmount')::numeric ELSE 0 END), 0)::text AS sum_cache_write_amt,
+            COALESCE(SUM(CASE WHEN billing_amount IS NOT NULL AND billing_currency IS NOT NULL AND billing_details->>'otherAmount' ~ '^-?[0-9]+(\.[0-9]+)?$' THEN (billing_details->>'otherAmount')::numeric ELSE 0 END), 0)::text AS sum_other_amt
         FROM request_logs
         WHERE created_at >= $3
           AND ($4::TEXT IS NULL OR project_id = $4)
           AND ($5::TEXT IS NULL OR provider_id = $5)
           AND ($6::TEXT IS NULL OR model_id = $6)
+        GROUP BY bucket, project_id, provider_id, model_id, billing_currency, COALESCE(billing_status, 'unpriced')
         ",
     )
     .bind(win.pg_unit)
@@ -1808,15 +1811,19 @@ pub async fn query_cost_monitoring(
         let provider_name: String = row.try_get("provider_name")?;
         let model_id: String = row.try_get("model_id")?;
         let model_name: String = row.try_get("model_name")?;
-        let total_tokens: i64 = row.try_get("total_tokens")?;
-        let amount_str: Option<String> = row.try_get("amount")?;
         let currency: Option<String> = row.try_get("billing_currency")?;
-        let b_status: String = row
-            .try_get::<Option<String>, _>("billing_status")?
-            .unwrap_or_else(|| "unpriced".to_string());
-        let details: Option<Value> = row.try_get("billing_details")?;
+        let b_status: String = row.try_get("b_status")?;
+        let row_count: i64 = row.try_get("row_count")?;
+        let priced_count: i64 = row.try_get("priced_count")?;
+        let priced_tokens: i64 = row.try_get("priced_tokens")?;
+        let sum_amount_str: String = row.try_get("sum_amount")?;
+        let sum_input_str: String = row.try_get("sum_input_amt")?;
+        let sum_output_str: String = row.try_get("sum_output_amt")?;
+        let sum_cache_read_str: String = row.try_get("sum_cache_read_amt")?;
+        let sum_cache_write_str: String = row.try_get("sum_cache_write_amt")?;
+        let sum_other_str: String = row.try_get("sum_other_amt")?;
 
-        *status_counts_map.entry(b_status.clone()).or_insert(0) += 1;
+        *status_counts_map.entry(b_status.clone()).or_insert(0) += row_count;
 
         let model_key = format!("{provider_id}/{model_id}");
         let acc = bucket_accs.entry(dt).or_default();
@@ -1838,26 +1845,36 @@ pub async fn query_cost_monitoring(
                 name: model_name,
                 ..CostRankAcc::default()
             });
-        proj_acc.request_count += 1;
-        provider_acc.request_count += 1;
-        mod_acc.request_count += 1;
+        proj_acc.request_count += row_count;
+        provider_acc.request_count += row_count;
+        mod_acc.request_count += row_count;
 
         if b_status == "script_error" {
-            acc.script_error_count += 1;
-            total_script_errors += 1;
+            acc.script_error_count += row_count;
+            total_script_errors += row_count;
         }
 
-        if let (Some(amt_s), Some(curr)) = (amount_str, currency)
-            && let Ok(amt) = Decimal::from_str(&amt_s)
+        let unpriced_in_group = row_count.saturating_sub(priced_count);
+        if unpriced_in_group > 0 {
+            acc.unpriced_count += unpriced_in_group;
+            total_unpriced_reqs += unpriced_in_group;
+            proj_acc.unpriced_count += unpriced_in_group;
+            provider_acc.unpriced_count += unpriced_in_group;
+            mod_acc.unpriced_count += unpriced_in_group;
+        }
+
+        if priced_count > 0
+            && let Some(curr) = currency
         {
+            let amt = parse_decimal_or_zero(&sum_amount_str);
             seen_currencies.insert(curr.clone());
-            acc.priced_requests += 1;
-            acc.priced_tokens += total_tokens;
-            total_priced_reqs += 1;
-            total_priced_tokens += total_tokens;
-            proj_acc.priced_tokens += total_tokens;
-            provider_acc.priced_tokens += total_tokens;
-            mod_acc.priced_tokens += total_tokens;
+            acc.priced_requests += priced_count;
+            acc.priced_tokens += priced_tokens;
+            total_priced_reqs += priced_count;
+            total_priced_tokens += priced_tokens;
+            proj_acc.priced_tokens += priced_tokens;
+            provider_acc.priced_tokens += priced_tokens;
+            mod_acc.priced_tokens += priced_tokens;
 
             add_currency_amount(&mut raw_currency_totals, &curr, amt);
             add_currency_amount(&mut acc.total_currencies, &curr, amt);
@@ -1867,41 +1884,33 @@ pub async fn query_cost_monitoring(
             add_currency_amount(&mut provider_acc.currencies, &curr, amt);
             add_currency_amount(&mut mod_acc.currencies, &curr, amt);
 
-            if let Some(det) = details {
-                let d_in = json_decimal(&det, "inputAmount");
-                let d_out = json_decimal(&det, "outputAmount");
-                let cache_read_amt = json_decimal(&det, "cacheReadAmount");
-                let cache_write_amt = json_decimal(&det, "cacheWriteAmount");
-                let d_other = json_decimal(&det, "otherAmount");
-                let d_cache = cache_read_amt
-                    .checked_add(cache_write_amt)
-                    .unwrap_or(cache_read_amt);
+            let d_in = parse_decimal_or_zero(&sum_input_str);
+            let d_out = parse_decimal_or_zero(&sum_output_str);
+            let cache_read_amt = parse_decimal_or_zero(&sum_cache_read_str);
+            let cache_write_amt = parse_decimal_or_zero(&sum_cache_write_str);
+            let d_other = parse_decimal_or_zero(&sum_other_str);
+            let d_cache = cache_read_amt
+                .checked_add(cache_write_amt)
+                .unwrap_or(cache_read_amt);
 
-                add_currency_amount(&mut acc.input_currencies, &curr, d_in);
-                add_currency_amount(&mut acc.output_currencies, &curr, d_out);
-                add_currency_amount(&mut acc.cache_read_currencies, &curr, cache_read_amt);
-                add_currency_amount(&mut acc.cache_write_currencies, &curr, cache_write_amt);
-                add_currency_amount(&mut acc.other_currencies, &curr, d_other);
+            add_currency_amount(&mut acc.input_currencies, &curr, d_in);
+            add_currency_amount(&mut acc.output_currencies, &curr, d_out);
+            add_currency_amount(&mut acc.cache_read_currencies, &curr, cache_read_amt);
+            add_currency_amount(&mut acc.cache_write_currencies, &curr, cache_write_amt);
+            add_currency_amount(&mut acc.other_currencies, &curr, d_other);
 
-                add_currency_amount(&mut total_input_cur, &curr, d_in);
-                add_currency_amount(&mut total_output_cur, &curr, d_out);
-                add_currency_amount(&mut total_cache_read_cur, &curr, cache_read_amt);
-                add_currency_amount(&mut total_cache_write_cur, &curr, cache_write_amt);
-                add_currency_amount(&mut total_other_cur, &curr, d_other);
+            add_currency_amount(&mut total_input_cur, &curr, d_in);
+            add_currency_amount(&mut total_output_cur, &curr, d_out);
+            add_currency_amount(&mut total_cache_read_cur, &curr, cache_read_amt);
+            add_currency_amount(&mut total_cache_write_cur, &curr, cache_write_amt);
+            add_currency_amount(&mut total_other_cur, &curr, d_other);
 
-                for target in [&mut *proj_acc, &mut *provider_acc, &mut *mod_acc] {
-                    add_currency_amount(&mut target.input_currencies, &curr, d_in);
-                    add_currency_amount(&mut target.output_currencies, &curr, d_out);
-                    add_currency_amount(&mut target.cache_currencies, &curr, d_cache);
-                    add_currency_amount(&mut target.other_currencies, &curr, d_other);
-                }
+            for target in [&mut *proj_acc, &mut *provider_acc, &mut *mod_acc] {
+                add_currency_amount(&mut target.input_currencies, &curr, d_in);
+                add_currency_amount(&mut target.output_currencies, &curr, d_out);
+                add_currency_amount(&mut target.cache_currencies, &curr, d_cache);
+                add_currency_amount(&mut target.other_currencies, &curr, d_other);
             }
-        } else {
-            acc.unpriced_count += 1;
-            total_unpriced_reqs += 1;
-            proj_acc.unpriced_count += 1;
-            provider_acc.unpriced_count += 1;
-            mod_acc.unpriced_count += 1;
         }
     }
 

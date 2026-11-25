@@ -1,16 +1,18 @@
 //! Official `LobeHub` SVG icons embedded in the application binary.
 
+use std::borrow::Cow;
+
 use crate::web::embedded_assets::LobeIcons;
 
 /// Resolves an embedded SVG by slug, falling back to its monochrome icon when available.
 #[must_use]
-pub fn resolve_icon_svg(raw_name: &str) -> Option<Vec<u8>> {
+pub fn resolve_icon_svg(raw_name: &str) -> Option<Cow<'static, [u8]>> {
     let slug = sanitize_icon_slug(raw_name)?;
     let icon = LobeIcons::get(&format!("{slug}.svg")).or_else(|| {
         slug.strip_suffix("-color")
             .and_then(|base| LobeIcons::get(&format!("{base}.svg")))
     })?;
-    Some(icon.data.into_owned())
+    Some(icon.data)
 }
 
 /// Validates and normalizes an icon slug to prevent path traversal.

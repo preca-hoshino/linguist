@@ -88,7 +88,7 @@ async fn serve_icon_handler(Path(icon_name): Path<String>) -> Response {
         HeaderName::from_static("cache-control"),
         HeaderValue::from_static("public, max-age=86400"),
     );
-    (StatusCode::OK, headers, svg).into_response()
+    (StatusCode::OK, headers, axum::body::Body::from(svg)).into_response()
 }
 
 /// Serves embedded `frontend/dist` files and falls back to `index.html` for SPA routes,
@@ -127,22 +127,22 @@ async fn spa_fallback_handler(uri: Uri) -> Response {
     };
 
     if let Some(asset) = embedded_assets::FrontendDist::get(lookup) {
-        return asset_response(lookup, asset.data.into_owned());
+        return asset_response(lookup, asset.data);
     }
 
     if let Some(index) = embedded_assets::FrontendDist::get("index.html") {
-        return asset_response("index.html", index.data.into_owned());
+        return asset_response("index.html", index.data);
     }
 
     (StatusCode::NOT_FOUND, "Frontend bundle missing").into_response()
 }
 
 /// Converts embedded file bytes into an HTTP response with inferred MIME `Content-Type`.
-fn asset_response(path: &str, bytes: Vec<u8>) -> Response {
+fn asset_response(path: &str, bytes: std::borrow::Cow<'static, [u8]>) -> Response {
     let mime = mime_guess::from_path(path).first_or_octet_stream();
     let mut headers = HeaderMap::new();
     if let Ok(val) = HeaderValue::from_str(mime.as_ref()) {
         headers.insert(HeaderName::from_static("content-type"), val);
     }
-    (StatusCode::OK, headers, bytes).into_response()
+    (StatusCode::OK, headers, axum::body::Body::from(bytes)).into_response()
 }
