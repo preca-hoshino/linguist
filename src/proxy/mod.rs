@@ -116,6 +116,21 @@ struct AttemptTimings {
     upstream_header_ms: f64,
 }
 
+/// RAII guard decrementing `outbound_inflight` when an upstream HTTP attempt exits.
+struct OutboundInflightGuard<'a> {
+    /// Shared runtime telemetry collector.
+    runtime: &'a crate::runtime_metrics::RuntimeMetrics,
+}
+
+impl Drop for OutboundInflightGuard<'_> {
+    fn drop(&mut self) {
+        self.runtime
+            .counters
+            .outbound_inflight
+            .fetch_sub(1, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
 /// Shared Stages ①..③ + upstream dispatch pipeline for `/model/{project_id}/v1/...`.
 async fn handle_routed_chat(
     state: AppState,
@@ -348,6 +363,30 @@ async fn send_upstream_attempt(
 ) -> AttemptOutcome {
     let t_start = Instant::now();
     let started_at = Utc::now();
+    state
+        .runtime
+        .record_gateway_timings(timings.routing_ms, timings.attempt_prep_ms);
+    if attempt_num > 1 {
+        state
+            .runtime
+            .counters
+            .outbound_retry_count
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    }
+    state
+        .runtime
+        .counters
+        .outbound_total
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    state
+        .runtime
+        .counters
+        .outbound_inflight
+        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let _outbound_guard = OutboundInflightGuard {
+        runtime: &state.runtime,
+    };
+
     let mut req_builder = state.http_client.post(&attempt_ctx.request.url);
     for (k, v) in &outbound_headers {
         req_builder = req_builder.header(k, v);
@@ -360,14 +399,26 @@ async fn send_upstream_attempt(
             .max(5);
         req_builder = req_builder.timeout(Duration::from_secs(timeout_secs));
     }
+    let body_bytes = serde_json::to_vec(&outbound_body).unwrap_or_default();
+    state.runtime.counters.outbound_req_bytes.fetch_add(
+        u64::try_from(body_bytes.len()).unwrap_or(0),
+        std::sync::atomic::Ordering::Relaxed,
+    );
 
-    let upstream_res = match req_builder.json(&outbound_body).send().await {
+    let upstream_res = match req_builder
+        .header(CONTENT_TYPE, "application/json")
+        .body(body_bytes)
+        .send()
+        .await
+    {
         Ok(resp) => {
             timings.upstream_header_ms = t_start.elapsed().as_secs_f64() * 1000.0;
             resp
         }
         Err(err) => {
             let elapsed_ms = t_start.elapsed().as_secs_f64() * 1000.0;
+            let conn_micros = u64::try_from(t_start.elapsed().as_micros()).unwrap_or(u64::MAX);
+            state.runtime.record_outbound_conn_error(conn_micros);
             timings.upstream_header_ms = elapsed_ms;
             record_failed_attempt(
                 state,
@@ -400,6 +451,8 @@ async fn send_upstream_attempt(
 
     let status = upstream_res.status();
     let status_u16 = status.as_u16();
+    let header_us = u64::try_from(t_start.elapsed().as_micros()).unwrap_or(u64::MAX);
+    state.runtime.record_outbound_status(status_u16, header_us);
     let content_type = upstream_res
         .headers()
         .get(CONTENT_TYPE)
@@ -492,6 +545,10 @@ async fn handle_fallback_status(
 ) -> AttemptOutcome {
     let status_u16 = status.as_u16();
     let err_bytes = upstream_res.bytes().await.unwrap_or_default();
+    state.runtime.counters.outbound_resp_bytes.fetch_add(
+        u64::try_from(err_bytes.len()).unwrap_or(0),
+        std::sync::atomic::Ordering::Relaxed,
+    );
     let err_text = String::from_utf8_lossy(&err_bytes).to_string();
     let elapsed_ms = t_start.elapsed().as_secs_f64() * 1000.0;
     let resp_json: Option<Value> = serde_json::from_slice(&err_bytes).ok();
@@ -609,7 +666,13 @@ async fn buffer_json_response(
     meta: InspectionMetadata,
 ) -> Response {
     let body_bytes = match upstream_res.bytes().await {
-        Ok(b) => b,
+        Ok(b) => {
+            state.runtime.counters.outbound_resp_bytes.fetch_add(
+                u64::try_from(b.len()).unwrap_or(0),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            b
+        }
         Err(err) => {
             let mut tracker = StreamTelemetryTracker::new(meta);
             if let Some((_, record)) =
@@ -788,6 +851,7 @@ fn build_inspection_metadata(
         routing_ms: timings.routing_ms,
         attempt_prep_ms: timings.attempt_prep_ms,
         upstream_header_ms: timings.upstream_header_ms,
+        runtime_metrics: Some(Arc::clone(&state.runtime)),
     }
 }
 

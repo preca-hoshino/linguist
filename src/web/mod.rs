@@ -65,6 +65,10 @@ pub fn build_router(state: AppState) -> Router {
         .merge(auth_api::public_router())
         .merge(admin_protected)
         .fallback(spa_fallback_handler)
+        .layer(from_fn_with_state(
+            state.clone(),
+            crate::runtime_metrics::inbound_http_middleware,
+        ))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

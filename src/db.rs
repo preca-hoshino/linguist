@@ -38,12 +38,44 @@ enum LogWriterMsg {
     Flush(tokio::sync::oneshot::Sender<()>),
 }
 
+/// Snapshot of `LogWriterHandle` channel depth and cumulative persistence counts.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct LogWriterStats {
+    /// Current queued items waiting in the bounded MPSC channel.
+    pub queue_depth: u64,
+    /// Configured channel capacity.
+    pub queue_capacity: u64,
+    /// Total records enqueued.
+    pub enqueued: u64,
+    /// Total records persisted to PostgreSQL.
+    pub persisted: u64,
+    /// Total retry attempts after transient DB errors.
+    pub retries: u64,
+    /// Total records dropped because the channel was full or closed.
+    pub dropped: u64,
+}
+
+/// Atomic counters shared by `LogWriterHandle` and its background worker task.
+#[derive(Debug, Default)]
+struct LogWriterCounters {
+    /// Total records enqueued.
+    enqueued: std::sync::atomic::AtomicU64,
+    /// Total records persisted to PostgreSQL.
+    persisted: std::sync::atomic::AtomicU64,
+    /// Total retry attempts.
+    retries: std::sync::atomic::AtomicU64,
+    /// Total records dropped.
+    dropped: std::sync::atomic::AtomicU64,
+}
+
 /// Async handle used by the proxy gateway to enqueue completed request telemetry
 /// without blocking HTTP response delivery.
 #[derive(Debug, Clone)]
 pub struct LogWriterHandle {
     /// Bounded MPSC sender feeding the background DB writer task.
     tx: mpsc::Sender<LogWriterMsg>,
+    /// Atomic persistence counters.
+    counters: std::sync::Arc<LogWriterCounters>,
 }
 
 impl LogWriterHandle {
@@ -56,6 +88,8 @@ impl LogWriterHandle {
         engine: crate::script_engine::ScriptEngine,
     ) -> Self {
         let (tx, mut rx) = mpsc::channel::<LogWriterMsg>(1024);
+        let counters = std::sync::Arc::new(LogWriterCounters::default());
+        let worker_counters = std::sync::Arc::clone(&counters);
         tokio::spawn(async move {
             while let Some(msg) = rx.recv().await {
                 match msg {
@@ -70,8 +104,16 @@ impl LogWriterHandle {
                             )
                             .await
                             {
-                                Ok(()) => break,
+                                Ok(()) => {
+                                    worker_counters
+                                        .persisted
+                                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                                    break;
+                                }
                                 Err(err) => {
+                                    worker_counters
+                                        .retries
+                                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                                     error!(request_uid = %record.request_uid, attempt, error = %err,
                                         "failed to persist request telemetry to PostgreSQL");
                                     if attempt < 3 {
@@ -88,13 +130,47 @@ impl LogWriterHandle {
                 }
             }
         });
-        Self { tx }
+        Self { tx, counters }
     }
 
     /// Enqueues a request log record for asynchronous database insertion.
     pub fn send(&self, record: RequestLogRecord) {
         if let Err(err) = self.tx.try_send(LogWriterMsg::Record(Box::new(record))) {
+            self.counters
+                .dropped
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             warn!(error = %err, "telemetry log channel full or closed; dropping record");
+        } else {
+            self.counters
+                .enqueued
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+
+    /// Returns a snapshot of channel depth and cumulative persistence counts.
+    #[must_use]
+    pub fn stats(&self) -> LogWriterStats {
+        let cap = self.tx.max_capacity();
+        let avail = self.tx.capacity();
+        LogWriterStats {
+            queue_depth: u64::try_from(cap.saturating_sub(avail)).unwrap_or(0),
+            queue_capacity: u64::try_from(cap).unwrap_or(1024),
+            enqueued: self
+                .counters
+                .enqueued
+                .load(std::sync::atomic::Ordering::Relaxed),
+            persisted: self
+                .counters
+                .persisted
+                .load(std::sync::atomic::Ordering::Relaxed),
+            retries: self
+                .counters
+                .retries
+                .load(std::sync::atomic::Ordering::Relaxed),
+            dropped: self
+                .counters
+                .dropped
+                .load(std::sync::atomic::Ordering::Relaxed),
         }
     }
 

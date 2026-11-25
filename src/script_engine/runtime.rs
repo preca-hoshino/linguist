@@ -253,6 +253,54 @@ impl HttpCache {
     }
 }
 
+/// Snapshot of script engine execution and `linguist.http` cache metrics.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ScriptRuntimeStats {
+    /// Total `onRequest` hook invocations.
+    pub on_request_calls: u64,
+    /// Total `onRequest` hook failures/timeouts.
+    pub on_request_errors: u64,
+    /// Total `onBilling` chain invocations.
+    pub on_billing_calls: u64,
+    /// Total `onBilling` chain failures/timeouts.
+    pub on_billing_errors: u64,
+    /// Total `linguist.http` requests initiated.
+    pub http_calls: u64,
+    /// Total `linguist.http` TTL cache hits.
+    pub http_cache_hits: u64,
+    /// Total `linguist.http` singleflight coalesced waits.
+    pub http_singleflight_coalesced: u64,
+    /// Total `linguist.http` requests blocked by SSRF guard.
+    pub http_ssrf_blocked: u64,
+    /// Total `linguist.http` network/timeout errors.
+    pub http_errors: u64,
+    /// Current number of cached `linguist.http` entries.
+    pub http_cache_entries: usize,
+}
+
+/// Atomic counters shared across `ScriptRuntimePool` workers and `HttpContext`.
+#[derive(Debug, Default)]
+struct ScriptRuntimeCounters {
+    /// Total `onRequest` hook invocations.
+    on_request_calls: std::sync::atomic::AtomicU64,
+    /// Total `onRequest` hook failures/timeouts.
+    on_request_errors: std::sync::atomic::AtomicU64,
+    /// Total `onBilling` chain invocations.
+    on_billing_calls: std::sync::atomic::AtomicU64,
+    /// Total `onBilling` chain failures/timeouts.
+    on_billing_errors: std::sync::atomic::AtomicU64,
+    /// Total `linguist.http` requests initiated.
+    http_calls: std::sync::atomic::AtomicU64,
+    /// Total `linguist.http` TTL cache hits.
+    http_cache_hits: std::sync::atomic::AtomicU64,
+    /// Total `linguist.http` singleflight coalesced waits.
+    http_singleflight_coalesced: std::sync::atomic::AtomicU64,
+    /// Total `linguist.http` requests blocked by SSRF guard.
+    http_ssrf_blocked: std::sync::atomic::AtomicU64,
+    /// Total `linguist.http` network/timeout errors.
+    http_errors: std::sync::atomic::AtomicU64,
+}
+
 /// Shared HTTP client and cache context injected into worker threads.
 #[derive(Debug, Clone)]
 struct HttpContext {
@@ -262,6 +310,8 @@ struct HttpContext {
     cache: Arc<HttpCache>,
     /// Engine configuration (timeouts, SSRF rules).
     config: Arc<ScriptEngineConfig>,
+    /// Shared execution and HTTP telemetry counters.
+    counters: Arc<ScriptRuntimeCounters>,
 }
 
 /// Per-invocation mutable slot stored in thread-local map for native host callbacks.
@@ -434,6 +484,10 @@ pub struct ScriptRuntimePool {
     workers: Arc<Vec<mpsc::UnboundedSender<RuntimeJob>>>,
     /// Round-robin index.
     rr: Arc<AtomicUsize>,
+    /// Shared HTTP cache for stats inspection.
+    http_cache: Arc<HttpCache>,
+    /// Shared execution and HTTP telemetry counters.
+    counters: Arc<ScriptRuntimeCounters>,
 }
 
 impl ScriptRuntimePool {
@@ -450,10 +504,13 @@ impl ScriptRuntimePool {
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
 
+        let http_cache = Arc::new(HttpCache::default());
+        let counters = Arc::new(ScriptRuntimeCounters::default());
         let http_ctx = HttpContext {
             client,
-            cache: Arc::new(HttpCache::default()),
+            cache: Arc::clone(&http_cache),
             config,
+            counters: Arc::clone(&counters),
         };
 
         let mut workers = Vec::with_capacity(count);
@@ -503,6 +560,29 @@ impl ScriptRuntimePool {
         Self {
             workers: Arc::new(workers),
             rr: Arc::new(AtomicUsize::new(0)),
+            http_cache,
+            counters,
+        }
+    }
+
+    /// Returns a snapshot of script execution and `linguist.http` counters.
+    #[must_use]
+    pub fn stats(&self) -> ScriptRuntimeStats {
+        let entries = self.http_cache.entries.lock().map_or(0, |g| g.len());
+        ScriptRuntimeStats {
+            on_request_calls: self.counters.on_request_calls.load(Ordering::Relaxed),
+            on_request_errors: self.counters.on_request_errors.load(Ordering::Relaxed),
+            on_billing_calls: self.counters.on_billing_calls.load(Ordering::Relaxed),
+            on_billing_errors: self.counters.on_billing_errors.load(Ordering::Relaxed),
+            http_calls: self.counters.http_calls.load(Ordering::Relaxed),
+            http_cache_hits: self.counters.http_cache_hits.load(Ordering::Relaxed),
+            http_singleflight_coalesced: self
+                .counters
+                .http_singleflight_coalesced
+                .load(Ordering::Relaxed),
+            http_ssrf_blocked: self.counters.http_ssrf_blocked.load(Ordering::Relaxed),
+            http_errors: self.counters.http_errors.load(Ordering::Relaxed),
+            http_cache_entries: entries,
         }
     }
 
@@ -524,8 +604,18 @@ impl ScriptRuntimePool {
                 reply: tx,
             })
             .map_err(|_| anyhow!("script worker pool channel closed"))?;
-        rx.await
-            .map_err(|_| anyhow!("script worker dropped request"))?
+        self.counters
+            .on_request_calls
+            .fetch_add(1, Ordering::Relaxed);
+        let res = rx
+            .await
+            .map_err(|_| anyhow!("script worker dropped request"))?;
+        if res.is_err() {
+            self.counters
+                .on_request_errors
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        res
     }
 
     /// Executes an ordered `onBilling` chain (`Provider` -> `Model`) asynchronously.
@@ -546,8 +636,18 @@ impl ScriptRuntimePool {
                 reply: tx,
             })
             .map_err(|_| anyhow!("script worker pool channel closed"))?;
-        rx.await
-            .map_err(|_| anyhow!("script worker dropped billing task"))?
+        self.counters
+            .on_billing_calls
+            .fetch_add(1, Ordering::Relaxed);
+        let res = rx
+            .await
+            .map_err(|_| anyhow!("script worker dropped billing task"))?;
+        if res.is_err() {
+            self.counters
+                .on_billing_errors
+                .fetch_add(1, Ordering::Relaxed);
+        }
+        res
     }
 }
 
@@ -1587,9 +1687,13 @@ async fn execute_http_fetch(
     opts: JsHttpOptions,
     default_timeout_ms: u64,
 ) -> Result<String> {
+    http.counters.http_calls.fetch_add(1, Ordering::Relaxed);
     if let Some(cache_key) = &opts.cache_key
         && let Some(cached) = http.cache.get(cache_key)
     {
+        http.counters
+            .http_cache_hits
+            .fetch_add(1, Ordering::Relaxed);
         return Ok(cached);
     }
 
@@ -1608,6 +1712,9 @@ async fn execute_http_fetch(
         }
 
         if let Some(mut rx) = inflight_rx {
+            http.counters
+                .http_singleflight_coalesced
+                .fetch_add(1, Ordering::Relaxed);
             let wait_res = tokio::time::timeout(
                 Duration::from_millis(opts.timeout_ms.unwrap_or(default_timeout_ms).max(100)),
                 async {
@@ -1646,6 +1753,7 @@ async fn execute_http_fetch(
                 Ok(payload)
             }
             Err(err) => {
+                http.counters.http_errors.fetch_add(1, Ordering::Relaxed);
                 let msg = err.to_string();
                 if let Some(tx) = leader_tx {
                     let _ = tx.send(Some(Err(msg.clone())));
@@ -1654,7 +1762,11 @@ async fn execute_http_fetch(
             }
         }
     } else {
-        perform_raw_http(&http, &url, &opts, default_timeout_ms).await
+        let res = perform_raw_http(&http, &url, &opts, default_timeout_ms).await;
+        if res.is_err() {
+            http.counters.http_errors.fetch_add(1, Ordering::Relaxed);
+        }
+        res
     }
 }
 

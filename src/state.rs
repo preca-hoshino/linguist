@@ -13,6 +13,7 @@ use crate::config::AppConfig;
 use crate::db::LogWriterHandle;
 use crate::metrics_cache::MetricsCache;
 use crate::models::RequestLogRecord;
+use crate::runtime_metrics::RuntimeMetrics;
 use crate::script_engine::ScriptEngine;
 
 /// Thread-safe shared state for Linguist HTTP handlers.
@@ -34,6 +35,8 @@ pub struct AppState {
     pub log_writer: Option<LogWriterHandle>,
     /// OIDC client and validated admin identity configuration.
     pub oidc: Option<OidcClient>,
+    /// In-process runtime telemetry & HTTP byte/request counters.
+    pub runtime: Arc<RuntimeMetrics>,
 }
 
 impl AppState {
@@ -66,6 +69,7 @@ impl AppState {
             db_pool,
             log_writer,
             oidc: None,
+            runtime: Arc::new(RuntimeMetrics::new()),
         })
     }
 

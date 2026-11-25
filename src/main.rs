@@ -286,6 +286,7 @@ async fn run_serve(cfg: AppConfig) -> Result<()> {
     .with_oidc(oidc_client);
 
     linguist::billing::fx::start(&state);
+    linguist::runtime_metrics::start_sampler(&state);
 
     let app = web::build_router(state);
     let addr_str = format!("{}:{}", cfg.server.host, cfg.server.port);

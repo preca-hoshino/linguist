@@ -66,6 +66,12 @@ impl ScriptEngine {
     ) -> Result<BillingExecutionOutput> {
         self.pool.execute_billing_chain(units, input).await
     }
+
+    /// Returns a snapshot of script execution and `linguist.http` cache metrics.
+    #[must_use]
+    pub fn runtime_stats(&self) -> crate::script_engine::runtime::ScriptRuntimeStats {
+        self.pool.stats()
+    }
 }
 
 #[cfg(test)]

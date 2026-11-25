@@ -29,6 +29,7 @@ rustls-native-certs = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0", features = ["arbitrary_precision"] }
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "chrono", "uuid", "json", "macros", "migrate", "rust_decimal"] }
+sysinfo = { version = "0.40", default-features = false, features = ["system"] }
 tokio = { version = "1.45", features = ["full"] }
 toml = "0.8"
 tower-http = { version = "0.6", features = ["cors", "trace"] }

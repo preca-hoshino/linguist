@@ -44,6 +44,10 @@ pub fn router() -> Router<AppState> {
             "/api/v1/stats/monitoring/cost",
             get(monitoring_cost_handler),
         )
+        .route(
+            "/api/v1/stats/monitoring/runtime",
+            get(monitoring_runtime_handler),
+        )
 }
 
 /// Query parameters for `/api/v1/stats/overview`.
@@ -430,6 +434,23 @@ async fn monitoring_cost_handler(
         Ok(resp) => Json(resp).into_response(),
         Err(err) => db_error_response(&err),
     }
+}
+
+/// Query parameters for `/api/v1/stats/monitoring/runtime`.
+#[derive(Debug, Deserialize)]
+struct RuntimeMonitoringQuery {
+    /// Time window (`5m`, `15m`, `1h`, `6h`, `24h`).
+    #[serde(default)]
+    window: Option<String>,
+}
+
+/// `GET /api/v1/stats/monitoring/runtime` handler.
+async fn monitoring_runtime_handler(
+    State(state): State<AppState>,
+    Query(query): Query<RuntimeMonitoringQuery>,
+) -> Response {
+    let window = clean_opt(query.window.as_deref()).unwrap_or("15m");
+    Json(state.runtime.build_response(&state, window)).into_response()
 }
 
 /// Formats a database query error as JSON HTTP 500.

@@ -157,6 +157,17 @@ impl MetricsCache {
             error_rate: Some(error_rate),
         }
     }
+
+    /// Returns `(endpoint_count, total_samples)` currently held in the sliding window cache.
+    #[must_use]
+    pub fn stats(&self) -> (usize, usize) {
+        let Ok(guard) = self.buckets.read() else {
+            return (0, 0);
+        };
+        let endpoints = guard.len();
+        let samples = guard.values().map(VecDeque::len).sum();
+        (endpoints, samples)
+    }
 }
 
 #[cfg(test)]

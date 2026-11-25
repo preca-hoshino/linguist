@@ -10,6 +10,7 @@ pub mod metrics_cache;
 pub mod models;
 pub mod monitoring_db;
 pub mod proxy;
+pub mod runtime_metrics;
 pub mod script_engine;
 pub mod state;
 pub mod web;

@@ -73,6 +73,8 @@ pub struct InspectionMetadata {
     pub attempt_prep_ms: f64,
     /// Upstream HTTP response header establishment latency in milliseconds.
     pub upstream_header_ms: f64,
+    /// Optional in-process runtime metrics collector for outbound byte/SSE tracking.
+    pub runtime_metrics: Option<Arc<crate::runtime_metrics::RuntimeMetrics>>,
 }
 
 /// Extracted token counters and timing results computed by the inspector.
@@ -620,6 +622,13 @@ impl<S> InspectedByteStream<S> {
         let mid = guard.meta.model_id.clone();
         let status = guard.meta.status_code;
         if let Some((metrics, record)) = guard.finalize(error_message, None) {
+            if let Some(rt) = &guard.meta.runtime_metrics
+                && record.interrupted
+            {
+                rt.counters
+                    .outbound_sse_interrupted
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
             self.metrics_cache.record(
                 &pid,
                 &mid,
@@ -651,6 +660,12 @@ where
             Poll::Pending => Poll::Pending,
             Poll::Ready(Some(Ok(chunk))) => {
                 let out = if let Ok(mut guard) = self.tracker.lock() {
+                    if let Some(rt) = &guard.meta.runtime_metrics {
+                        rt.counters.outbound_resp_bytes.fetch_add(
+                            u64::try_from(chunk.len()).unwrap_or(0),
+                            std::sync::atomic::Ordering::Relaxed,
+                        );
+                    }
                     guard.process_sse_chunk(&chunk)
                 } else {
                     chunk
@@ -728,6 +743,7 @@ mod tests {
             routing_ms: 0.0,
             attempt_prep_ms: 0.0,
             upstream_header_ms: 0.0,
+            runtime_metrics: None,
         }
     }
 
