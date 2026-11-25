@@ -91,44 +91,15 @@ impl LogWriterHandle {
         let counters = std::sync::Arc::new(LogWriterCounters::default());
         let worker_counters = std::sync::Arc::clone(&counters);
         tokio::spawn(async move {
-            while let Some(msg) = rx.recv().await {
-                match msg {
-                    LogWriterMsg::Record(mut record) => {
-                        for attempt in 1..=3 {
-                            match persist_request_log(
-                                &pool,
-                                &config,
-                                tz_offset_secs,
-                                &engine,
-                                &mut record,
-                            )
-                            .await
-                            {
-                                Ok(()) => {
-                                    worker_counters
-                                        .persisted
-                                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                    break;
-                                }
-                                Err(err) => {
-                                    worker_counters
-                                        .retries
-                                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                                    error!(request_uid = %record.request_uid, attempt, error = %err,
-                                        "failed to persist request telemetry to PostgreSQL");
-                                    if attempt < 3 {
-                                        tokio::time::sleep(std::time::Duration::from_secs(attempt))
-                                            .await;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    LogWriterMsg::Flush(ack) => {
-                        let _ = ack.send(());
-                    }
-                }
-            }
+            run_log_writer_loop(
+                pool,
+                config,
+                tz_offset_secs,
+                engine,
+                &mut rx,
+                &worker_counters,
+            )
+            .await;
         });
         Self { tx, counters }
     }
@@ -445,7 +416,149 @@ const fn unreachable_fallback_offset() -> FixedOffset {
     }
 }
 
-/// Inserts a single request log row, optional payload row, and updates `daily_model_stats`.
+/// Maximum number of log records coalesced into one PostgreSQL transaction.
+const LOG_BATCH_MAX_SIZE: usize = 64;
+/// Maximum time to wait for additional records after the first record enters a batch.
+const LOG_BATCH_MAX_WAIT: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// Background micro-batching loop for `LogWriterHandle`.
+async fn run_log_writer_loop(
+    pool: PgPool,
+    config: DatabaseConfig,
+    tz_offset_secs: i32,
+    engine: crate::script_engine::ScriptEngine,
+    rx: &mut mpsc::Receiver<LogWriterMsg>,
+    counters: &LogWriterCounters,
+) {
+    let mut batch: Vec<RequestLogRecord> = Vec::with_capacity(LOG_BATCH_MAX_SIZE);
+
+    while let Some(msg) = rx.recv().await {
+        match msg {
+            LogWriterMsg::Record(rec) => batch.push(*rec),
+            LogWriterMsg::Flush(ack) => {
+                let _ = ack.send(());
+                continue;
+            }
+        }
+
+        let deadline = tokio::time::Instant::now() + LOG_BATCH_MAX_WAIT;
+        let mut pending_acks: Vec<tokio::sync::oneshot::Sender<()>> = Vec::new();
+        let mut channel_closed = false;
+
+        while batch.len() < LOG_BATCH_MAX_SIZE {
+            tokio::select! {
+                biased;
+                maybe_msg = rx.recv() => match maybe_msg {
+                    Some(LogWriterMsg::Record(rec)) => batch.push(*rec),
+                    Some(LogWriterMsg::Flush(ack)) => {
+                        pending_acks.push(ack);
+                        break;
+                    }
+                    None => {
+                        channel_closed = true;
+                        break;
+                    }
+                },
+                () = tokio::time::sleep_until(deadline) => break,
+            }
+        }
+
+        flush_log_batch(
+            &pool,
+            &config,
+            tz_offset_secs,
+            &engine,
+            &mut batch,
+            counters,
+        )
+        .await;
+        for ack in pending_acks {
+            let _ = ack.send(());
+        }
+        if channel_closed {
+            break;
+        }
+    }
+}
+
+/// Evaluates billing concurrently and persists `batch` with up to 3 retry attempts.
+async fn flush_log_batch(
+    pool: &PgPool,
+    config: &DatabaseConfig,
+    tz_offset_secs: i32,
+    engine: &crate::script_engine::ScriptEngine,
+    batch: &mut Vec<RequestLogRecord>,
+    counters: &LogWriterCounters,
+) {
+    if batch.is_empty() {
+        return;
+    }
+
+    let billings = futures::future::join_all(
+        batch
+            .iter_mut()
+            .map(|rec| crate::billing::evaluate_record_billing(engine, rec)),
+    )
+    .await;
+
+    for attempt in 1..=3 {
+        match persist_request_log_batch(pool, config, tz_offset_secs, batch, &billings).await {
+            Ok(()) => {
+                let count = u64::try_from(batch.len()).unwrap_or(0);
+                counters
+                    .persisted
+                    .fetch_add(count, std::sync::atomic::Ordering::Relaxed);
+                break;
+            }
+            Err(err) => {
+                counters
+                    .retries
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                error!(
+                    batch_size = batch.len(),
+                    attempt,
+                    error = %err,
+                    "failed to persist request telemetry batch to PostgreSQL"
+                );
+                if attempt < 3 {
+                    tokio::time::sleep(std::time::Duration::from_secs(attempt)).await;
+                }
+            }
+        }
+    }
+    batch.clear();
+}
+
+/// In-memory accumulator for `daily_model_stats` batch upserts.
+struct DailyStatAgg<'a> {
+    /// Latest provider display name.
+    provider_name: &'a str,
+    /// Latest model display name.
+    model_name: &'a str,
+    /// Number of requests in this bucket.
+    request_count: i64,
+    /// Number of 2xx requests in this bucket.
+    success_count: i64,
+    /// Sum of input tokens.
+    input_tokens: i64,
+    /// Sum of output tokens.
+    output_tokens: i64,
+    /// Sum of cache read tokens.
+    cache_read_tokens: i64,
+    /// Sum of cache creation tokens.
+    cache_creation_tokens: i64,
+    /// Sum of reasoning tokens.
+    reasoning_tokens: i64,
+    /// Sum of total tokens.
+    total_tokens: i64,
+    /// Sum of TTFT (ms).
+    sum_ttft_ms: f64,
+    /// Sum of generation duration (ms).
+    sum_generation_duration_ms: f64,
+}
+
+/// Persists a single request log record (convenience wrapper used by tests).
+#[cfg(test)]
 async fn persist_request_log(
     pool: &PgPool,
     config: &DatabaseConfig,
@@ -454,185 +567,267 @@ async fn persist_request_log(
     rec: &mut RequestLogRecord,
 ) -> Result<()> {
     let billing = crate::billing::evaluate_record_billing(engine, rec).await;
+    persist_request_log_batch(
+        pool,
+        config,
+        tz_offset_secs,
+        std::slice::from_ref(rec),
+        &[billing],
+    )
+    .await
+}
+
+/// Inserts a batch of request logs, optional payloads, and pre-aggregated `daily_model_stats`
+/// inside a single PostgreSQL transaction.
+async fn persist_request_log_batch(
+    pool: &PgPool,
+    config: &DatabaseConfig,
+    tz_offset_secs: i32,
+    batch: &[RequestLogRecord],
+    billings: &[crate::billing::BillingResult],
+) -> Result<()> {
     let mut tx = pool.begin().await?;
-    let Some(log_id) = insert_request_log_row(&mut tx, rec, &billing).await? else {
+    let inserted_ids = insert_request_log_rows_batch(&mut tx, batch, billings).await?;
+    if inserted_ids.is_empty() {
         tx.commit().await?;
         return Ok(());
-    };
-
-    let should_log_payload =
-        config.log_full_payload || (config.log_error_payload && rec.status_code >= 400);
-    if should_log_payload
-        && (rec.error_message.is_some()
-            || rec.request_headers.is_some()
-            || rec.request_body.is_some()
-            || rec.response_body.is_some())
-    {
-        insert_request_payload_row(&mut tx, log_id, rec).await?;
     }
 
-    let stat_date = local_stat_date(rec.created_at, tz_offset_secs);
-    upsert_daily_stats(&mut tx, stat_date, rec).await?;
+    insert_request_payload_rows_batch(&mut tx, config, batch, &inserted_ids).await?;
+    upsert_daily_stats_batch(&mut tx, tz_offset_secs, batch, &inserted_ids).await?;
 
     tx.commit().await?;
     Ok(())
 }
 
-/// Inserts one row into `request_logs` and returns the generated primary key ID.
-async fn insert_request_log_row(
+/// Bulk-inserts `request_logs` rows and returns a map of newly inserted `request_uid -> id`.
+async fn insert_request_log_rows_batch(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    rec: &RequestLogRecord,
-    billing: &crate::billing::BillingResult,
-) -> Result<Option<i64>> {
-    let row = sqlx::query(
-        r"
-        INSERT INTO request_logs (
-            request_uid, parent_request_uid, attempt_index, created_at,
-            project_id, project_name, call_model_id, call_model_name,
-            provider_id, provider_name, model_id, model_name, route_rule_id,
-            is_stream, status_code, input_tokens, output_tokens,
-            cache_read_tokens, cache_creation_tokens, reasoning_tokens, total_tokens,
-            ttft_ms, total_duration_ms, generation_duration_ms, decode_tps, e2e_tps,
-            finish_reason, reasoning_effort, token_source, script_state,
-            billing_amount, billing_currency, billing_status, billing_details, extra_tokens,
-            gateway_overhead_ms, routing_ms, attempt_prep_ms, upstream_header_ms
-        )
-        VALUES (
-            $1, $2, $3, $4,
-            $5, $6, $7, $8,
-            $9, $10, $11, $12, $13,
-            $14, $15, $16, $17,
-            $18, $19, $20, $21,
-            $22, $23, $24, $25, $26,
-            $27, $28, $29, $30, $31, $32, $33, $34, $35,
-            $36, $37, $38, $39
-        )
-        ON CONFLICT (request_uid) DO NOTHING
-        RETURNING id
-        ",
-    )
-    .bind(rec.request_uid)
-    .bind(rec.parent_request_uid)
-    .bind(rec.attempt_index)
-    .bind(rec.created_at)
-    .bind(&rec.project_id)
-    .bind(&rec.project_name)
-    .bind(&rec.call_model_id)
-    .bind(&rec.call_model_name)
-    .bind(&rec.provider_id)
-    .bind(&rec.provider_name)
-    .bind(&rec.model_id)
-    .bind(&rec.model_name)
-    .bind(&rec.route_rule_id)
-    .bind(rec.is_stream)
-    .bind(rec.status_code)
-    .bind(rec.input_tokens)
-    .bind(rec.output_tokens)
-    .bind(rec.cache_read_tokens)
-    .bind(rec.cache_creation_tokens)
-    .bind(rec.reasoning_tokens)
-    .bind(rec.total_tokens)
-    .bind(rec.ttft_ms)
-    .bind(rec.total_duration_ms)
-    .bind(rec.generation_duration_ms)
-    .bind(rec.decode_tps)
-    .bind(rec.e2e_tps)
-    .bind(&rec.finish_reason)
-    .bind(&rec.reasoning_effort)
-    .bind(&rec.token_source)
-    .bind(&rec.script_state)
-    .bind(billing.amount)
-    .bind(&billing.currency)
-    .bind(&billing.status)
-    .bind(&billing.details)
-    .bind(serde_json::to_value(&rec.extra_tokens)?)
-    .bind(rec.gateway_overhead_ms)
-    .bind(rec.routing_ms)
-    .bind(rec.attempt_prep_ms)
-    .bind(rec.upstream_header_ms)
-    .fetch_optional(&mut **tx)
-    .await?;
+    batch: &[RequestLogRecord],
+    billings: &[crate::billing::BillingResult],
+) -> Result<std::collections::HashMap<Uuid, i64>> {
+    let mut extra_tokens_json = Vec::with_capacity(batch.len());
+    for rec in batch {
+        extra_tokens_json.push(serde_json::to_value(&rec.extra_tokens)?);
+    }
 
-    row.map(|row| row.try_get("id"))
-        .transpose()
-        .map_err(Into::into)
+    let mut qb: sqlx::QueryBuilder<'_, sqlx::Postgres> = sqlx::QueryBuilder::new(
+        "INSERT INTO request_logs ( \
+            request_uid, parent_request_uid, attempt_index, created_at, \
+            project_id, project_name, call_model_id, call_model_name, \
+            provider_id, provider_name, model_id, model_name, route_rule_id, \
+            is_stream, status_code, input_tokens, output_tokens, \
+            cache_read_tokens, cache_creation_tokens, reasoning_tokens, total_tokens, \
+            ttft_ms, total_duration_ms, generation_duration_ms, decode_tps, e2e_tps, \
+            finish_reason, reasoning_effort, token_source, script_state, \
+            billing_amount, billing_currency, billing_status, billing_details, extra_tokens, \
+            gateway_overhead_ms, routing_ms, attempt_prep_ms, upstream_header_ms \
+        ) ",
+    );
+
+    qb.push_values(
+        batch
+            .iter()
+            .zip(billings.iter())
+            .zip(extra_tokens_json.iter()),
+        |mut b, ((rec, billing), extra)| {
+            b.push_bind(rec.request_uid)
+                .push_bind(rec.parent_request_uid)
+                .push_bind(rec.attempt_index)
+                .push_bind(rec.created_at)
+                .push_bind(&rec.project_id)
+                .push_bind(&rec.project_name)
+                .push_bind(&rec.call_model_id)
+                .push_bind(&rec.call_model_name)
+                .push_bind(&rec.provider_id)
+                .push_bind(&rec.provider_name)
+                .push_bind(&rec.model_id)
+                .push_bind(&rec.model_name)
+                .push_bind(&rec.route_rule_id)
+                .push_bind(rec.is_stream)
+                .push_bind(rec.status_code)
+                .push_bind(rec.input_tokens)
+                .push_bind(rec.output_tokens)
+                .push_bind(rec.cache_read_tokens)
+                .push_bind(rec.cache_creation_tokens)
+                .push_bind(rec.reasoning_tokens)
+                .push_bind(rec.total_tokens)
+                .push_bind(rec.ttft_ms)
+                .push_bind(rec.total_duration_ms)
+                .push_bind(rec.generation_duration_ms)
+                .push_bind(rec.decode_tps)
+                .push_bind(rec.e2e_tps)
+                .push_bind(&rec.finish_reason)
+                .push_bind(&rec.reasoning_effort)
+                .push_bind(&rec.token_source)
+                .push_bind(&rec.script_state)
+                .push_bind(billing.amount)
+                .push_bind(&billing.currency)
+                .push_bind(&billing.status)
+                .push_bind(&billing.details)
+                .push_bind(extra)
+                .push_bind(rec.gateway_overhead_ms)
+                .push_bind(rec.routing_ms)
+                .push_bind(rec.attempt_prep_ms)
+                .push_bind(rec.upstream_header_ms);
+        },
+    );
+    qb.push(" ON CONFLICT (request_uid) DO NOTHING RETURNING request_uid, id");
+
+    let rows = qb.build().fetch_all(&mut **tx).await?;
+    let mut inserted = std::collections::HashMap::with_capacity(rows.len());
+    for row in rows {
+        let uid: Uuid = row.try_get("request_uid")?;
+        let id: i64 = row.try_get("id")?;
+        inserted.insert(uid, id);
+    }
+    Ok(inserted)
 }
 
-/// Inserts error/debug payload details into `request_payloads`.
-async fn insert_request_payload_row(
+/// Bulk-inserts eligible `request_payloads` rows for newly inserted `request_logs` records.
+async fn insert_request_payload_rows_batch(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    log_id: i64,
-    rec: &RequestLogRecord,
+    config: &DatabaseConfig,
+    batch: &[RequestLogRecord],
+    inserted_ids: &std::collections::HashMap<Uuid, i64>,
 ) -> Result<()> {
-    sqlx::query(
-        r"
-        INSERT INTO request_payloads (
-            request_log_id, error_message, request_headers, request_body, response_body, created_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6)
-        ",
-    )
-    .bind(log_id)
-    .bind(&rec.error_message)
-    .bind(&rec.request_headers)
-    .bind(&rec.request_body)
-    .bind(&rec.response_body)
-    .bind(rec.created_at)
-    .execute(&mut **tx)
-    .await?;
+    let payload_rows: Vec<(i64, &RequestLogRecord)> = batch
+        .iter()
+        .filter_map(|rec| {
+            let log_id = inserted_ids.get(&rec.request_uid).copied()?;
+            let should_log =
+                config.log_full_payload || (config.log_error_payload && rec.status_code >= 400);
+            let has_any = rec.error_message.is_some()
+                || rec.request_headers.is_some()
+                || rec.request_body.is_some()
+                || rec.response_body.is_some();
+            (should_log && has_any).then_some((log_id, rec))
+        })
+        .collect();
+
+    if payload_rows.is_empty() {
+        return Ok(());
+    }
+
+    let mut qb: sqlx::QueryBuilder<'_, sqlx::Postgres> = sqlx::QueryBuilder::new(
+        "INSERT INTO request_payloads ( \
+            request_log_id, error_message, request_headers, request_body, response_body, created_at \
+        ) ",
+    );
+    qb.push_values(payload_rows, |mut b, (log_id, rec)| {
+        b.push_bind(log_id)
+            .push_bind(&rec.error_message)
+            .push_bind(&rec.request_headers)
+            .push_bind(&rec.request_body)
+            .push_bind(&rec.response_body)
+            .push_bind(rec.created_at);
+    });
+    qb.build().execute(&mut **tx).await?;
     Ok(())
 }
 
-/// Upserts daily aggregate counters in `daily_model_stats`.
-async fn upsert_daily_stats(
+/// Pre-aggregates and bulk-upserts `daily_model_stats` in deterministic key order.
+async fn upsert_daily_stats_batch(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    stat_date: NaiveDate,
-    rec: &RequestLogRecord,
+    tz_offset_secs: i32,
+    batch: &[RequestLogRecord],
+    inserted_ids: &std::collections::HashMap<Uuid, i64>,
 ) -> Result<()> {
-    let is_success: i64 = i64::from((200..300).contains(&rec.status_code));
-    sqlx::query(
-        r"
-        INSERT INTO daily_model_stats (
-            stat_date, project_id, provider_id, model_id, provider_name, model_name,
-            request_count, success_count, input_tokens, output_tokens,
-            cache_read_tokens, cache_creation_tokens, reasoning_tokens, total_tokens,
-            sum_ttft_ms, sum_generation_duration_ms, updated_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8, $9, $10, $11, $12, $13, $14, $15, NOW())
-        ON CONFLICT (stat_date, project_id, provider_id, model_id)
-        DO UPDATE SET
-            provider_name = EXCLUDED.provider_name,
-            model_name = EXCLUDED.model_name,
-            request_count = daily_model_stats.request_count + 1,
-            success_count = daily_model_stats.success_count + EXCLUDED.success_count,
-            input_tokens = daily_model_stats.input_tokens + EXCLUDED.input_tokens,
-            output_tokens = daily_model_stats.output_tokens + EXCLUDED.output_tokens,
-            cache_read_tokens = daily_model_stats.cache_read_tokens + EXCLUDED.cache_read_tokens,
-            cache_creation_tokens = daily_model_stats.cache_creation_tokens + EXCLUDED.cache_creation_tokens,
-            reasoning_tokens = daily_model_stats.reasoning_tokens + EXCLUDED.reasoning_tokens,
-            total_tokens = daily_model_stats.total_tokens + EXCLUDED.total_tokens,
-            sum_ttft_ms = daily_model_stats.sum_ttft_ms + EXCLUDED.sum_ttft_ms,
-            sum_generation_duration_ms = daily_model_stats.sum_generation_duration_ms + EXCLUDED.sum_generation_duration_ms,
-            updated_at = NOW()
-        ",
-    )
-    .bind(stat_date)
-    .bind(&rec.project_id)
-    .bind(&rec.provider_id)
-    .bind(&rec.model_id)
-    .bind(&rec.provider_name)
-    .bind(&rec.model_name)
-    .bind(is_success)
-    .bind(rec.input_tokens)
-    .bind(rec.output_tokens)
-    .bind(rec.cache_read_tokens)
-    .bind(rec.cache_creation_tokens)
-    .bind(rec.reasoning_tokens)
-    .bind(rec.total_tokens)
-    .bind(rec.ttft_ms)
-    .bind(rec.generation_duration_ms)
-    .execute(&mut **tx)
-    .await?;
+    let mut aggs: std::collections::BTreeMap<(NaiveDate, &str, &str, &str), DailyStatAgg<'_>> =
+        std::collections::BTreeMap::new();
+
+    for rec in batch {
+        if !inserted_ids.contains_key(&rec.request_uid) {
+            continue;
+        }
+        let stat_date = local_stat_date(rec.created_at, tz_offset_secs);
+        let key = (
+            stat_date,
+            rec.project_id.as_str(),
+            rec.provider_id.as_str(),
+            rec.model_id.as_str(),
+        );
+        let is_success = i64::from((200..300).contains(&rec.status_code));
+        aggs.entry(key)
+            .and_modify(|agg| {
+                agg.provider_name = rec.provider_name.as_str();
+                agg.model_name = rec.model_name.as_str();
+                agg.request_count += 1;
+                agg.success_count += is_success;
+                agg.input_tokens += rec.input_tokens;
+                agg.output_tokens += rec.output_tokens;
+                agg.cache_read_tokens += rec.cache_read_tokens;
+                agg.cache_creation_tokens += rec.cache_creation_tokens;
+                agg.reasoning_tokens += rec.reasoning_tokens;
+                agg.total_tokens += rec.total_tokens;
+                agg.sum_ttft_ms += rec.ttft_ms;
+                agg.sum_generation_duration_ms += rec.generation_duration_ms;
+            })
+            .or_insert_with(|| DailyStatAgg {
+                provider_name: rec.provider_name.as_str(),
+                model_name: rec.model_name.as_str(),
+                request_count: 1,
+                success_count: is_success,
+                input_tokens: rec.input_tokens,
+                output_tokens: rec.output_tokens,
+                cache_read_tokens: rec.cache_read_tokens,
+                cache_creation_tokens: rec.cache_creation_tokens,
+                reasoning_tokens: rec.reasoning_tokens,
+                total_tokens: rec.total_tokens,
+                sum_ttft_ms: rec.ttft_ms,
+                sum_generation_duration_ms: rec.generation_duration_ms,
+            });
+    }
+
+    if aggs.is_empty() {
+        return Ok(());
+    }
+
+    let mut qb: sqlx::QueryBuilder<'_, sqlx::Postgres> = sqlx::QueryBuilder::new(
+        "INSERT INTO daily_model_stats ( \
+            stat_date, project_id, provider_id, model_id, provider_name, model_name, \
+            request_count, success_count, input_tokens, output_tokens, \
+            cache_read_tokens, cache_creation_tokens, reasoning_tokens, total_tokens, \
+            sum_ttft_ms, sum_generation_duration_ms, updated_at \
+        ) ",
+    );
+    qb.push_values(aggs, |mut b, ((stat_date, pid, provid, mid), agg)| {
+        b.push_bind(stat_date)
+            .push_bind(pid)
+            .push_bind(provid)
+            .push_bind(mid)
+            .push_bind(agg.provider_name)
+            .push_bind(agg.model_name)
+            .push_bind(agg.request_count)
+            .push_bind(agg.success_count)
+            .push_bind(agg.input_tokens)
+            .push_bind(agg.output_tokens)
+            .push_bind(agg.cache_read_tokens)
+            .push_bind(agg.cache_creation_tokens)
+            .push_bind(agg.reasoning_tokens)
+            .push_bind(agg.total_tokens)
+            .push_bind(agg.sum_ttft_ms)
+            .push_bind(agg.sum_generation_duration_ms)
+            .push("NOW()");
+    });
+    qb.push(
+        " ON CONFLICT (stat_date, project_id, provider_id, model_id) \
+        DO UPDATE SET \
+            provider_name = EXCLUDED.provider_name, \
+            model_name = EXCLUDED.model_name, \
+            request_count = daily_model_stats.request_count + EXCLUDED.request_count, \
+            success_count = daily_model_stats.success_count + EXCLUDED.success_count, \
+            input_tokens = daily_model_stats.input_tokens + EXCLUDED.input_tokens, \
+            output_tokens = daily_model_stats.output_tokens + EXCLUDED.output_tokens, \
+            cache_read_tokens = daily_model_stats.cache_read_tokens + EXCLUDED.cache_read_tokens, \
+            cache_creation_tokens = daily_model_stats.cache_creation_tokens + EXCLUDED.cache_creation_tokens, \
+            reasoning_tokens = daily_model_stats.reasoning_tokens + EXCLUDED.reasoning_tokens, \
+            total_tokens = daily_model_stats.total_tokens + EXCLUDED.total_tokens, \
+            sum_ttft_ms = daily_model_stats.sum_ttft_ms + EXCLUDED.sum_ttft_ms, \
+            sum_generation_duration_ms = daily_model_stats.sum_generation_duration_ms + EXCLUDED.sum_generation_duration_ms, \
+            updated_at = NOW()",
+    );
+    qb.build().execute(&mut **tx).await?;
     Ok(())
 }
 
@@ -898,10 +1093,12 @@ pub async fn seed_demo(
         for idx in 0..reqs_today {
             let pick = usize::try_from(next_demo_rand(&mut rng_state)).unwrap_or(0) % entries.len();
             let mut rec = build_demo_record(entries[pick], day_base, idx, &mut rng_state);
-            let stat_date = local_stat_date(rec.created_at, tz_offset_secs);
             let billing = crate::billing::evaluate_record_billing(engine, &mut rec).await;
-            insert_request_log_row(&mut tx, &rec, &billing).await?;
-            upsert_daily_stats(&mut tx, stat_date, &rec).await?;
+            let single = std::slice::from_ref(&rec);
+            let inserted_ids =
+                insert_request_log_rows_batch(&mut tx, single, std::slice::from_ref(&billing))
+                    .await?;
+            upsert_daily_stats_batch(&mut tx, tz_offset_secs, single, &inserted_ids).await?;
             inserted += 1;
         }
     }
