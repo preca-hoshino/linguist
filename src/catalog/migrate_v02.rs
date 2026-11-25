@@ -660,8 +660,7 @@ fn build_migrated_route_script(r: &OldRouteRow, targets: &[OldTargetRow]) -> Res
         .script
         .as_deref()
         .filter(|s| !s.trim().is_empty())
-        .map(rewrite_v1_script_refs)
-        .unwrap_or_default();
+        .map_or_default(rewrite_v1_script_refs);
 
     let custom_block = if inner_script.is_empty() {
         String::new()
