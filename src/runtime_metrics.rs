@@ -599,8 +599,7 @@ impl RuntimeMetrics {
         let log_stats = state
             .log_writer
             .as_ref()
-            .map(crate::db::LogWriterHandle::stats)
-            .unwrap_or_default();
+            .map_or_default(crate::db::LogWriterHandle::stats);
         let script_stats = state.engine.runtime_stats();
         let (pg_size, pg_idle) = state.db_pool.as_ref().map_or((0, 0), |p| {
             (p.size(), u32::try_from(p.num_idle()).unwrap_or(0))
@@ -846,8 +845,7 @@ impl RuntimeMetrics {
         let log_stats = state
             .log_writer
             .as_ref()
-            .map(crate::db::LogWriterHandle::stats)
-            .unwrap_or_default();
+            .map_or_default(crate::db::LogWriterHandle::stats);
         let script_stats = state.engine.runtime_stats();
         let (mc_endpoints, mc_samples) = state.metrics.stats();
         let (pg_size, pg_idle) = state.db_pool.as_ref().map_or((0, 0), |p| {
@@ -1189,6 +1187,7 @@ fn probe_linux_procfs() -> LinuxProcfsStats {
     LinuxProcfsStats::default()
 }
 
+/// Helper to read an unsigned 64-bit integer from a single-line sysfs or procfs file.
 #[cfg(target_os = "linux")]
 fn read_u64_file(path: &str) -> Option<u64> {
     std::fs::read_to_string(path)
