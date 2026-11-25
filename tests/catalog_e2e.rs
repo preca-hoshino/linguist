@@ -302,7 +302,7 @@ async fn migrate_v02_transforms_v010_tables_atomically(pool: PgPool) {
     // Recreate a minimal v0.1.0 schema state to test `run_migrate_v02` end-to-end.
     sqlx::raw_sql(
         r"
-        DROP TABLE IF EXISTS catalog_route_rules, catalog_project_models, catalog_projects, catalog_provider_models, catalog_providers CASCADE;
+        DROP TABLE IF EXISTS catalog_route_targets, catalog_route_rules, catalog_project_models, catalog_projects, catalog_provider_models, catalog_providers CASCADE;
         CREATE TABLE catalog_providers (
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
@@ -311,7 +311,7 @@ async fn migrate_v02_transforms_v010_tables_atomically(pool: PgPool) {
             api_type TEXT,
             encrypted_key BYTEA,
             script TEXT,
-            position INTEGER NOT NULL UNIQUE
+            position BIGINT NOT NULL UNIQUE
         );
         CREATE TABLE catalog_provider_models (
             provider_id TEXT NOT NULL REFERENCES catalog_providers(id) ON DELETE CASCADE,
@@ -324,10 +324,10 @@ async fn migrate_v02_transforms_v010_tables_atomically(pool: PgPool) {
             vision BOOLEAN,
             thinking BOOLEAN,
             streaming BOOLEAN,
-            max_input_tokens INTEGER,
-            max_output_tokens INTEGER,
+            max_input_tokens BIGINT,
+            max_output_tokens BIGINT,
             script TEXT,
-            position INTEGER NOT NULL,
+            position BIGINT NOT NULL,
             PRIMARY KEY (provider_id, id),
             UNIQUE (provider_id, position)
         );
@@ -335,10 +335,10 @@ async fn migrate_v02_transforms_v010_tables_atomically(pool: PgPool) {
             id TEXT PRIMARY KEY,
             name TEXT NOT NULL,
             icon TEXT NOT NULL DEFAULT '',
-            key_hash BYTEA,
+            key_digest BYTEA NOT NULL,
             meta JSONB NOT NULL DEFAULT '{}'::jsonb,
             script TEXT,
-            position INTEGER NOT NULL UNIQUE
+            position BIGINT NOT NULL UNIQUE
         );
         CREATE TABLE catalog_project_models (
             project_id TEXT NOT NULL REFERENCES catalog_projects(id) ON DELETE CASCADE,
@@ -347,7 +347,7 @@ async fn migrate_v02_transforms_v010_tables_atomically(pool: PgPool) {
             icon TEXT NOT NULL DEFAULT '',
             meta JSONB NOT NULL DEFAULT '{}'::jsonb,
             script TEXT,
-            position INTEGER NOT NULL,
+            position BIGINT NOT NULL,
             PRIMARY KEY (project_id, id),
             UNIQUE (project_id, position)
         );
@@ -356,13 +356,21 @@ async fn migrate_v02_transforms_v010_tables_atomically(pool: PgPool) {
             name TEXT NOT NULL,
             enabled BOOLEAN NOT NULL DEFAULT TRUE,
             priority INTEGER NOT NULL DEFAULT 0,
-            match_rule JSONB NOT NULL,
-            candidates JSONB NOT NULL DEFAULT '{}'::jsonb,
-            target JSONB,
-            fallbacks JSONB NOT NULL DEFAULT '[]'::jsonb,
+            project_ids TEXT[] NOT NULL DEFAULT ARRAY['*']::text[],
+            call_model_ids TEXT[] NOT NULL DEFAULT ARRAY['*']::text[],
+            allow_patterns TEXT[] NOT NULL DEFAULT '{}'::text[],
+            deny_patterns TEXT[] NOT NULL DEFAULT '{}'::text[],
             rewrite_response_model BOOLEAN NOT NULL DEFAULT TRUE,
             script TEXT,
-            position INTEGER NOT NULL UNIQUE
+            position BIGINT NOT NULL UNIQUE
+        );
+        CREATE TABLE catalog_route_targets (
+            route_id TEXT NOT NULL REFERENCES catalog_route_rules(id) ON DELETE CASCADE,
+            position BIGINT NOT NULL,
+            provider_id TEXT NOT NULL,
+            model_id TEXT NOT NULL,
+            max_attempts SMALLINT NOT NULL DEFAULT 1,
+            PRIMARY KEY (route_id, position)
         );
         ALTER TABLE catalog_state DROP COLUMN IF EXISTS schema_version;
         ALTER TABLE catalog_state ADD COLUMN IF NOT EXISTS billing_prices JSONB NOT NULL DEFAULT '[]'::jsonb;
@@ -372,6 +380,9 @@ async fn migrate_v02_transforms_v010_tables_atomically(pool: PgPool) {
     .await
     .unwrap();
 
+    let secrets = test_secrets();
+    let app_digest = secrets.digest_project("app", "migrated-plain-key");
+
     sqlx::query("INSERT INTO catalog_providers (id, name, icon, position) VALUES ('prov', 'Prov', 'openai', 1)")
         .execute(&pool)
         .await
@@ -380,7 +391,8 @@ async fn migrate_v02_transforms_v010_tables_atomically(pool: PgPool) {
         .execute(&pool)
         .await
         .unwrap();
-    sqlx::query("INSERT INTO catalog_projects (id, name, icon, position) VALUES ('app', 'App', 'openai', 1)")
+    sqlx::query("INSERT INTO catalog_projects (id, name, icon, key_digest, position) VALUES ('app', 'App', 'openai', $1, 1)")
+        .bind(app_digest.as_slice())
         .execute(&pool)
         .await
         .unwrap();
@@ -389,7 +401,13 @@ async fn migrate_v02_transforms_v010_tables_atomically(pool: PgPool) {
         .await
         .unwrap();
     sqlx::query(
-        "INSERT INTO catalog_route_rules (id, name, enabled, priority, match_rule, target, position) VALUES ('r1', 'R1', true, 100, '{\"projectIds\":[\"app\"],\"callModelIds\":[\"cm1\"]}'::jsonb, '{\"providerId\":\"prov\",\"modelId\":\"m1\"}'::jsonb, 1)",
+        "INSERT INTO catalog_route_rules (id, name, enabled, priority, project_ids, call_model_ids, position) VALUES ('r1', 'R1', true, 100, ARRAY['app'], ARRAY['cm1'], 1)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO catalog_route_targets (route_id, position, provider_id, model_id, max_attempts) VALUES ('r1', 0, 'prov', 'm1', 2)",
     )
     .execute(&pool)
     .await

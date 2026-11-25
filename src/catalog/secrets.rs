@@ -69,7 +69,8 @@ impl CatalogSecrets {
     }
 
     /// Computes the digest stored for a project bearer key.
-    pub(in crate::catalog) fn digest_project(&self, project_id: &str, token: &str) -> [u8; 32] {
+    #[must_use]
+    pub fn digest_project(&self, project_id: &str, token: &str) -> [u8; 32] {
         tag_bytes(hmac::sign(
             &self.projects,
             &project_message(project_id, token),

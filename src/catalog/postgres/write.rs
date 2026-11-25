@@ -166,7 +166,9 @@ impl PgCatalogProvider {
         if let Some(expected) = expected_revision
             && revision != expected
         {
-            bail!("conflict: catalog revision changed (expected {expected}, current {revision})");
+            bail!(
+                "revision_conflict: catalog revision changed (expected {expected}, current {revision})"
+            );
         }
 
         let our_tag = self.secrets.key_tag();
