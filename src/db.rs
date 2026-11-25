@@ -1,11 +1,12 @@
 //! PostgreSQL connection lifecycle, automatic database/schema migration, async log writer,
 //! demo telemetry seeder, and read-only aggregation queries.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::str::FromStr;
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
+use rust_decimal::Decimal;
 use rustls::RootCertStore;
 use rustls::pki_types::CertificateDer;
 use serde_json::{Value, json};
@@ -15,13 +16,14 @@ use tokio::sync::mpsc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+use crate::billing::fx::{RateSnapshot, convert_totals};
 use crate::catalog::RuntimeCatalog;
 use crate::config::{DatabaseConfig, UiConfig};
 use crate::metrics_cache::{MetricSample, MetricsCache};
 use crate::models::{
     ContributionDayCell, DailyModelDay, DailyModelSlice, FilterEntityItem, LeaderboardItem,
-    OverviewResponse, OverviewSummary, RecentRequestItem, RequestLogRecord, TopModelSummary,
-    infer_model_icon, infer_provider_icon,
+    OverviewResponse, OverviewSummary, RecentRequestItem, RecentRequestsResponse, RequestLogRecord,
+    TopModelSummary, infer_model_icon, infer_provider_icon,
 };
 
 /// Embedded `SQLx` migrations from `./migrations`.
@@ -1177,19 +1179,114 @@ pub async fn query_daily_models(
         .collect())
 }
 
-/// Queries recent requests for `GET /api/v1/stats/recent-requests`.
+/// Builds catalog filter options `(projects, providers, models)` for telemetry pages.
+#[must_use]
+pub fn catalog_filter_options(
+    catalog: &RuntimeCatalog,
+) -> (
+    Vec<FilterEntityItem>,
+    Vec<FilterEntityItem>,
+    Vec<FilterEntityItem>,
+) {
+    let projects = catalog
+        .projects
+        .iter()
+        .map(|p| FilterEntityItem {
+            id: p.id.clone(),
+            name: p.name.clone(),
+            icon: p.icon.clone(),
+        })
+        .collect();
+    let providers = catalog
+        .providers
+        .iter()
+        .map(|p| FilterEntityItem {
+            id: p.id.clone(),
+            name: p.name.clone(),
+            icon: p.icon.clone(),
+        })
+        .collect();
+    let mut seen_models = BTreeSet::new();
+    let mut models = Vec::new();
+    for provider in &catalog.providers {
+        for model in &provider.models {
+            if seen_models.insert(model.id.clone()) {
+                models.push(FilterEntityItem {
+                    id: model.id.clone(),
+                    name: model.name.clone(),
+                    icon: model.icon.clone(),
+                });
+            }
+        }
+    }
+    (projects, providers, models)
+}
+
+/// Computes `(page, page_size, total_pages)` with safe bounds.
+#[must_use]
+pub fn normalize_pagination(page: u32, page_size: u32, total: i64) -> (u32, u32, u32) {
+    let clamped_size = page_size.clamp(1, 100);
+    let safe_total = total.max(0);
+    let pages_i64 = if safe_total == 0 {
+        1
+    } else {
+        (safe_total - 1) / i64::from(clamped_size) + 1
+    };
+    let total_pages = u32::try_from(pages_i64).unwrap_or(u32::MAX);
+    let clamped_page = page.max(1);
+    (clamped_page, clamped_size, total_pages)
+}
+
+/// Queries paginated request logs for `GET /api/v1/stats/recent-requests`.
 ///
 /// # Errors
 /// Returns an error if the database query fails.
+#[allow(clippy::too_many_arguments)]
 pub async fn query_recent_requests(
     pool: &PgPool,
     catalog: &RuntimeCatalog,
+    display_currency: Option<&str>,
     project_id: Option<&str>,
     provider_id: Option<&str>,
     model_id: Option<&str>,
-    limit: u32,
-) -> Result<Vec<RecentRequestItem>> {
-    let clamped_limit = i64::from(limit.clamp(1, 200));
+    status: Option<&str>,
+    page: u32,
+    page_size: u32,
+) -> Result<RecentRequestsResponse> {
+    let status_filter = match status {
+        Some("success" | "error") => status,
+        _ => None,
+    };
+    let clamped_size = page_size.clamp(1, 100);
+    let clamped_page = page.max(1);
+    let offset = i64::from(clamped_page - 1) * i64::from(clamped_size);
+
+    let mut tx = pool.begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *tx)
+        .await?;
+
+    let total: i64 = sqlx::query_scalar(
+        r"
+        SELECT COUNT(*)
+        FROM request_logs
+        WHERE ($1::TEXT IS NULL OR project_id = $1)
+          AND ($2::TEXT IS NULL OR provider_id = $2)
+          AND ($3::TEXT IS NULL OR model_id = $3)
+          AND (
+              $4::TEXT IS NULL
+              OR ($4 = 'success' AND status_code < 400)
+              OR ($4 = 'error' AND status_code >= 400)
+          )
+        ",
+    )
+    .bind(project_id)
+    .bind(provider_id)
+    .bind(model_id)
+    .bind(status_filter)
+    .fetch_one(&mut *tx)
+    .await?;
+
     let rows = sqlx::query(
         r"
         SELECT
@@ -1199,87 +1296,159 @@ pub async fn query_recent_requests(
             route_rule_id, attempt_index, status_code, is_stream,
             input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
             reasoning_tokens, extra_tokens, total_tokens,
-            ttft_ms, total_duration_ms, decode_tps, e2e_tps
+            ttft_ms, total_duration_ms, decode_tps, e2e_tps,
+            billing_currency, billing_amount::text AS billing_amount, billing_status
         FROM request_logs
         WHERE ($1::TEXT IS NULL OR project_id = $1)
           AND ($2::TEXT IS NULL OR provider_id = $2)
           AND ($3::TEXT IS NULL OR model_id = $3)
-        ORDER BY created_at DESC
-        LIMIT $4
+          AND (
+              $4::TEXT IS NULL
+              OR ($4 = 'success' AND status_code < 400)
+              OR ($4 = 'error' AND status_code >= 400)
+          )
+        ORDER BY created_at DESC, id DESC
+        LIMIT $5 OFFSET $6
         ",
     )
     .bind(project_id)
     .bind(provider_id)
     .bind(model_id)
-    .bind(clamped_limit)
-    .fetch_all(pool)
+    .bind(status_filter)
+    .bind(i64::from(clamped_size))
+    .bind(offset)
+    .fetch_all(&mut *tx)
     .await?;
 
+    let raw_fx: Option<Value> =
+        sqlx::query_scalar("SELECT billing_fx_rates FROM catalog_state WHERE singleton")
+            .fetch_one(&mut *tx)
+            .await?;
+    tx.commit().await?;
+
+    let fx_snapshot: Option<RateSnapshot> = raw_fx.map(serde_json::from_value).transpose()?;
     let mut icon_cache: HashMap<(String, String), (String, String)> = HashMap::new();
     let mut items = Vec::with_capacity(rows.len());
 
-    for row in rows {
-        let pid: String = row.try_get("provider_id")?;
-        let pname: String = row.try_get("provider_name")?;
-        let mid: String = row.try_get("model_id")?;
-        let mname: String = row.try_get("model_name")?;
-
-        let (provider_icon, model_icon) = icon_cache
-            .entry((pid.clone(), mid.clone()))
-            .or_insert_with(|| {
-                let p_icon = catalog
-                    .find_provider(&pid)
-                    .map_or_else(|| infer_provider_icon(&pid, &pname), |p| p.icon.clone());
-                let m_icon = catalog.find_model(&pid, &mid).map_or_else(
-                    || infer_model_icon(&mid, &mname, &p_icon),
-                    |(_, m)| m.icon.clone(),
-                );
-                (p_icon, m_icon)
-            })
-            .clone();
-
-        items.push(RecentRequestItem {
-            request_uid: row.try_get("request_uid")?,
-            created_at: row.try_get("created_at")?,
-            project_id: row.try_get("project_id")?,
-            project_name: row.try_get("project_name")?,
-            call_model_id: row.try_get("call_model_id")?,
-            call_model_name: row.try_get("call_model_name")?,
-            provider_id: pid,
-            provider_name: pname,
-            provider_icon,
-            model_id: mid,
-            model_name: mname,
-            model_icon,
-            route_rule_id: row.try_get("route_rule_id")?,
-            attempt_index: row.try_get("attempt_index")?,
-            status_code: row.try_get("status_code")?,
-            is_stream: row.try_get("is_stream")?,
-            input_tokens: row.try_get("input_tokens")?,
-            output_tokens: row.try_get("output_tokens")?,
-            cache_read_tokens: row.try_get("cache_read_tokens")?,
-            cache_creation_tokens: row.try_get("cache_creation_tokens")?,
-            reasoning_tokens: row.try_get("reasoning_tokens")?,
-            extra_tokens: row
-                .try_get::<Value, _>("extra_tokens")
-                .ok()
-                .and_then(|v| serde_json::from_value(v).ok())
-                .unwrap_or_default(),
-            total_tokens: row.try_get("total_tokens")?,
-            ttft_ms: row.try_get("ttft_ms")?,
-            total_duration_ms: row.try_get("total_duration_ms")?,
-            decode_tps: row.try_get("decode_tps")?,
-            e2e_tps: row.try_get("e2e_tps")?,
-        });
+    for row in &rows {
+        items.push(map_recent_request_row(
+            row,
+            catalog,
+            display_currency,
+            fx_snapshot.as_ref(),
+            &mut icon_cache,
+        )?);
     }
 
-    Ok(items)
+    let (page, page_size, total_pages) = normalize_pagination(clamped_page, clamped_size, total);
+    let has_next = page < total_pages;
+    let (projects, providers, models) = catalog_filter_options(catalog);
+
+    Ok(RecentRequestsResponse {
+        items,
+        page,
+        page_size,
+        total,
+        total_pages,
+        has_next,
+        display_currency: display_currency.map(str::to_string),
+        projects,
+        providers,
+        models,
+    })
+}
+
+/// Maps one `request_logs` row into a `RecentRequestItem` with catalog icons and FX conversion.
+fn map_recent_request_row(
+    row: &sqlx::postgres::PgRow,
+    catalog: &RuntimeCatalog,
+    display_currency: Option<&str>,
+    fx_snapshot: Option<&RateSnapshot>,
+    icon_cache: &mut HashMap<(String, String), (String, String)>,
+) -> Result<RecentRequestItem> {
+    let pid: String = row.try_get("provider_id")?;
+    let pname: String = row.try_get("provider_name")?;
+    let mid: String = row.try_get("model_id")?;
+    let mname: String = row.try_get("model_name")?;
+
+    let (provider_icon, model_icon) = icon_cache
+        .entry((pid.clone(), mid.clone()))
+        .or_insert_with(|| {
+            let p_icon = catalog
+                .find_provider(&pid)
+                .map_or_else(|| infer_provider_icon(&pid, &pname), |p| p.icon.clone());
+            let m_icon = catalog.find_model(&pid, &mid).map_or_else(
+                || infer_model_icon(&mid, &mname, &p_icon),
+                |(_, m)| m.icon.clone(),
+            );
+            (p_icon, m_icon)
+        })
+        .clone();
+
+    let billing_currency: Option<String> = row.try_get("billing_currency")?;
+    let billing_amount: Option<String> = row.try_get("billing_amount")?;
+    let billing_converted_amount = match (&billing_currency, &billing_amount, display_currency) {
+        (Some(currency), Some(amount), Some(target)) => {
+            Decimal::from_str(amount).ok().and_then(|dec| {
+                let values = BTreeMap::from([(currency.clone(), dec)]);
+                convert_totals(&values, target, fx_snapshot).map(|v| v.to_string())
+            })
+        }
+        _ => None,
+    };
+
+    Ok(RecentRequestItem {
+        request_uid: row.try_get("request_uid")?,
+        created_at: row.try_get("created_at")?,
+        project_id: row.try_get("project_id")?,
+        project_name: row.try_get("project_name")?,
+        call_model_id: row.try_get("call_model_id")?,
+        call_model_name: row.try_get("call_model_name")?,
+        provider_id: pid,
+        provider_name: pname,
+        provider_icon,
+        model_id: mid,
+        model_name: mname,
+        model_icon,
+        route_rule_id: row.try_get("route_rule_id")?,
+        attempt_index: row.try_get("attempt_index")?,
+        status_code: row.try_get("status_code")?,
+        is_stream: row.try_get("is_stream")?,
+        input_tokens: row.try_get("input_tokens")?,
+        output_tokens: row.try_get("output_tokens")?,
+        cache_read_tokens: row.try_get("cache_read_tokens")?,
+        cache_creation_tokens: row.try_get("cache_creation_tokens")?,
+        reasoning_tokens: row.try_get("reasoning_tokens")?,
+        extra_tokens: row
+            .try_get::<Value, _>("extra_tokens")
+            .ok()
+            .and_then(|v| serde_json::from_value(v).ok())
+            .unwrap_or_default(),
+        total_tokens: row.try_get("total_tokens")?,
+        ttft_ms: row.try_get("ttft_ms")?,
+        total_duration_ms: row.try_get("total_duration_ms")?,
+        decode_tps: row.try_get("decode_tps")?,
+        e2e_tps: row.try_get("e2e_tps")?,
+        billing_currency,
+        billing_amount,
+        billing_converted_amount,
+        billing_status: row.try_get("billing_status")?,
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use rustls::pki_types::pem::PemObject;
+
+    #[test]
+    fn pagination_bounds_and_total_pages() {
+        assert_eq!(normalize_pagination(0, 0, 0), (1, 1, 1));
+        assert_eq!(normalize_pagination(1, 20, 0), (1, 20, 1));
+        assert_eq!(normalize_pagination(1, 20, 20), (1, 20, 1));
+        assert_eq!(normalize_pagination(2, 20, 21), (2, 20, 2));
+        assert_eq!(normalize_pagination(3, 500, 250), (3, 100, 3));
+    }
 
     #[test]
     fn url_ssl_root_cert_detection_matches_sqlx_keys() {

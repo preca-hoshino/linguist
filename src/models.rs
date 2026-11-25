@@ -667,6 +667,40 @@ pub struct RecentRequestItem {
     pub decode_tps: f64,
     /// End-to-end tokens per second.
     pub e2e_tps: f64,
+    /// Recorded billing currency code, if available.
+    pub billing_currency: Option<String>,
+    /// Recorded billing amount string in `billing_currency`.
+    pub billing_amount: Option<String>,
+    /// Reference-converted billing amount string in `display_currency`.
+    pub billing_converted_amount: Option<String>,
+    /// Recorded billing status (`priced`, `unpriced`, `script_error`, `estimated`, etc.).
+    pub billing_status: Option<String>,
+}
+
+/// Paginated response returned by `GET /api/v1/stats/recent-requests`.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentRequestsResponse {
+    /// Request log rows on the current page.
+    pub items: Vec<RecentRequestItem>,
+    /// Current one-based page number.
+    pub page: u32,
+    /// Active page size.
+    pub page_size: u32,
+    /// Total matching rows across all pages.
+    pub total: i64,
+    /// Total page count (at least `1`).
+    pub total_pages: u32,
+    /// Whether another page follows `page`.
+    pub has_next: bool,
+    /// Configured display currency for reference conversion.
+    pub display_currency: Option<String>,
+    /// Available project filter options from the active catalog.
+    pub projects: Vec<FilterEntityItem>,
+    /// Available provider filter options from the active catalog.
+    pub providers: Vec<FilterEntityItem>,
+    /// Available model filter options from the active catalog.
+    pub models: Vec<FilterEntityItem>,
 }
 
 /// Shared metadata and filter options returned by monitoring endpoints.

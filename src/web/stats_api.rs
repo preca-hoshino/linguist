@@ -12,7 +12,7 @@ use serde_json::json;
 use crate::db;
 use crate::models::{
     CostMonitoringResponse, FilterEntityItem, OverviewResponse, OverviewSummary,
-    PerformanceMonitoringResponse, RoutingMonitoringResponse, StreamSplit,
+    PerformanceMonitoringResponse, RecentRequestsResponse, RoutingMonitoringResponse, StreamSplit,
     TrafficMonitoringResponse,
 };
 use crate::monitoring_db::{self, MonitoringFilter};
@@ -103,7 +103,16 @@ struct RecentRequestsQuery {
     /// Optional model filter.
     #[serde(default)]
     model_id: Option<String>,
-    /// Maximum rows returned (default 50, max 200).
+    /// Optional status filter (`all`, `success`, `error`).
+    #[serde(default)]
+    status: Option<String>,
+    /// One-based page index (default 1).
+    #[serde(default)]
+    page: Option<u32>,
+    /// Page size (default 20, max 100).
+    #[serde(default)]
+    page_size: Option<u32>,
+    /// Legacy alias for `page_size`.
     #[serde(default)]
     limit: Option<u32>,
 }
@@ -229,23 +238,41 @@ async fn recent_requests_handler(
     State(state): State<AppState>,
     Query(query): Query<RecentRequestsQuery>,
 ) -> Response {
-    let Some(pool) = &state.db_pool else {
-        return Json(json!([])).into_response();
-    };
     let catalog = state.catalog.load();
-    let limit = query.limit.unwrap_or(50);
+    let page = query.page.unwrap_or(1).max(1);
+    let page_size = query.page_size.or(query.limit).unwrap_or(20).clamp(1, 100);
+    let display_currency = state.config.billing.display_currency.as_deref();
+    let Some(pool) = &state.db_pool else {
+        let (projects, providers, models) = db::catalog_filter_options(&catalog);
+        return Json(RecentRequestsResponse {
+            items: Vec::new(),
+            page,
+            page_size,
+            total: 0,
+            total_pages: 1,
+            has_next: false,
+            display_currency: display_currency.map(str::to_string),
+            projects,
+            providers,
+            models,
+        })
+        .into_response();
+    };
 
     match db::query_recent_requests(
         pool,
         &catalog,
+        display_currency,
         clean_opt(query.project_id.as_deref()),
         clean_opt(query.provider_id.as_deref()),
         clean_opt(query.model_id.as_deref()),
-        limit,
+        clean_opt(query.status.as_deref()),
+        page,
+        page_size,
     )
     .await
     {
-        Ok(rows) => Json(rows).into_response(),
+        Ok(resp) => Json(resp).into_response(),
         Err(err) => db_error_response(&err),
     }
 }
