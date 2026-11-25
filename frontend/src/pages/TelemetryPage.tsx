@@ -3,19 +3,16 @@ import {
   fetchDailyModels,
   fetchLeaderboard,
   fetchOverview,
-  fetchRecentRequests,
 } from "../api/client";
 import { ContributionWall } from "../components/ContributionWall";
 import { HeaderBar } from "../components/HeaderBar";
 import { ModelLeaderboard } from "../components/ModelLeaderboard";
-import { RecentRequestsTable } from "../components/RecentRequestsTable";
 import { TokenStackedChart } from "../components/TokenStackedChart";
 import type {
   DailyModelDay,
   LeaderboardItem,
   LeaderboardSort,
   OverviewResponse,
-  RecentRequestItem,
 } from "../types/telemetry";
 import { billingError, getBillingDashboard } from "../billing/api";
 import type { BillingDashboard } from "../billing/api";
@@ -23,7 +20,6 @@ import type { BillingDashboard } from "../billing/api";
 export function TelemetryPage() {
   const [selectedProject, setSelectedProject] = useState("");
   const [selectedProvider, setSelectedProvider] = useState("");
-  const [selectedModel, setSelectedModel] = useState("");
 
   const [leaderboardDays, setLeaderboardDays] = useState(30);
   const [leaderboardSort, setLeaderboardSort] = useState<LeaderboardSort>("avg_decode_tps");
@@ -37,11 +33,9 @@ export function TelemetryPage() {
   const [overview, setOverview] = useState<OverviewResponse | null>(null);
   const [leaderboard, setLeaderboard] = useState<LeaderboardItem[]>([]);
   const [dailyModels, setDailyModels] = useState<DailyModelDay[]>([]);
-  const [recentRequests, setRecentRequests] = useState<RecentRequestItem[]>([]);
   const [billingResult, setBillingResult] = useState<{ key: string; data: BillingDashboard | null; error: string } | null>(null);
   const [billingRefresh, setBillingRefresh] = useState(0);
-  const requestUids = JSON.stringify(recentRequests.map((item) => item.requestUid));
-  const billingKey = JSON.stringify([selectedProject, selectedProvider, requestUids]);
+  const billingKey = JSON.stringify([selectedProject, selectedProvider]);
   const billing = billingResult?.key === billingKey ? billingResult.data : null;
   const billingErrorMessage = billingResult?.key === billingKey ? billingResult.error : "";
 
@@ -55,7 +49,7 @@ export function TelemetryPage() {
       const { signal } = controller;
       setIsRefreshing(true);
       try {
-        const [ov, lb, dm, rr] = await Promise.all([
+        const [ov, lb, dm] = await Promise.all([
           fetchOverview(selectedProject, selectedProvider, 365, signal),
           fetchLeaderboard(
             selectedProject,
@@ -65,13 +59,11 @@ export function TelemetryPage() {
             signal,
           ),
           fetchDailyModels(selectedProject, selectedProvider, dailyDays, signal),
-          fetchRecentRequests(selectedProject, selectedProvider, selectedModel, 50, signal),
         ]);
         if (signal.aborted) return;
         setOverview(ov);
         setLeaderboard(lb);
         setDailyModels(dm);
-        setRecentRequests(rr);
         setBillingRefresh((current) => current + 1);
         setErrorMsg(null);
         setLastUpdated(new Date().toLocaleTimeString("zh-CN", { hour12: false }));
@@ -90,7 +82,6 @@ export function TelemetryPage() {
     [
       selectedProject,
       selectedProvider,
-      selectedModel,
       leaderboardDays,
       leaderboardSort,
       dailyDays,
@@ -115,12 +106,11 @@ export function TelemetryPage() {
 
   useEffect(() => {
     const controller = new AbortController();
-    const visibleUids: string[] = JSON.parse(requestUids) as string[];
-    void getBillingDashboard(selectedProject, selectedProvider, visibleUids, controller.signal)
+    void getBillingDashboard(selectedProject, selectedProvider, [], controller.signal)
       .then((data) => { if (!controller.signal.aborted) setBillingResult({ key: billingKey, data, error: "" }); })
       .catch((error: unknown) => { if (!controller.signal.aborted) setBillingResult({ key: billingKey, data: null, error: billingError(error) }); });
     return () => { controller.abort(); };
-  }, [billingKey, billingRefresh, requestUids, selectedProject, selectedProvider]);
+  }, [billingKey, billingRefresh, selectedProject, selectedProvider]);
 
   return (
     <div className="app-shell">
@@ -177,13 +167,6 @@ export function TelemetryPage() {
           daysData={dailyModels}
           daysWindow={dailyDays}
           onDaysWindowChange={setDailyDays}
-        />
-
-        <RecentRequestsTable
-          items={recentRequests}
-          selectedModel={selectedModel}
-          onModelChange={setSelectedModel}
-          billing={billing}
         />
       </main>
     </div>

@@ -4,27 +4,31 @@ import { useAuth } from "../auth/AuthContext";
 import { catalogPath, catalogTitles } from "../catalog/navigation";
 import type { CatalogResource } from "../catalog/types";
 
+type NavSection = CatalogResource | "telemetry" | "monitoring" | "logs";
+
 interface NavigationGroup {
   title?: string;
-  resources: (CatalogResource | "telemetry" | "monitoring")[];
+  resources: NavSection[];
 }
 
 const groups: NavigationGroup[] = [
-  { resources: ["telemetry", "monitoring"] },
+  { resources: ["telemetry", "monitoring", "logs"] },
   { title: "供给侧", resources: ["providers", "provider-models"] },
   { title: "调用侧", resources: ["projects", "project-models"] },
   { resources: ["routes"] },
 ];
 
-function navTarget(resource: CatalogResource | "telemetry" | "monitoring"): string {
+function navTarget(resource: NavSection): string {
   if (resource === "telemetry") return "/";
   if (resource === "monitoring") return "/data";
+  if (resource === "logs") return "/logs";
   return catalogPath(resource);
 }
 
-function navLabel(resource: CatalogResource | "telemetry" | "monitoring"): string {
+function navLabel(resource: NavSection): string {
   if (resource === "telemetry") return "统计总览";
   if (resource === "monitoring") return "数据";
+  if (resource === "logs") return "请求日志";
   return catalogTitles[resource];
 }
 

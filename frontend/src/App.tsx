@@ -9,6 +9,7 @@ import type { CatalogResource } from "./catalog/types";
 import { ConsoleSidebar } from "./components/ConsoleSidebar";
 import { DataMonitoringPage } from "./pages/DataMonitoringPage";
 import { LoginPage } from "./pages/LoginPage";
+import { RequestLogsPage } from "./pages/RequestLogsPage";
 import { TelemetryPage } from "./pages/TelemetryPage";
 import "./styles/console.css";
 
@@ -89,6 +90,7 @@ export function App() {
                 <Routes>
                   <Route path="/" element={<TelemetryPage />} />
                   <Route path="/data" element={<DataMonitoringPage />} />
+                  <Route path="/logs" element={<RequestLogsPage />} />
                   {resources.map((resource) => (
                     <Route
                       key={resource}

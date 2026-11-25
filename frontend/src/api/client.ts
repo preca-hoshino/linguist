@@ -3,7 +3,7 @@ import type {
   LeaderboardItem,
   LeaderboardSort,
   OverviewResponse,
-  RecentRequestItem,
+  RecentRequestsResponse,
 } from "../types/telemetry";
 
 const MODEL_PALETTE = [
@@ -109,18 +109,26 @@ export async function fetchDailyModels(
   return fetchJson<DailyModelDay[]>(`/api/v1/stats/daily-models${qs}`, signal);
 }
 
+export interface RecentRequestsParams {
+  projectId?: string;
+  providerId?: string;
+  modelId?: string;
+  status?: string;
+  page?: number;
+  pageSize?: number;
+}
+
 export async function fetchRecentRequests(
-  projectId: string,
-  providerId: string,
-  modelId: string,
-  limit = 50,
+  params: RecentRequestsParams,
   signal?: AbortSignal,
-): Promise<RecentRequestItem[]> {
+): Promise<RecentRequestsResponse> {
   const qs = buildQuery({
-    project_id: projectId,
-    provider_id: providerId,
-    model_id: modelId,
-    limit,
+    project_id: params.projectId,
+    provider_id: params.providerId,
+    model_id: params.modelId,
+    status: params.status,
+    page: params.page,
+    page_size: params.pageSize,
   });
-  return fetchJson<RecentRequestItem[]>(`/api/v1/stats/recent-requests${qs}`, signal);
+  return fetchJson<RecentRequestsResponse>(`/api/v1/stats/recent-requests${qs}`, signal);
 }

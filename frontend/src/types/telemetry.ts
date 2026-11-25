@@ -99,6 +99,23 @@ export interface RecentRequestItem {
   totalDurationMs: number;
   decodeTps: number;
   e2eTps: number;
+  billingCurrency: string | null;
+  billingAmount: string | null;
+  billingConvertedAmount: string | null;
+  billingStatus: string | null;
+}
+
+export interface RecentRequestsResponse {
+  items: RecentRequestItem[];
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+  hasNext: boolean;
+  displayCurrency: string | null;
+  projects: FilterEntityItem[];
+  providers: FilterEntityItem[];
+  models: FilterEntityItem[];
 }
 
 export type WallMetric = "totalTokens" | "outputTokens" | "requestCount" | "cost";
