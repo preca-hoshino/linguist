@@ -1,17 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { BrowserRouter, Navigate, Route, Routes } from "react-router";
-import { fetchAuthMe, postLogout } from "./auth/api";
-import type { AuthSession } from "./auth/api";
-import { AuthContext } from "./auth/AuthContext";
-import { CatalogPage } from "./catalog/CatalogPage";
-import { catalogPath, catalogTitles } from "./catalog/navigation";
-import type { CatalogResource } from "./catalog/types";
-import { ConsoleSidebar } from "./components/ConsoleSidebar";
-import { DataMonitoringPage } from "./pages/DataMonitoringPage";
-import { LoginPage } from "./pages/LoginPage";
-import { RequestLogsPage } from "./pages/RequestLogsPage";
-import { TelemetryPage } from "./pages/TelemetryPage";
-import "./styles/console.css";
+import { AuthContext } from "@/context/auth-provider";
+import { PreferencesProvider } from "@/context/preferences-provider";
+import { ThemeProvider } from "@/context/theme-provider";
+import { AuthenticatedLayout } from "@/components/layout/authenticated-layout";
+import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { fetchAuthMe, postLogout, type AuthSession } from "@/features/auth/api";
+import { SignInPage } from "@/features/auth/sign-in";
+import { CatalogPage } from "@/features/catalog";
+import { catalogPath, catalogTitles, type CatalogResource } from "@/features/catalog/types";
+import { DashboardPage } from "@/features/dashboard";
+import { RequestLogsPage } from "@/features/logs";
+import { DataMonitoringPage } from "@/features/monitoring";
+import { SettingsPage } from "@/features/settings";
+import { AccountSettings } from "@/features/settings/account";
+import { AppearanceSettings } from "@/features/settings/appearance";
+import { PreferencesSettings } from "@/features/settings/preferences";
+import { SystemSettings } from "@/features/settings/system";
 
 const resources = Object.keys(catalogTitles) as CatalogResource[];
 
@@ -39,7 +45,9 @@ export function App() {
         setSession(null);
         setAuthState("unavailable");
       });
-    return () => { controller.abort(); };
+    return () => {
+      controller.abort();
+    };
   }, []);
 
   const handleUnauthorized = useCallback(() => {
@@ -59,53 +67,66 @@ export function App() {
     }
   }, [session?.csrfToken]);
 
-  const authValue = useMemo(() => ({
-    user: session
-      ? {
-          subject: session.subject,
-          email: session.email,
-          displayName: session.displayName,
-        }
-      : null,
-    csrfToken: session?.csrfToken ?? "",
-    logout,
-    handleUnauthorized,
-  }), [session, logout, handleUnauthorized]);
+  const authValue = useMemo(
+    () => ({
+      user: session
+        ? {
+            subject: session.subject,
+            email: session.email,
+            displayName: session.displayName,
+          }
+        : null,
+      csrfToken: session?.csrfToken ?? "",
+      expiresAt: session?.expiresAt ?? null,
+      logout,
+      handleUnauthorized,
+    }),
+    [session, logout, handleUnauthorized],
+  );
 
   return (
-    <BrowserRouter>
-      <AuthContext.Provider value={authValue}>
-        {authState === "loading" ? (
-          <main className="login-shell">
-            <p className="empty-state" role="status">正在验证登录状态…</p>
-          </main>
-        ) : authState !== "authenticated" ? (
-          <LoginPage authUnavailable={authState === "unavailable"} />
-        ) : (
-          <>
-            <a href="#main-content" className="console-skip">跳到内容</a>
-            <div className="console-shell">
-              <ConsoleSidebar />
-              <div className="console-content">
-                <Routes>
-                  <Route path="/" element={<TelemetryPage />} />
-                  <Route path="/data" element={<DataMonitoringPage />} />
-                  <Route path="/logs" element={<RequestLogsPage />} />
-                  {resources.map((resource) => (
-                    <Route
-                      key={resource}
-                      path={catalogPath(resource)}
-                      element={<CatalogPage key={resource} resource={resource} />}
-                    />
-                  ))}
-                  <Route path="*" element={<Navigate replace to="/" />} />
-                </Routes>
-              </div>
-            </div>
-          </>
-        )}
-      </AuthContext.Provider>
-    </BrowserRouter>
+    <ThemeProvider>
+      <PreferencesProvider>
+        <TooltipProvider delayDuration={150}>
+          <BrowserRouter>
+            <AuthContext.Provider value={authValue}>
+              {authState === "loading" ? (
+                <main className="grid h-svh place-items-center bg-background">
+                  <p className="text-sm text-muted-foreground" role="status">
+                    正在验证登录状态…
+                  </p>
+                </main>
+              ) : authState !== "authenticated" ? (
+                <SignInPage authUnavailable={authState === "unavailable"} />
+              ) : (
+                <AuthenticatedLayout>
+                  <Routes>
+                    <Route path="/" element={<DashboardPage />} />
+                    <Route path="/data" element={<DataMonitoringPage />} />
+                    <Route path="/logs" element={<RequestLogsPage />} />
+                    {resources.map((resource) => (
+                      <Route
+                        key={resource}
+                        path={catalogPath(resource)}
+                        element={<CatalogPage key={resource} resource={resource} />}
+                      />
+                    ))}
+                    <Route path="/settings" element={<SettingsPage />}>
+                      <Route index element={<AppearanceSettings />} />
+                      <Route path="preferences" element={<PreferencesSettings />} />
+                      <Route path="account" element={<AccountSettings />} />
+                      <Route path="system" element={<SystemSettings />} />
+                    </Route>
+                    <Route path="*" element={<Navigate replace to="/" />} />
+                  </Routes>
+                </AuthenticatedLayout>
+              )}
+              <Toaster position="top-right" richColors closeButton />
+            </AuthContext.Provider>
+          </BrowserRouter>
+        </TooltipProvider>
+      </PreferencesProvider>
+    </ThemeProvider>
   );
 }
 
